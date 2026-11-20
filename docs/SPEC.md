@@ -119,6 +119,7 @@ Exemples visés :
 | P1 | API JSON au niveau du maître, utilisable par Talixio AI Assistant. | ✅ |
 | P2 | Interface web soignée (shadcn/ui) : la grappe en direct, chaque agent avec nom, rôle, machine, IP, état ; le fil des messages ; le dialogue avec le maître. | ⬜ |
 | P3 | Vue de la grappe et du journal en ligne de commande. | ✅ |
+| P4 | Pilotage depuis un téléphone (Android) : discuter avec le maître, voir la grappe, être prévenu. | ❓ voir Q9 |
 
 ## 4. Décisions
 
@@ -228,6 +229,7 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 | Q6 | Coffre des clés au niveau 0. | Fichier chiffré ou coffre du système, à choisir. En attendant : fichier de clé en 0600. À terme, les clés devraient vivre sous un autre compte que celui des agents. |
 | Q7 | Stockage et mémoire des agents (S1–S3) : dossier, SQLite, ou les deux ? | Proposition, à valider : **des fichiers d'abord**. Chaque agent reçoit un dossier de travail à lui (`<state_dir>/agents/<id>/`), ajouté d'office à ses droits, et une mémoire en fichier texte (`memoire.md`) relue à chaque démarrage, qu'il tient avec un outil dédié. Le maître écrit le journal et l'état de la grappe sur disque. **SQLite chez le maître seulement**, quand l'interface aura besoin de chercher dans l'historique : embarqué, il ajoute environ 1 Mo à l'exécutable, et un agent enfant n'en a pas besoin. À étudier : mémoire partagée entre agents, taille maximale, effacement à la désinstallation. |
 | Q8 | Abonnement Claude Max au lieu d'une clé d'API (B5). | À vérifier avant tout : qu'un abonnement Max puisse servir à des agents tiers n'est pas acquis, ni techniquement ni dans les conditions d'Anthropic. La voie sûre est la clé d'API avec un solde. Si c'est permis : lire les limites renvoyées par le fournisseur à chaque réponse, et les traiter comme un budget qui se recharge. |
+| Q9 | Android (P4) : piloter depuis le téléphone, ou y faire tourner un agent ? | Piloter : l'interface web, installable comme application (PWA), suffit ; elle demande HTTPS et un maître joignable depuis le téléphone, donc l'étape 2. Agent sur le téléphone : Rust se compile pour Android, mais le système arrête les process d'arrière-plan et enferme chaque application ; à n'étudier que si un usage le demande. |
 
 ## 7. Sécurité
 

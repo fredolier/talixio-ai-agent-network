@@ -37,7 +37,7 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 - [ ] Plafond de droits par cible de déploiement (Q2)
 - [ ] Déploiement Docker (G5)
 - [ ] Déploiement SSH : copie de l'exécutable, lancement, désinstallation (G5, G10)
-- [ ] Interface web shadcn/ui embarquée : arbre en direct, journal, dialogue avec le maître (P2, A1)
+- [ ] Interface web shadcn/ui embarquée : arbre en direct, journal, dialogue avec le maître (P2, A1) ; utilisable sur téléphone et installable (PWA) (P4, Q9)
 - [ ] Passe de sécurité sur le lien distant et les déploiements (D11)
 
 ## Étape 3 — durcir et durer
