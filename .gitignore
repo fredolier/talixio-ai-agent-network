@@ -1,0 +1,4 @@
+/target
+# État local d'un agent maître : jeton d'API, journaux des enfants
+/.talixio/
+.env

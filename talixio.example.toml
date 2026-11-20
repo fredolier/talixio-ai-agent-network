@@ -1,0 +1,66 @@
+# Configuration de l'agent maître. Copiez ce fichier en talixio.toml et adaptez-le.
+#   talixio-agent root --config talixio.toml
+
+name = "maître"
+role = "orchestrateur"
+instructions = """
+Tu pilotes une grappe d'agents pour le compte de la personne qui te parle.
+Délègue ce qui peut l'être à des agents spécialisés, avec le strict minimum de droits.
+"""
+
+# Alias du modèle du maître, parmi ceux définis plus bas.
+model = "main"
+
+# Adresse de l'API et du lien avec les enfants. Seule l'interface locale est acceptée pour l'instant.
+listen = "127.0.0.1:7700"
+
+# Dossier d'état : jeton de l'API, journaux des enfants.
+state_dir = ".talixio"
+
+[timing]
+heartbeat_secs = 5        # un battement toutes les 5 s
+suspend_after_secs = 20   # sans nouvelles du parent : mise en veille
+die_after_secs = 300      # toujours sans nouvelles : extinction, descendance comprise
+
+# --- Modèles -------------------------------------------------------------------------------
+# Les clés restent chez le maître : les enfants passent par lui pour appeler un modèle.
+# La clé n'est jamais écrite ici ; `api_key_env` nomme la variable d'environnement qui la contient.
+
+[models.main]
+provider = "anthropic"
+model = "claude-opus-5-5"
+api_key_env = "ANTHROPIC_API_KEY"
+effort = "high"
+
+[models.fast]
+provider = "anthropic"
+model = "claude-haiku-5-5"
+api_key_env = "ANTHROPIC_API_KEY"
+
+# Tout serveur compatible OpenAI : OpenAI, Gemini, Mistral, OpenRouter, Ollama, vLLM…
+# [models.local]
+# provider = "openai"
+# base_url = "http://localhost:11434/v1"
+# model = "qwen3"
+
+# --- Droits du maître ----------------------------------------------------------------------
+# Tout ce qui n'est pas listé est refusé. Un enfant ne reçoit jamais plus que son parent.
+
+[capabilities]
+fs_read = ["/srv/projet"]
+fs_write = ["/srv/projet/travail"]
+# models = ["main", "fast"]   # par défaut : tous les modèles définis ci-dessus
+# max_tokens = 5000000         # budget global ; absent : pas de plafond
+
+# Commandes autorisées, sans shell. `*` : un argument libre ; `**` en dernier : suite libre.
+[[capabilities.exec]]
+program = "/usr/bin/git"
+args = ["status"]
+
+[[capabilities.exec]]
+program = "/usr/bin/git"
+args = ["log", "**"]
+
+[capabilities.spawn]
+max_children = 5   # enfants directs en vie
+max_depth = 2      # niveaux sous le maître

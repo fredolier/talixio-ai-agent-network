@@ -1,0 +1,32 @@
+[package]
+name = "talixio-agent"
+version = "0.1.0"
+edition = "2021"
+description = "Agents IA autonomes en grappe : chaque agent est un petit process, aux droits limités, qui ne parle qu'à son parent"
+publish = false
+
+[dependencies]
+anyhow = "1"
+axum = { version = "0.8", features = ["ws"] }
+clap = { version = "4", features = ["derive", "env"] }
+futures-util = "0.3"
+gethostname = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "sync", "process", "io-util", "io-std", "fs", "signal"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-tungstenite = "0.26"
+toml = "0.8"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+# Un seul petit exécutable à déposer sur n'importe quelle machine.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
