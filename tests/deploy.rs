@@ -1,6 +1,8 @@
 //! Déploiement sur une autre machine : un vrai maître, un faux `ssh` qui exécute sur place ce
 //! qu'on lui demande d'exécuter là-bas, et un vrai enfant lancé par ce chemin.
 
+#![cfg(unix)]
+
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -84,7 +86,6 @@ fn free_port() -> u16 {
 }
 
 
-#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn deploiement_par_ssh() {
     use std::os::unix::fs::PermissionsExt;

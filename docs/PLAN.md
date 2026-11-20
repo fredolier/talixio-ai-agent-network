@@ -57,7 +57,9 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 - [ ] Coffre des clés au niveau 0, clés sous un autre compte que celui des agents (D6, Q6)
 - [ ] Conversations longues : résumé ou compaction (M4)
 - [ ] Agents permanents ; installation en service ou démon, agent hôte par machine (A5, A6, Q4)
-- [ ] Compilation et essais sous macOS et Windows (A2)
+- [ ] Windows : le code se compile ; restent les protections propres au système (Job Objects pour tuer la descendance, ACL des fichiers de clés, liens), un essai réel, et des agents Windows comme cibles de déploiement (A2)
+- [ ] macOS : compiler et essayer sur une vraie machine ; remplacer PDEATHSIG (A2)
+- [ ] Compilation de toutes les plateformes en intégration continue (Linux statique, Windows, macOS)
 
 ## Étape 4 — nouveaux usages
 
@@ -76,3 +78,4 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 | 2026-11-20 | Exécutable statique (musl) compilé et testé : 5,3 Mo. Couverture mesurée. Exigences R1–R3 (répertoire des rôles) inscrites ; catalogue de l'assistant relu (Q10). |
 | 2026-11-20 | v0.5.0 : interface web embarquée, servie par le maître. |
 | 2026-11-20 | Deuxième passe de sécurité (déploiement, TLS) : 10 constats, 9 traités. |
+| 2026-11-20 | Compilation croisée Windows réussie ; écarts de sécurité Windows et macOS inscrits (A2). |

@@ -43,7 +43,7 @@ Exemples visés :
 | N° | Exigence | État |
 |---|---|---|
 | A1 | Un seul exécutable Rust et des fichiers de configuration, rien d'autre à déployer. L'interface web fait exception, mais elle est embarquée dans l'exécutable du maître. | 🟡 exécutable seul fait (5,2 Mo, SQLite et TLS compris) ; interface embarquée (5 fichiers statiques, sans étape de construction) |
-| A2 | Tourne sur Linux, macOS et Windows. | 🟡 code portable ; testé sous Linux seulement |
+| A2 | Tourne sur Linux, macOS et Windows. | 🟡 Linux : testé. Windows : se compile (`x86_64-pc-windows-gnu`, 4,7 Mo), jamais exécuté, et **pas au niveau de sécurité de Linux** : pas de groupes de process (une commande lancée peut survivre à l'agent, D13), pas de contrôle des droits des fichiers de clés, pas d'ouverture sans suivre les liens, pas de fermeture de la mémoire du process ; le déploiement SSH suppose une cible POSIX. À écrire avec les API Windows (Job Objects, ACL) avant tout usage réel. macOS : code Unix commun, pas encore compilé ni essayé (pas de chaîne de compilation ici) ; PDEATHSIG n'y existe pas. |
 | A3 | Se connecte à n'importe quel modèle : Anthropic, et tout serveur compatible OpenAI (OpenAI, Gemini, Mistral, Ollama, vLLM, OpenRouter), comme dans Talixio AI Assistant. | ✅ |
 | A4 | Exécutable de petite taille. | ✅ profil de compilation optimisé en taille |
 | A5 | Peut être installé en service ou en démon sur une machine. | ❓ |
