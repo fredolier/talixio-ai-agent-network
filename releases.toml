@@ -37,8 +37,12 @@ kind = "nouveau"
 text = "Notes de version : `talixio-agent releases` et `GET /api/releases`."
 
 [[release.changes]]
+kind = "amélioration"
+text = "Compilation statique (musl) : l'exécutable ne dépend plus d'aucune bibliothèque du système et tourne sur toute distribution Linux et dans toute image Docker. Voir le README."
+
+[[release.changes]]
 kind = "attention"
-text = "Seul le maître déploie sur une cible ; il doit écouter hors de sa machine (`listen`, `advertise`). Machine cible : même système et même processeur que le maître."
+text = "Seul le maître déploie sur une cible ; il doit écouter hors de sa machine (`listen`, `advertise`). Machine cible : même processeur que le maître ; pour ne pas dépendre de sa distribution, déployer l'exécutable statique."
 
 [[release]]
 version = "0.3.0"

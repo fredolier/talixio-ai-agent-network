@@ -15,6 +15,26 @@ cargo build --release
 
 L'exécutable est `target/release/talixio-agent`. C'est tout ce qu'il faut déployer, avec un fichier de configuration.
 
+### Exécutable statique (recommandé pour déployer)
+
+Compilé ainsi, l'exécutable ne dépend d'aucune bibliothèque du système : il tourne tel quel sur
+n'importe quelle distribution Linux du même processeur, et dans n'importe quelle image Docker,
+même vide. C'est la version à utiliser dès que le maître déploie des agents ailleurs.
+
+```bash
+sudo apt-get install -y musl-tools
+```
+
+```bash
+rustup target add x86_64-unknown-linux-musl
+```
+
+```bash
+cargo build --release --target x86_64-unknown-linux-musl
+```
+
+L'exécutable est alors `target/x86_64-unknown-linux-musl/release/talixio-agent` (5,3 Mo).
+
 ## Lancer le maître
 
 ```bash
@@ -62,8 +82,8 @@ cargo test
 ## Limites actuelles
 
 - Déploiement par SSH et dans Docker (`[targets]`, voir `talixio.example.toml`) : écrit et testé avec des
-  programmes factices, pas encore essayé sur une vraie machine. La cible doit avoir le même système et le
-  même processeur que le maître.
+  programmes factices, pas encore essayé sur une vraie machine. La cible doit avoir le même processeur que
+  le maître ; avec l'exécutable statique, la distribution n'a plus d'importance.
 - Le cloisonnement est fait par le process lui-même, pas encore par le système d'exploitation :
   une commande autorisée s'exécute avec tous les droits du compte. N'autoriser que des commandes
   inoffensives, et lancer le maître sous un compte dédié sans privilèges (voir la spécification, §7).

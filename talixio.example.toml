@@ -99,7 +99,7 @@ args = ["-l", "{read}"]
 #
 # [targets.bac]
 # kind = "docker"
-# image = "debian:12-slim"              # déjà présente sur la machine ; glibc compatible
+# image = "debian:12-slim"              # déjà présente sur la machine ; n'importe laquelle avec l'exécutable statique
 # user = "1000:1000"
 # mounts = [{ host = "/srv/projet", container = "/data" }]   # write = true pour l'écriture
 #

@@ -75,7 +75,7 @@ Exemples visés :
 | G2 | Un enfant ne communique qu'avec son parent. Le maître reçoit ainsi tout ce qui remonte. | ✅ |
 | G3 | Un enfant peut demander de l'aide à son parent (information, droit, décision). | ✅ outil `ask_parent` |
 | G4 | L'enfant doit voir son parent : c'est lui qui se connecte. Le parent installe et lance l'enfant par le moyen de son choix. | ✅ en local |
-| G5 | Déploiement d'un enfant : sur la machine, dans Docker, par SSH, ou par un autre moyen d'accès distant. | 🟡 local, SSH et Docker (le maître seul déploie hors de sa machine ; même système et même processeur). Essayé avec un faux `ssh` ; pas encore sur une vraie machine ni un vrai démon Docker |
+| G5 | Déploiement d'un enfant : sur la machine, dans Docker, par SSH, ou par un autre moyen d'accès distant. | 🟡 local, SSH et Docker (le maître seul déploie hors de sa machine ; même processeur ; exécutable statique pour ne pas dépendre de la distribution). Essayé avec un faux `ssh` ; pas encore sur une vraie machine ni un vrai démon Docker |
 | G6 | Lien chiffré et authentifié dès qu'il quitte la machine (port HTTPS ou TCP ouvert par le parent). | ✅ TLS 1.3 partout (lien et API) ; l'enfant n'accepte que le certificat de son parent, épinglé au lancement ; authentification mutuelle liée à ce certificat |
 | G7 | Lien coupé : l'enfant se met en veille ; si le parent ne revient pas, il s'éteint avec sa descendance. Jamais d'enfant autonome sans parent. | ✅ |
 | G8 | Aucun message perdu pendant une coupure. | ✅ numérotation et acquittement |
@@ -114,6 +114,16 @@ Demandé le 2026-11-20, sur le modèle de Talixio AI Assistant. Rien n'est codé
 | F2 | Un agent reçoit le droit d'utiliser tel modèle de tel fournisseur, nature par nature. Ses enfants n'en reçoivent jamais plus. | 🟡 fait pour les modèles de texte (`capabilities.models`) |
 | F3 | À la création d'un enfant, le parent choisit son modèle, son niveau d'effort, la taille de son contexte, ses instructions, et ses capacités (texte, image, voix), en plus de ses droits sur les dossiers et les commandes. | 🟡 modèle, instructions et droits ; l'effort et le contexte sont fixés par l'alias, pas par enfant |
 | F4 | Les appels d'image et de voix passent par le maître, comme ceux de texte : les clés ne descendent jamais, et chaque appel est compté dans le budget. | ⬜ voir Q10 |
+
+### Répertoire des rôles et apprentissage
+
+Demandé le 2026-11-20. Rien n'est codé.
+
+| N° | Exigence | État |
+|---|---|---|
+| R1 | Chaque rôle créé dans la grappe (nom, rôle, instructions, droits demandés, modèle, contexte de la mission) remonte au maître, qui le range dans un répertoire qui dure. | ⬜ voir Q11 |
+| R2 | Tout agent, à n'importe quel niveau, peut interroger ce répertoire avant de créer un enfant, pour reprendre un rôle qui existe déjà et convient au contexte. | ⬜ |
+| R3 | Le répertoire apprend : pour chaque rôle, ce que ses missions ont donné (réussie, échouée, impossible, coût), pour que les rôles qui marchent soient préférés et les autres corrigés. | ⬜ |
 
 ### Stockage et mémoire
 
@@ -195,6 +205,14 @@ Demandé le 2026-11-20, sur le modèle de Talixio AI Assistant. Rien n'est codé
 19. **Docker : conteneur jetable et fermé.** Aucune capacité, pas de nouveaux privilèges, système
     en lecture seule, mémoire et process bornés, état en mémoire, jamais root, image jamais
     téléchargée d'office, seuls les montages de la cible.
+21. **L'exécutable de déploiement est statique** (cible `x86_64-unknown-linux-musl`) : aucune
+    bibliothèque du système, donc aucune dépendance à la glibc ni à la distribution de la machine
+    d'arrivée. Tout ce qui est en C (SQLite, la cryptographie de TLS) est compilé dedans. Essayé :
+    5,3 Mo contre 5,2 Mo en dynamique, tous les tests passent. Pas de paquets Debian : un
+    exécutable seul reste plus simple à déposer et à retirer. Prix à connaître : l'allocateur de
+    musl est plus lent sous forte charge (sans effet pour un agent, qui attend surtout son
+    modèle), et la résolution de noms ignore NSS (pas de LDAP ni de mDNS ; `/etc/hosts` et DNS
+    seulement).
 20. **Les notes de version ont une source unique**, `releases.toml`, embarquée dans l'exécutable.
     Chaque version y ajoute une entrée ; un test refuse une version sans note.
 
@@ -277,7 +295,8 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 | Q7 | Stockage et mémoire des agents (S1–S3) : dossier, SQLite, ou les deux ? | Tranché pour la mémoire et le journal : SQLite embarqué, pour tous les agents (décision 14). Reste à faire : un dossier de travail par agent, ajouté d'office à ses droits (S1) ; l'arbre et les conversations sur disque (S3) ; effacement de la base d'un enfant à sa désinstallation ; mémoire partagée entre agents, si un usage le demande. |
 | Q8 | Abonnement Claude Max au lieu d'une clé d'API (B5). | À vérifier avant tout : qu'un abonnement Max puisse servir à des agents tiers n'est pas acquis, ni techniquement ni dans les conditions d'Anthropic. La voie sûre est la clé d'API avec un solde. Si c'est permis : lire les limites renvoyées par le fournisseur à chaque réponse, et les traiter comme un budget qui se recharge. |
 | Q9 | Android (P4) : piloter depuis le téléphone, ou y faire tourner un agent ? | Piloter : l'interface web, installable comme application (PWA), suffit ; elle demande HTTPS et un maître joignable depuis le téléphone, donc l'étape 2. Agent sur le téléphone : Rust se compile pour Android, mais le système arrête les process d'arrière-plan et enferme chaque application ; à n'étudier que si un usage le demande. |
-| Q10 | Catalogue de fournisseurs et capacités image et voix (F1–F4). | Config : `[providers.<nom>]` (adresse, clé) puis des modèles par nature ; droits de la forme `fournisseur/modèle`. Côté maître, du code propre à chaque nature : le lien ne porte aujourd'hui que des demandes de texte ; image et voix demandent de nouveaux messages, des tailles bornées autrement (un son ou une image pèse lourd), un comptage en argent plutôt qu'en tokens (donc B4), et des outils nouveaux chez l'agent (`generate_image`, `speak`, `transcribe`). Reprendre le catalogue de l'assistant plutôt que d'en réinventer un : son format est à récupérer. Nouvelle surface : revue de sécurité avant de coder. |
+| Q10 | Catalogue de fournisseurs et capacités image et voix (F1–F4). | Format de l'assistant relu (`src/ModelCatalog.php`, `Sovereign.php`, `Routing.php`, `Pricing.php`) : une table de fournisseurs (identifiant, nom, pays, niveau de confiance, adresse, mode de facturation) et une table de modèles (identifiant exact de l'API, fournisseur, nature `LLM`, `Vision`, `Voice`, `Image`, `Embedding`, prix par million de tokens ou par unité : minute, image). Usages liés à un modèle : `fast`, `standard`, `deep`, `voice`, `vision`, `embedding` ; effort et tokens de réflexion portés par le palier. À reprendre ici : `[providers.<nom>]` (adresse, type d'API, fichier de clé) et des modèles par nature, avec prix ; droits de la forme `fournisseur/modèle`. À savoir : l'assistant ne tient ni taille de contexte ni effort par modèle, ne compte que les tokens (minutes et images sont affichées, pas comptées), et n'appelle aucune API d'image ni de synthèse vocale : seules la transcription (`POST /audio/transcriptions`) et les embeddings existent. Image et synthèse sont donc à écrire, pas à reprendre. Côté maître, du code par nature : nouveaux messages du lien, tailles bornées autrement (un son ou une image pèse lourd), comptage en argent (B4), nouveaux outils chez l'agent. Nouvelle surface : revue de sécurité avant de coder. |
+| Q11 | Répertoire des rôles (R1–R3). | Une table SQLite chez le maître. Écriture : à chaque `spawn_agent`, le rôle remonte par le lien, de parent en parent ; à chaque fin de mission, son résultat. Lecture : un outil `find_role` (recherche par mots, puis par embeddings quand F1 existera), dont la demande remonte au maître comme une demande de modèle. Sécurité, à trancher avant de coder : un rôle enregistré contient des instructions écrites par un agent, donc un texte qui peut avoir été empoisonné et que d'autres agents reliront. Il doit être présenté comme une donnée à évaluer, jamais comme une consigne ; ne jamais porter de droits (les droits restent accordés par le parent, dans la limite des siens) ; et un rôle « approuvé » par l'humain doit se distinguer d'un rôle seulement observé. Fuite : un agent d'une branche lit ce qu'une autre branche a écrit ; prévoir de quoi cloisonner. |
 
 ## 7. Sécurité
 

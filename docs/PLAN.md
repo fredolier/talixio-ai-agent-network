@@ -38,8 +38,11 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 - [x] Plafond de droits par cible de déploiement (Q2, décision 17)
 - [x] Déploiement Docker (G5) — arguments vérifiés en test ; **pas encore essayé avec un vrai démon**
 - [x] Déploiement SSH : copie de l'exécutable, lancement, désinstallation (G5, G10) — essayé de bout en bout avec un faux `ssh` (`tests/deploy.rs`) ; **pas encore sur une vraie machine**
-- [ ] Essai réel de SSH et de Docker sur les VM ; exécutable statique (musl) pour ne pas dépendre de la glibc de la cible ; cibles d'un autre système ou processeur
+- [x] Exécutable statique (musl), indépendant de la distribution de la cible (décision 21) — compilé et testé
+- [ ] Essai réel de SSH et de Docker sur les VM ; cibles d'un autre processeur (ARM) : un exécutable par architecture, choisi d'après la cible
 - [x] Notes de version : `releases.toml`, `talixio-agent releases`, `GET /api/releases` (P5)
+- [ ] Répertoire des rôles chez le maître, interrogeable par toute la grappe, avec le résultat des missions (R1–R3, Q11)
+- [ ] Couverture des tests : première mesure à 52 % des lignes (`cargo llvm-cov`), sous-estimée car les process maître et enfants lancés par les tests ne sont pas comptés ; à faire : les compter (arrêt propre, variable de profil transmise sous `cfg(coverage)`), puis couvrir `agent.rs`, `tools.rs`, `spawn.rs`, `main.rs`
 - [ ] Catalogue de fournisseurs, modèles par nature (texte, image, voix), effort et contexte par enfant (F1–F4, Q10)
 - [ ] Interface web shadcn/ui embarquée : arbre en direct, journal, dialogue avec le maître (P2, A1) ; utilisable sur téléphone et installable (PWA) (P4, Q9)
 - [ ] Passe de sécurité indépendante sur le lien distant et les déploiements (D11) — relecture faite à l'écriture (SPEC §7, limites 6 à 10), audit complet à faire
@@ -67,3 +70,4 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 | 2026-11-20 | Audit rendu : 17 constats vérifiés, tous traités et rejoués en test (SPEC §7). Nouvelle syntaxe des règles de commande, authentification mutuelle du lien, budgets par réservation. Exigences de stockage et de mémoire (S1–S3, Q7), de budgets et de quotas (B1–B6, Q8) ajoutées. |
 | 2026-11-20 | SQLite embarqué (exécutable : 4,6 Mo) : mémoire des agents, journal du maître repris au redémarrage. Décidé : le maître tourne sur une VM. |
 | 2026-11-20 | v0.3.0 : TLS 1.3 partout, certificat épinglé. v0.4.0 : cibles de déploiement SSH et Docker avec plafond de droits, désinstallation, notes de version. Exigences F1–F4 (catalogue de fournisseurs, image, voix) inscrites. |
+| 2026-11-20 | Exécutable statique (musl) compilé et testé : 5,3 Mo. Couverture mesurée. Exigences R1–R3 (répertoire des rôles) inscrites ; catalogue de l'assistant relu (Q10). |
