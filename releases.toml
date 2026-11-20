@@ -25,6 +25,14 @@ kind = "sécurité"
 text = "La page ne charge que ses propres fichiers et n'appelle que sa propre API (politique de contenu stricte, jamais dans un cadre). Ce qu'écrit un agent n'est jamais interprété comme du HTML. Le jeton reste demandé pour toute donnée."
 
 [[release.changes]]
+kind = "sécurité"
+text = "Deuxième passe de sécurité, sur le déploiement : les fichiers de clés et le dossier `.ssh` sont interdits aux outils de toute la descendance locale ; une cible SSH hostile ne peut plus bloquer le maître ; un agent déployé qui n'obéit plus est tué, pas seulement désinstallé ; le dossier distant doit appartenir au compte de l'agent."
+
+[[release.changes]]
+kind = "attention"
+text = "Cible Docker : `user` devient obligatoire (numéro de compte non privilégié). Cible SSH : `remote_dir` ne peut plus être `/tmp`."
+
+[[release.changes]]
 kind = "attention"
 text = "Le certificat fabriqué par le maître déclenche un avertissement du navigateur : comparer l'empreinte affichée au démarrage, ou fournir un certificat reconnu (`[tls]`). Un téléphone n'installe l'application qu'avec un certificat reconnu."
 

@@ -64,7 +64,9 @@ pub fn ephemeral() -> Result<Identity> {
 /// empreinte est écrite à côté, pour la ligne de commande.
 pub fn load_or_create(state_dir: &Path) -> Result<Identity> {
     let (cert_path, key_path) = (state_dir.join("tls-cert.pem"), state_dir.join("tls-key.pem"));
-    if key_path.symlink_metadata().is_err() {
+    // une paire incomplète (arrêt entre les deux écritures) est refaite
+    if key_path.symlink_metadata().is_err() || cert_path.symlink_metadata().is_err() {
+        let _ = std::fs::remove_file(&key_path);
         let made = generate()?;
         write_private(&key_path, &made.key_pair.serialize_pem())?;
         std::fs::write(&cert_path, made.cert.pem()).with_context(|| format!("{}", cert_path.display()))?;

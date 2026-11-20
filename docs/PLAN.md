@@ -46,7 +46,9 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 - [ ] Catalogue de fournisseurs, modèles par nature (texte, image, voix), effort et contexte par enfant (F1–F4, Q10)
 - [x] Interface web embarquée : arbre en direct, détail et arrêt d'un agent, dialogue avec le maître, journal, nouveautés ; téléphone et manifeste d'application (P2, P4, décision 22) — essayée dans un navigateur, bureau et téléphone
 - [ ] Interface, suite : budgets, validations, réglages ; notifications ; hors ligne
-- [ ] Passe de sécurité indépendante sur le lien distant et les déploiements (D11) — relecture faite à l'écriture (SPEC §7, limites 6 à 10), audit complet à faire
+- [x] Passe de sécurité indépendante sur le déploiement et le TLS : 10 constats, 9 traités (SPEC §7, deuxième passe)
+- [ ] Suites de la deuxième passe : borner les journaux locaux des enfants ; test du constat 1 (clés interdites aux enfants) ; rapatrier le journal distant ; retirer les bases des petits-enfants
+- [ ] Passe de sécurité indépendante sur l'interface web
 
 ## Étape 3 — durcir et durer
 
@@ -73,3 +75,4 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 | 2026-11-20 | v0.3.0 : TLS 1.3 partout, certificat épinglé. v0.4.0 : cibles de déploiement SSH et Docker avec plafond de droits, désinstallation, notes de version. Exigences F1–F4 (catalogue de fournisseurs, image, voix) inscrites. |
 | 2026-11-20 | Exécutable statique (musl) compilé et testé : 5,3 Mo. Couverture mesurée. Exigences R1–R3 (répertoire des rôles) inscrites ; catalogue de l'assistant relu (Q10). |
 | 2026-11-20 | v0.5.0 : interface web embarquée, servie par le maître. |
+| 2026-11-20 | Deuxième passe de sécurité (déploiement, TLS) : 10 constats, 9 traités. |

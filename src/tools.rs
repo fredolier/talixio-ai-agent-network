@@ -347,7 +347,7 @@ pub async fn execute(node: &Arc<Node>, name: &str, input: &Value) -> Result<Stri
 
 /// Lit une sortie sans jamais garder plus de `MAX_OUTPUT` octets ; le reste est lu et jeté,
 /// pour que le programme ne reste pas bloqué sur un tube plein.
-async fn read_capped(stream: Option<impl AsyncRead + Unpin>) -> (Vec<u8>, bool) {
+pub(crate) async fn read_capped(stream: Option<impl AsyncRead + Unpin>) -> (Vec<u8>, bool) {
     let (mut kept, mut truncated) = (Vec::new(), false);
     let Some(mut stream) = stream else { return (kept, truncated) };
     let mut buffer = [0u8; 8192];
@@ -472,12 +472,16 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
         Some(target) => {
             // ailleurs, les dossiers et commandes du parent n'ont pas de sens : c'est le plafond
             // de la cible qui borne l'enfant. Modèles, budget et descendance restent bornés par le parent.
-            let limit = Capabilities {
+            let mut limit = Capabilities {
                 fs_read: target.capabilities.fs_read.clone(),
                 fs_write: target.capabilities.fs_write.clone(),
                 exec: target.capabilities.exec.clone(),
                 ..node.caps.clone()
             };
+            // là-bas, « local » désigne sa machine à lui : le seul endroit où il pourra créer
+            if let Some(spawn) = &mut limit.spawn {
+                spawn.targets = vec!["local".into()];
+            }
             limit.check_grant(&caps)?;
             Some(target.capabilities.clone())
         }
@@ -508,6 +512,8 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
         depth: node.depth + 1,
         target: target_name.clone(),
         timing: node.timing,
+        // les interdits ne valent que sur cette machine
+        deny: if target.is_none() { node.deny.iter().filter(|p| **p != node.state_dir).cloned().collect() } else { Vec::new() },
         ceiling,
     };
     let placeholder = NodeInfo {
@@ -563,13 +569,33 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
         );
     }
     match spawn::launch(node, &boot, target.as_ref()).await {
-        Ok(process) => {
-            if let Some(child) = node.children.lock().unwrap().get_mut(&boot.agent_id) {
-                child.process = Some(process);
+        Ok(mut process) => {
+            let mut children = node.children.lock().unwrap();
+            match children.get_mut(&boot.agent_id).filter(|child| !child.stopped) {
+                Some(child) => child.process = Some(process),
+                None => {
+                    // arrêté pendant son lancement : il ne doit rien rester de lui
+                    drop(children);
+                    let _ = process.start_kill();
+                    if let Some(target) = target.clone() {
+                        let id = boot.agent_id.clone();
+                        tokio::spawn(async move {
+                            let _ = spawn::uninstall(&target, &id).await;
+                        });
+                    }
+                    return Err("agent arrêté pendant son lancement".into());
+                }
             }
         }
         Err(e) => {
             node.children.lock().unwrap().remove(&boot.agent_id);
+            // un dépôt interrompu ne laisse rien derrière lui
+            if let Some(target) = target.clone() {
+                let id = boot.agent_id.clone();
+                tokio::spawn(async move {
+                    let _ = spawn::uninstall(&target, &id).await;
+                });
+            }
             return Err(e);
         }
     }

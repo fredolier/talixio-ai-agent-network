@@ -28,7 +28,7 @@ async fn fake_model(State(file): State<Arc<String>>, Json(body): Json<Value>) ->
             "name": name, "role": "lecteur", "instructions": "Lis ce qu'on te demande.", "target": target,
             "objective": format!("Lis le fichier {file} et rapporte son contenu."),
             "success_criteria": "Le contenu exact du fichier figure dans le compte rendu.",
-            "capabilities": { "fs_read": [folder] }
+            "capabilities": { "fs_read": [folder], "spawn": { "max_children": 1, "max_depth": 1 } }
         }))
     };
     let folder = std::path::Path::new(file.as_str()).parent().unwrap().to_str().unwrap().to_string();
@@ -127,7 +127,7 @@ model = "faux"
 
 [capabilities.spawn]
 max_children = 2
-max_depth = 1
+max_depth = 2
 targets = ["vm"]
 
 [targets.vm]
@@ -143,6 +143,7 @@ fs_read = [{data:?}]
 [targets.autre]
 kind = "docker"
 image = "debian"
+user = "1000"
 "#,
             state = tmp.join("state"),
         ),
@@ -184,6 +185,9 @@ image = "debian"
     let child = &tree["children"][0];
     assert_eq!(child["target"], "vm");
     let id = child["id"].as_str().unwrap().to_string();
+    let pid = child["pid"].as_u64().unwrap();
+    // déployé, il garde le droit de créer des enfants sur sa propre machine
+    assert_eq!(child["capabilities"]["spawn"]["targets"][0], "local");
     let binary = remote.join(format!("talixio-agent-{id}"));
     assert!(binary.exists(), "l'exécutable devait être déposé sur la cible");
     assert_eq!(std::fs::metadata(&binary).unwrap().permissions().mode() & 0o777, 0o700);
@@ -218,4 +222,8 @@ image = "debian"
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
     assert!(!remote.join(format!("state/agents/{id}.db")).exists());
+    // et il ne tourne plus : son process a été tué, pas seulement lâché
+    assert!(!remote.join(format!("state/{id}.pid")).exists());
+    let gone = !std::process::Command::new("kill").args(["-0", &pid.to_string()]).stderr(Stdio::null()).status().unwrap().success();
+    assert!(gone, "le process de l'agent déployé devait être tué");
 }

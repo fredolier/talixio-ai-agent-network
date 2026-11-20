@@ -238,7 +238,7 @@ impl Node {
         let (inbox, rx) = mpsc::unbounded_channel();
         let store = Arc::new(Store::open(&cfg.state_dir.join("talixio.db"))?);
         let mut deny = vec![cfg.state_dir.clone()];
-        deny.extend(cfg.secret_paths());
+        deny.extend(cfg.secret_paths().map_err(|e| format!("{e:#}"))?);
         let node = Self {
             id: format!("a-{}", &crate::random_hex(1)[..20]),
             name: cfg.name.clone(),
@@ -293,7 +293,7 @@ impl Node {
             caps: boot.capabilities.clone(),
             timing: boot.timing,
             target: boot.target.clone(),
-            deny: vec![state_dir.clone()],
+            deny: std::iter::once(state_dir.clone()).chain(boot.deny.iter().cloned()).collect(),
             state_dir,
             nonce: crate::random_hex(1)[..16].to_string(),
             running: Mutex::new(BTreeSet::new()),
@@ -556,14 +556,14 @@ impl Node {
             (children.values_mut().filter_map(|c| c.process.take()).collect(), deployed)
         };
         // les agents déployés ailleurs sont désinstallés, sans que cela puisse retenir l'extinction
-        let cleanup = async {
-            for (id, target) in &deployed {
-                if let Err(e) = crate::spawn::uninstall(target, id).await {
-                    eprintln!("désinstallation de {id} : {e}");
-                }
+        futures_util::future::join_all(deployed.iter().map(|(id, target)| async move {
+            match tokio::time::timeout(Duration::from_secs(15), crate::spawn::uninstall(target, id)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => eprintln!("désinstallation de {id} : {e}"),
+                Err(_) => eprintln!("désinstallation de {id} : cible injoignable"),
             }
-        };
-        let _ = tokio::time::timeout(Duration::from_secs(10), cleanup).await;
+        }))
+        .await;
         for mut process in processes {
             let _ = process.start_kill();
         }

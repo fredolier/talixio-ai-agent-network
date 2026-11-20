@@ -374,3 +374,27 @@ Audit complet du code, des connexions et du cloisonnement. Conclusion de l'audit
 
 Reste de cette passe, reporté à l'étape 2 avec le lien distant : détecter un correspondant qui
 envoie une trame au compte-gouttes pour paraître vivant ; séparer l'écoute du lien de celle de l'API.
+
+### Deuxième passe (2026-11-20) : déploiement, TLS, notes de version
+
+Revue indépendante, à la lecture, du code de déploiement et du TLS. Dix constats.
+
+| N° | Gravité | Constat | Traitement |
+|---|---|---|---|
+| 1 | Haute | Les fichiers de clés n'étaient interdits qu'aux outils du maître : un enfant local qui recevait le dossier pouvait les lire. | ✅ Les interdits descendent de parent en enfant sur une même machine ; le dossier `.ssh` du compte est interdit d'office ; un fichier de clé déclaré mais introuvable arrête le démarrage. Test à écrire. |
+| 2 | Haute | Une cible SSH qui ne lit pas, ou répond sans fin, bloquait le maître ou épuisait sa mémoire ; sa réponse était recopiée telle quelle au modèle. | ✅ Envoi et lectures menés ensemble sous un seul délai, sorties bornées, réponse nettoyée et tronquée. |
+| 3 | Moyenne | Un agent déployé par SSH qui n'obéissait plus n'était que désinstallé, pas tué. | ✅ Son numéro de process est noté au lancement ; la désinstallation le tue, lui et son groupe. Rejoué dans `tests/deploy.rs`. |
+| 4 | Moyenne | Docker : sans `user`, l'agent tournait sous le compte de l'image, souvent root. | ✅ `user` obligatoire, numérique, jamais 0. |
+| 5 | Moyenne | Dossier distant : ni propriétaire ni droits vérifiés ; `//` et `/tmp` acceptés. | ✅ Le dossier doit appartenir au compte, ne pas être un lien, passe en 0700 ; `/tmp`, `//` et `/` final refusés ; fichiers créés fermés aux autres. |
+| 6 | Basse | Le journal local d'un enfant n'est pas borné : un enfant peut remplir le disque du maître. | ⬜ à faire : quota ou rotation. |
+| 7 | Basse | À l'extinction, une cible injoignable privait les suivantes de nettoyage. | ✅ Désinstallations en parallèle, un délai par cible. |
+| 8 | Basse | Un enfant déployé ne pouvait pas recevoir le droit de créer des enfants si le maître n'avait pas `local`. | ✅ Sur une cible, `local` désigne la machine de l'enfant. |
+| 9 | Basse | Arrêt pendant un lancement : l'exécutable restait sur la cible. | ✅ Revérifié après le lancement ; un dépôt interrompu est nettoyé. Restent : le journal distant d'un enfant mort au démarrage n'est pas rapatrié ; les bases des petits-enfants nés sur la cible ne sont pas retirées. |
+| 10 | Basse | Certificat du maître écrit en deux temps : un arrêt entre les deux empêchait tout redémarrage. | ✅ Une paire incomplète est refaite. |
+
+Aussi : `ssh` est lancé sans aucun fichier de réglages (`-F /dev/null`). Examiné sans rien
+trouver : injection vers `ssh`, `docker` ou le shell distant ; chemins de la désinstallation ;
+plafond d'une cible ; secret du lien ; TLS (1.3 seul, signature vérifiée, empreinte comparée en
+temps constant) ; moniteur ; API.
+
+L'interface web (v0.5.0) n'a pas encore eu de revue indépendante.

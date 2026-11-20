@@ -109,7 +109,8 @@ async fn feed(child: &mut Child, payload: &[u8]) -> Result<(), String> {
 /// (`known_hosts`), sinon la connexion est refusée — jamais de confiance à la première vue.
 fn ssh(target: &Target, remote_command: &str) -> Command {
     let mut command = Command::new(target.program.clone().unwrap_or_else(|| "/usr/bin/ssh".into()));
-    command.args(["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10"]);
+    // aucun fichier de réglages : ni ceux du compte ni ceux de la machine ne changent ce qui est lancé
+    command.args(["-F", "/dev/null", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10"]);
     command.args(["-o", "ServerAliveInterval=15", "-o", "ForwardAgent=no", "-o", "ClearAllForwardings=yes", "-T"]);
     if let Some(port) = target.port {
         command.arg("-p").arg(port.to_string());
@@ -128,18 +129,25 @@ async fn ssh_run(target: &Target, remote_command: &str, input: Option<Vec<u8>>) 
     let mut command = ssh(target, remote_command);
     command.stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = command.spawn().map_err(|e| format!("ssh : {e}"))?;
-    if let Some(input) = input {
-        feed(&mut child, &input).await?;
-    }
-    let output = tokio::time::timeout(std::time::Duration::from_secs(120), child.wait_with_output())
-        .await
-        .map_err(|_| "ssh : délai dépassé".to_string())?
-        .map_err(|e| format!("ssh : {e}"))?;
-    if !output.status.success() {
-        let detail = crate::clean(&String::from_utf8_lossy(&output.stderr), 300, false);
+    let (stdin, stdout, stderr) = (child.stdin.take(), child.stdout.take(), child.stderr.take());
+    // une machine distante peut ne rien lire, ou répondre sans fin : l'envoi et les lectures
+    // avancent ensemble, sorties bornées, sous un seul délai
+    let exchange = async {
+        let send = async {
+            if let (Some(mut stdin), Some(input)) = (stdin, input) {
+                let _ = stdin.write_all(&input).await;
+            }
+        };
+        let (_, (out, _), (err, _)) = tokio::join!(send, crate::tools::read_capped(stdout), crate::tools::read_capped(stderr));
+        (child.wait().await, out, err)
+    };
+    let (status, out, err) =
+        tokio::time::timeout(std::time::Duration::from_secs(120), exchange).await.map_err(|_| "ssh : délai dépassé".to_string())?;
+    if !status.map_err(|e| format!("ssh : {e}"))?.success() {
+        let detail = crate::clean(&String::from_utf8_lossy(&err), 300, false);
         return Err(format!("la machine distante a refusé : {detail}"));
     }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    Ok(String::from_utf8_lossy(&out).into_owned())
 }
 
 fn remote_paths(target: &Target, id: &str) -> (String, String, String) {
@@ -152,9 +160,13 @@ fn remote_paths(target: &Target, id: &str) -> (String, String, String) {
 /// hors du dossier réservé aux agents.
 async fn spawn_ssh(node: &Node, boot: &Bootstrap, target: &Target) -> Result<Child, String> {
     let (binary, state, dir) = remote_paths(target, &boot.agent_id);
-    let system = ssh_run(target, &format!("umask 077 && mkdir -p {dir} {state} && uname -sm"), None).await?;
+    // le dossier doit être à ce compte, et à lui seul : personne d'autre n'y prépare ni n'y remplace rien
+    let prepare = format!(
+        "umask 077 && mkdir -p {dir} {state} && [ -O {dir} ] && [ ! -L {dir} ] && [ -O {state} ] && [ ! -L {state} ] && chmod 700 {dir} {state} && uname -sm"
+    );
+    let system = ssh_run(target, &prepare, None).await?;
     let expected = format!("{} {}", if cfg!(target_os = "macos") { "Darwin" } else { "Linux" }, std::env::consts::ARCH);
-    let system = system.trim().replace("arm64", "aarch64");
+    let system = crate::clean(system.trim(), 80, false).replace("arm64", "aarch64");
     if system != expected {
         return Err(format!("la machine distante est « {system} », cet exécutable est fait pour « {expected} »"));
     }
@@ -163,12 +175,19 @@ async fn spawn_ssh(node: &Node, boot: &Bootstrap, target: &Target) -> Result<Chi
     ssh_run(target, &format!("umask 077 && cat > {binary} && chmod 700 {binary}"), Some(bytes)).await?;
 
     // les erreurs de l'agent vont dans un journal distant : sa vie ne dépend pas de la session ssh
-    let run = format!("exec {binary} child --state-dir {state} 2>>{state}/{}.log", boot.agent_id);
+    // son numéro de process est noté : c'est ce qui permettra de le tuer, pas seulement de le lâcher
+    let id = &boot.agent_id;
+    let run = format!("umask 077 && echo $$ > {state}/{id}.pid && exec {binary} child --state-dir {state} 2>>{state}/{id}.log");
     let mut command = ssh(target, &run);
     command.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(log_file(node, boot)?);
     let mut child = command.spawn().map_err(|e| format!("ssh : {e}"))?;
-    feed(&mut child, &serde_json::to_vec(boot).map_err(|e| e.to_string())?).await?;
+    send_bootstrap(&mut child, boot).await?;
     Ok(child)
+}
+
+async fn send_bootstrap(child: &mut Child, boot: &Bootstrap) -> Result<(), String> {
+    let payload = serde_json::to_vec(boot).map_err(|e| e.to_string())?;
+    tokio::time::timeout(std::time::Duration::from_secs(30), feed(child, &payload)).await.map_err(|_| "transmission des consignes : délai dépassé".to_string())?
 }
 
 fn docker(target: &Target) -> Command {
@@ -187,14 +206,9 @@ pub fn docker_args(id: &str, target: &Target, exe: &std::path::Path) -> Vec<Stri
     args.extend(["--pids-limit=512", "--memory=1g", "--tmpfs=/tmp"].map(String::from));
     args.push("--add-host=host.docker.internal:host-gateway".into());
     // le dossier d'état vit en mémoire et disparaît avec le conteneur
-    match &target.user {
-        Some(user) => {
-            let uid = user.split(':').next().unwrap_or("");
-            args.push(format!("--user={user}"));
-            args.push(format!("--tmpfs=/state:mode=700,uid={uid}"));
-        }
-        None => args.push("--tmpfs=/state:mode=700".into()),
-    }
+    let user = target.user.as_deref().unwrap_or("65534:65534");
+    args.push(format!("--user={user}"));
+    args.push(format!("--tmpfs=/state:mode=700,uid={}", user.split(':').next().unwrap_or("65534")));
     args.extend(["--volume".into(), format!("{}:/talixio-agent:ro", exe.display())]);
     for mount in &target.mounts {
         let mode = if mount.write { "rw" } else { "ro" };
@@ -212,23 +226,30 @@ async fn spawn_docker(node: &Node, boot: &Bootstrap, target: &Target) -> Result<
     command.args(docker_args(&boot.agent_id, target, &exe));
     command.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(log_file(node, boot)?);
     let mut child = command.spawn().map_err(|e| format!("docker : {e}"))?;
-    feed(&mut child, &serde_json::to_vec(boot).map_err(|e| e.to_string())?).await?;
+    send_bootstrap(&mut child, boot).await?;
     Ok(child)
 }
 
-/// Retire de la cible tout ce que l'agent y a laissé.
+/// Tue l'agent s'il tourne encore, puis retire de la cible tout ce que l'agent y a laissé.
 pub async fn uninstall(target: &Target, id: &str) -> Result<(), String> {
     if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return Err("identifiant invalide".into());
     }
     if target.kind == "ssh" {
         let (binary, state, _) = remote_paths(target, id);
-        let remove = format!("rm -f {binary} {state}/{id}.log {state}/agents/{id}.db {state}/agents/{id}.db-wal {state}/agents/{id}.db-shm");
+        // un agent qui n'obéit plus ne survit pas à sa désinstallation : lui et son groupe sont tués
+        let remove = format!(
+            "p=$(cat {state}/{id}.pid 2>/dev/null); case \"$p\" in ''|*[!0-9]*) ;; *) kill -9 -- \"-$p\" \"$p\" 2>/dev/null;; esac; \
+             rm -f {binary} {state}/{id}.pid {state}/{id}.log {state}/agents/{id}.db {state}/agents/{id}.db-wal {state}/agents/{id}.db-shm"
+        );
         ssh_run(target, &remove, None).await.map(|_| ())
     } else {
         let mut command = docker(target);
         command.args(["rm", "--force"]).arg(format!("talixio-{id}")).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-        command.status().await.map(|_| ()).map_err(|e| format!("docker : {e}"))
+        match tokio::time::timeout(std::time::Duration::from_secs(30), command.status()).await {
+            Ok(result) => result.map(|_| ()).map_err(|e| format!("docker : {e}")),
+            Err(_) => Err("docker : délai dépassé".into()),
+        }
     }
 }
 
@@ -263,6 +284,9 @@ mod tests {
             "kind = 'docker'\nimage = '--privileged'",
             "kind = 'docker'\nimage = 'debian'\nuser = '0'",
             "kind = 'docker'\nimage = 'debian'\nuser = 'root'",
+            "kind = 'docker'\nimage = 'debian'",
+            "kind = 'ssh'\nhost = 'vm'\nuser = 'a'\nremote_dir = '//'",
+            "kind = 'ssh'\nhost = 'vm'\nuser = 'a'\nremote_dir = '/tmp'",
             "kind = 'docker'\nimage = 'debian'\nmounts = [{ host = '/srv:/etc', container = '/data' }]",
             "kind = 'docker'\nimage = 'debian'\n[capabilities]\nmodels = ['main']",
             "kind = 'telnet'",

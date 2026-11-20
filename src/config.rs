@@ -107,7 +107,7 @@ impl Target {
                     bail!("cible ssh : `user` invalide");
                 }
                 let dir = self.remote_dir.as_deref().context("cible ssh : `remote_dir` manquant")?;
-                if !dir.starts_with('/') || !plain(&dir[1..], "/._-") || dir.contains("..") || dir.len() < 2 {
+                if !dir.starts_with('/') || !plain(&dir[1..], "/._-") || dir.contains("..") || dir.contains("//") || dir.ends_with('/') || dir == "/tmp" || dir == "/var/tmp" {
                     bail!("cible ssh : `remote_dir` doit être un chemin absolu simple (lettres, chiffres, / . _ -)");
                 }
                 if self.image.is_some() || !self.mounts.is_empty() {
@@ -118,7 +118,8 @@ impl Target {
                 if !plain(self.image.as_deref().context("cible docker : `image` manquante")?, "/._:@-") {
                     bail!("cible docker : `image` invalide");
                 }
-                if self.user.as_deref().is_some_and(|u| u.is_empty() || !u.split(':').all(|n| n.parse::<u32>().is_ok_and(|n| n > 0)) || u.split(':').count() > 2) {
+                let user = self.user.as_deref().context("cible docker : `user` manquant (numéro de compte non privilégié, « 1000:1000 »)")?;
+                if !user.split(':').all(|n| n.parse::<u32>().is_ok_and(|n| n > 0)) || user.split(':').count() > 2 {
                     bail!("cible docker : `user` doit être un numéro de compte non privilégié, « 1000 » ou « 1000:1000 »");
                 }
                 for mount in &self.mounts {
@@ -260,10 +261,21 @@ impl RootConfig {
     }
 
     /// Ce que les outils des agents ne doivent jamais atteindre : les fichiers de clés.
-    pub fn secret_paths(&self) -> Vec<PathBuf> {
+    /// Un fichier de clé déclaré mais introuvable est une erreur : on ne protège pas ce qu'on
+    /// ne sait pas situer. Le dossier `.ssh` du compte (clés, machines connues, réglages de
+    /// `ssh`) est interdit d'office.
+    pub fn secret_paths(&self) -> Result<Vec<PathBuf>> {
         let keys = self.models.values().filter_map(|m| m.api_key_file.as_ref());
         let ssh = self.targets.values().filter_map(|t| t.identity_file.as_ref());
-        keys.chain(ssh).chain(self.tls.as_ref().map(|t| &t.key_file)).filter_map(|p| p.canonicalize().ok()).collect()
+        let mut paths = Vec::new();
+        for path in keys.chain(ssh).chain(self.tls.as_ref().map(|t| &t.key_file)) {
+            paths.push(path.canonicalize().with_context(|| format!("fichier de clé introuvable : {}", path.display()))?);
+        }
+        let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
+        if let Some(dir) = home.map(|h| PathBuf::from(h).join(".ssh")).and_then(|d| d.canonicalize().ok()) {
+            paths.push(dir);
+        }
+        Ok(paths)
     }
 }
 
@@ -332,6 +344,10 @@ pub struct Bootstrap {
     pub depth: u32,
     pub target: String,
     pub timing: Timing,
+    /// Ce que les outils ne doivent jamais atteindre sur cette machine (fichiers de clés du
+    /// maître) : transmis de parent en enfant tant qu'on reste sur la même machine.
+    #[serde(default)]
+    pub deny: Vec<PathBuf>,
     /// Déployé sur une cible : le plafond de droits de celle-ci, que l'enfant revérifie à l'arrivée.
     #[serde(default)]
     pub ceiling: Option<Capabilities>,
