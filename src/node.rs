@@ -14,6 +14,7 @@ use crate::link::Uplink;
 use crate::model::{ModelRequest, ModelResponse, Providers};
 use crate::policy::Capabilities;
 use crate::protocol::{ActivityEvent, Frame, Msg, NodeInfo, Outbox, ReportKind, Status};
+use crate::store::Store;
 use crate::now_ms;
 
 /// Ce qui réveille un agent.
@@ -48,6 +49,8 @@ pub struct Node {
     pub nonce: String,
     /// Groupes de process des commandes en cours, à tuer si l'agent s'éteint.
     pub running: Mutex<BTreeSet<i32>>,
+    /// La base locale de l'agent : sa mémoire et, chez le maître, le journal.
+    pub store: Arc<Store>,
     /// Consommation de toute la grappe. Tenue chez le maître seulement.
     pub meter: Mutex<Meter>,
     pub started_at_ms: u64,
@@ -190,13 +193,17 @@ pub struct ActivityLog {
     events: Mutex<VecDeque<ActivityEvent>>,
     next_id: AtomicU64,
     pub live: broadcast::Sender<ActivityEvent>,
+    store: Arc<Store>,
 }
 
 const ACTIVITY_KEPT: usize = 10_000;
 
 impl ActivityLog {
-    fn new() -> Self {
-        Self { events: Mutex::new(VecDeque::new()), next_id: AtomicU64::new(1), live: broadcast::channel(1024).0 }
+    /// Reprend le journal là où le dernier démarrage l'a laissé.
+    fn new(store: Arc<Store>) -> Self {
+        let events: VecDeque<ActivityEvent> = store.recent(ACTIVITY_KEPT).into();
+        let next_id = events.back().map(|e| e.id + 1).unwrap_or(1);
+        Self { events: Mutex::new(events), next_id: AtomicU64::new(next_id), live: broadcast::channel(1024).0, store }
     }
 
     pub fn push(&self, mut event: ActivityEvent) {
@@ -206,6 +213,7 @@ impl ActivityLog {
             events.pop_front();
         }
         events.push_back(event.clone());
+        self.store.log(&event);
         drop(events);
         let _ = self.live.send(event);
     }
@@ -218,8 +226,9 @@ impl ActivityLog {
 
 impl Node {
     /// `cfg.state_dir` doit être le chemin réel du dossier d'état (voir `prepare_state_dir`).
-    pub fn new_root(cfg: &RootConfig, providers: Providers) -> (Arc<Self>, mpsc::UnboundedReceiver<Input>) {
+    pub fn new_root(cfg: &RootConfig, providers: Providers) -> Result<(Arc<Self>, mpsc::UnboundedReceiver<Input>), String> {
         let (inbox, rx) = mpsc::unbounded_channel();
+        let store = Arc::new(Store::open(&cfg.state_dir.join("talixio.db"))?);
         let mut deny = vec![cfg.state_dir.clone()];
         deny.extend(cfg.secret_paths());
         let node = Self {
@@ -247,16 +256,20 @@ impl Node {
             inbox,
             uplink: None,
             providers: Some(providers),
-            activity: Some(ActivityLog::new()),
+            activity: Some(ActivityLog::new(store.clone())),
+            store,
             listen: OnceLock::new(),
             tree_dirty: Notify::new(),
             mission: Mutex::new(Mission::default()),
         };
-        (Arc::new(node), rx)
+        Ok((Arc::new(node), rx))
     }
 
-    pub fn new_child(boot: &Bootstrap, state_dir: PathBuf) -> (Arc<Self>, mpsc::UnboundedReceiver<Input>) {
+    pub fn new_child(boot: &Bootstrap, state_dir: PathBuf) -> Result<(Arc<Self>, mpsc::UnboundedReceiver<Input>), String> {
         let (inbox, rx) = mpsc::unbounded_channel();
+        let agents = state_dir.join("agents");
+        std::fs::create_dir_all(&agents).map_err(|e| format!("{} : {e}", agents.display()))?;
+        let store = Arc::new(Store::open(&agents.join(format!("{}.db", boot.agent_id)))?);
         let node = Self {
             id: boot.agent_id.clone(),
             name: boot.name.clone(),
@@ -283,11 +296,12 @@ impl Node {
             uplink: Some(Arc::new(Uplink::new())),
             providers: None,
             activity: None,
+            store,
             listen: OnceLock::new(),
             tree_dirty: Notify::new(),
             mission: Mutex::new(Mission::default()),
         };
-        (Arc::new(node), rx)
+        Ok((Arc::new(node), rx))
     }
 
     /// L'agent et toute sa descendance, tels que connus ici.

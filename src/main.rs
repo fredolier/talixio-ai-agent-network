@@ -110,7 +110,7 @@ async fn run_root(config: &Path) -> Result<()> {
     cfg.state_dir = prepare_state_dir(&cfg.state_dir)?;
     let providers = Providers::from_config(&cfg.models)?;
     let token = api_token(&cfg.state_dir)?;
-    let (node, inbox) = Node::new_root(&cfg, providers);
+    let (node, inbox) = Node::new_root(&cfg, providers).map_err(anyhow::Error::msg)?;
     let addr = api::start_listener(node.clone(), cfg.listen, Some(token)).await?;
     eprintln!("[{}] agent maître {} — API sur http://{addr}", node.name, node.id);
     eprintln!("[{}] jeton de l'API : {}", node.name, cfg.state_dir.join("api-token").display());
@@ -129,7 +129,7 @@ async fn run_child(state_dir: PathBuf) -> Result<()> {
     let mut boot: Bootstrap = serde_json::from_str(&raw).context("consignes de démarrage invalides")?;
     boot.capabilities.canonicalize().map_err(anyhow::Error::msg)?;
     let state_dir = state_dir.canonicalize().context("dossier d'état")?;
-    let (node, inbox) = Node::new_child(&boot, state_dir);
+    let (node, inbox) = Node::new_child(&boot, state_dir).map_err(anyhow::Error::msg)?;
     if node.caps.spawn.is_some() {
         api::start_listener(node.clone(), ([127, 0, 0, 1], 0).into(), None).await?;
         tokio::spawn(link::run_child_monitor(node.clone()));

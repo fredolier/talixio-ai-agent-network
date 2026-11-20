@@ -33,7 +33,8 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 - [ ] Lien chiffré (G6, Q3) — l'authentification mutuelle est faite ; lever alors l'interdiction d'écoute distante
 - [ ] Écoute du lien séparée de celle de l'API ; socket Unix pour les enfants locaux ; correspondant qui envoie au compte-gouttes (SPEC §7)
 - [ ] Budgets : l'agent voit son budget et son reste, le répartit entre ses enfants sans dépasser ce qui lui reste, alerte son parent à un seuil, en cascade ; budget en argent (B1–B4, B6) ; quotas d'abonnement à étudier (B5, Q8)
-- [ ] Stockage : dossier de travail et mémoire par agent, journal et état du maître sur disque (S1–S3, Q7) — à valider avant de coder
+- [x] SQLite embarqué : mémoire par agent, journal du maître sur disque (S2, S3)
+- [ ] Stockage, suite : dossier de travail par agent (S1) ; arbre et conversations sur disque (S3) ; effacement à la désinstallation
 - [ ] Plafond de droits par cible de déploiement (Q2)
 - [ ] Déploiement Docker (G5)
 - [ ] Déploiement SSH : copie de l'exécutable, lancement, désinstallation (G5, G10)
@@ -61,3 +62,4 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 |---|---|
 | 2026-11-20 | Étape 1 : cœur écrit, tests verts, exécutable de 3,3 Mo. Première passe de sécurité lancée. |
 | 2026-11-20 | Audit rendu : 17 constats vérifiés, tous traités et rejoués en test (SPEC §7). Nouvelle syntaxe des règles de commande, authentification mutuelle du lien, budgets par réservation. Exigences de stockage et de mémoire (S1–S3, Q7), de budgets et de quotas (B1–B6, Q8) ajoutées. |
+| 2026-11-20 | SQLite embarqué (exécutable : 4,6 Mo) : mémoire des agents, journal du maître repris au redémarrage. Décidé : le maître tourne sur une VM. |

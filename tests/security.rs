@@ -28,7 +28,7 @@ fn root(dir: &Path, capabilities: &str) -> (Arc<Node>, UnboundedReceiver<Input>)
     let mut cfg = RootConfig::load(&config).unwrap();
     cfg.state_dir = prepare_state_dir(&cfg.state_dir).unwrap();
     let providers = Providers::from_config(&cfg.models).unwrap();
-    Node::new_root(&cfg, providers)
+    Node::new_root(&cfg, providers).unwrap()
 }
 
 /// Inscrit un enfant chez le parent, comme le ferait `spawn_agent`, sans lancer de process.

@@ -12,6 +12,7 @@ pub mod node;
 pub mod policy;
 pub mod protocol;
 pub mod spawn;
+pub mod store;
 pub mod tools;
 
 pub fn now_ms() -> u64 {

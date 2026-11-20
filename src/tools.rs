@@ -140,6 +140,15 @@ pub fn specs(node: &Node) -> Vec<ToolSpec> {
         ));
         tools.push(spec("list_agents", "Liste tes enfants et leur état.".into(), json!({}), &[]));
     }
+    tools.push(spec(
+        "memory_write",
+        "Écrit une note dans ta mémoire, qui dure au-delà de cette conversation : ce que tu as appris, où tu en es, \
+         ce qu'il faudra savoir plus tard. Une note par sujet, sous une clé courte ; réécrire une clé remplace la \
+         note ; un contenu vide l'efface. N'y mets jamais de secret (mot de passe, clé).".into(),
+        json!({ "key": { "type": "string", "description": "Nom court du sujet." }, "content": { "type": "string" } }),
+        &["key", "content"],
+    ));
+    tools.push(spec("memory_read", "Relit toutes les notes de ta mémoire.".into(), json!({}), &[]));
     if node.uplink.is_some() {
         tools.push(spec(
             "ask_parent",
@@ -295,6 +304,17 @@ pub async fn execute(node: &Arc<Node>, name: &str, input: &Value) -> Result<Stri
                 .map(|c| format!("{} ({}) — rôle : {} — état : {:?} — {} descendant(s)", c.name, c.id, c.role, c.status, c.children.len()))
                 .collect();
             Ok(lines.join("\n"))
+        }
+        "memory_write" => {
+            node.store.remember(text(input, "key")?, text(input, "content")?)?;
+            Ok("note enregistrée".into())
+        }
+        "memory_read" => {
+            let notes = node.store.notes()?;
+            if notes.is_empty() {
+                return Ok("mémoire vide".into());
+            }
+            Ok(notes.iter().map(|(key, content)| format!("## {key}\n{content}")).collect::<Vec<_>>().join("\n\n"))
         }
         "ask_parent" => {
             let uplink = node.uplink.as_ref().ok_or("cet agent n'a pas de parent")?;

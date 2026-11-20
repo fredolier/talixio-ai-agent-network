@@ -42,7 +42,7 @@ Exemples visés :
 
 | N° | Exigence | État |
 |---|---|---|
-| A1 | Un seul exécutable Rust et des fichiers de configuration, rien d'autre à déployer. L'interface web fait exception, mais elle est embarquée dans l'exécutable du maître. | 🟡 exécutable seul fait (3,3 Mo) ; interface à faire |
+| A1 | Un seul exécutable Rust et des fichiers de configuration, rien d'autre à déployer. L'interface web fait exception, mais elle est embarquée dans l'exécutable du maître. | 🟡 exécutable seul fait (4,6 Mo, SQLite compris) ; interface à faire |
 | A2 | Tourne sur Linux, macOS et Windows. | 🟡 code portable ; testé sous Linux seulement |
 | A3 | Se connecte à n'importe quel modèle : Anthropic, et tout serveur compatible OpenAI (OpenAI, Gemini, Mistral, Ollama, vLLM, OpenRouter), comme dans Talixio AI Assistant. | ✅ |
 | A4 | Exécutable de petite taille. | ✅ profil de compilation optimisé en taille |
@@ -109,8 +109,8 @@ Exemples visés :
 | N° | Exigence | État |
 |---|---|---|
 | S1 | Chaque agent a un endroit à lui pour travailler et déposer ses fichiers. | ❓ voir Q7 |
-| S2 | Chaque agent a une petite mémoire qui dure : ses consignes, ce qu'il a appris, où il en est. Elle survit à un redémarrage. | ❓ voir Q7 |
-| S3 | Le journal et l'état de la grappe survivent à un redémarrage du maître. | ❓ aujourd'hui tout est en mémoire vive |
+| S2 | Chaque agent a une petite mémoire qui dure : ses consignes, ce qu'il a appris, où il en est. Elle survit à un redémarrage. | 🟡 chaque agent a sa base SQLite et y tient ses notes (`memory_write`, `memory_read`), relues dans son prompt au démarrage. Celle du maître survit aux redémarrages ; celle d'un enfant dure le temps de sa vie, tant que les agents permanents n'existent pas |
+| S3 | Le journal et l'état de la grappe survivent à un redémarrage du maître. | 🟡 journal sur disque (SQLite), repris au démarrage ; l'arbre et les conversations ne le sont pas encore |
 
 ### Pilotage
 
@@ -152,6 +152,12 @@ Exemples visés :
 12. **Chaque message entre dans la conversation d'un agent sous une balise à marqueur secret**,
     propre à l'agent et tiré au hasard. Le contenu d'un message ne peut donc pas se faire passer
     pour un autre interlocuteur. Un tour qui échoue est retiré de la conversation.
+14. **SQLite est embarqué dans l'exécutable**, le même pour tous les agents (environ 1 Mo de plus).
+    Chaque agent a sa base dans le dossier d'état : `talixio.db` pour le maître,
+    `agents/<identifiant>.db` pour un enfant. Elle n'est accessible que par les outils de mémoire :
+    le dossier d'état reste interdit aux outils de fichiers et de commandes.
+15. **Le maître tourne sur un serveur toujours allumé** (une VM), pas sur un poste. Le poste et le
+    téléphone ne servent qu'à l'interface.
 13. **Une erreur de fournisseur de modèle reste chez le maître** (journal) ; les enfants n'en
     reçoivent qu'un message neutre.
 
@@ -168,6 +174,7 @@ src/
   agent.rs      boucle de l'agent : messages reçus, modèle, outils, suivi de mission
   tools.rs      outils : fichiers, commandes, enfants, mission
   spawn.rs      lancement d'un enfant (process local)
+  store.rs      base SQLite de l'agent : mémoire, journal du maître
   api.rs        écoute réseau : lien des enfants, API JSON du maître
   model/        format neutre ; connecteurs Anthropic et compatible OpenAI
 tests/e2e.rs       la grappe de bout en bout, avec un faux serveur de modèles
@@ -202,6 +209,7 @@ n'est accepté que d'un enfant en mission, 20 au plus entre deux consignes, 20 0
 | `run_command` | au moins une commande autorisée |
 | `spawn_agent`, `send_to_agent`, `stop_agent`, `list_agents` | droit de créer des enfants |
 | `ask_parent`, `finish_mission` | l'agent a un parent |
+| `memory_write`, `memory_read` | toujours |
 
 ### API JSON du maître
 
@@ -221,13 +229,13 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 
 | N° | Question | Piste |
 |---|---|---|
-| Q1 | Où tourne le maître ? Sur un poste, l'éteindre éteint toute la grappe. | Un serveur toujours allumé (par exemple celui de Talixio AI Assistant), le poste ne servant qu'à l'interface. À trancher. |
+| Q1 | ~~Où tourne le maître ?~~ | Tranché : sur une VM toujours allumée (décision 15). |
 | Q2 | Droits d'un enfant sur une autre machine : les chemins et commandes du parent n'y ont pas de sens. | Un plafond de droits par cible de déploiement, défini dans le droit de créer des enfants. |
 | Q3 | Chiffrement du lien : certificat du parent épinglé chez l'enfant au lancement, ou autorité propre à la grappe. | À concevoir à l'étape 2, avec l'audit. |
 | Q4 | Service ou démon (A5, A6) : systemd, launchd, service Windows ; un agent « hôte » par machine qui lance les autres. | À étudier à l'étape 3. |
 | Q5 | Assistant sur poste de travail : il observe une personne. | Visible et accepté par elle ; étape à part. |
 | Q6 | Coffre des clés au niveau 0. | Fichier chiffré ou coffre du système, à choisir. En attendant : fichier de clé en 0600. À terme, les clés devraient vivre sous un autre compte que celui des agents. |
-| Q7 | Stockage et mémoire des agents (S1–S3) : dossier, SQLite, ou les deux ? | Proposition, à valider : **des fichiers d'abord**. Chaque agent reçoit un dossier de travail à lui (`<state_dir>/agents/<id>/`), ajouté d'office à ses droits, et une mémoire en fichier texte (`memoire.md`) relue à chaque démarrage, qu'il tient avec un outil dédié. Le maître écrit le journal et l'état de la grappe sur disque. **SQLite chez le maître seulement**, quand l'interface aura besoin de chercher dans l'historique : embarqué, il ajoute environ 1 Mo à l'exécutable, et un agent enfant n'en a pas besoin. À étudier : mémoire partagée entre agents, taille maximale, effacement à la désinstallation. |
+| Q7 | Stockage et mémoire des agents (S1–S3) : dossier, SQLite, ou les deux ? | Tranché pour la mémoire et le journal : SQLite embarqué, pour tous les agents (décision 14). Reste à faire : un dossier de travail par agent, ajouté d'office à ses droits (S1) ; l'arbre et les conversations sur disque (S3) ; effacement de la base d'un enfant à sa désinstallation ; mémoire partagée entre agents, si un usage le demande. |
 | Q8 | Abonnement Claude Max au lieu d'une clé d'API (B5). | À vérifier avant tout : qu'un abonnement Max puisse servir à des agents tiers n'est pas acquis, ni techniquement ni dans les conditions d'Anthropic. La voie sûre est la clé d'API avec un solde. Si c'est permis : lire les limites renvoyées par le fournisseur à chaque réponse, et les traiter comme un budget qui se recharge. |
 | Q9 | Android (P4) : piloter depuis le téléphone, ou y faire tourner un agent ? | Piloter : l'interface web, installable comme application (PWA), suffit ; elle demande HTTPS et un maître joignable depuis le téléphone, donc l'étape 2. Agent sur le téléphone : Rust se compile pour Android, mais le système arrête les process d'arrière-plan et enferme chaque application ; à n'étudier que si un usage le demande. |
 

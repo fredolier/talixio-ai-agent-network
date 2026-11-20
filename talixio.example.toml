@@ -14,7 +14,7 @@ model = "main"
 # Adresse de l'API et du lien avec les enfants. Seule l'interface locale est acceptée pour l'instant.
 listen = "127.0.0.1:7700"
 
-# Dossier d'état : jeton de l'API, journaux des enfants.
+# Dossier d'état : jeton de l'API, journaux des enfants, bases SQLite (mémoire des agents, journal).
 state_dir = ".talixio"
 
 [timing]
