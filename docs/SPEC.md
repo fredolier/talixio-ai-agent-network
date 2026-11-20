@@ -152,14 +152,14 @@ Exemples visés :
 12. **Chaque message entre dans la conversation d'un agent sous une balise à marqueur secret**,
     propre à l'agent et tiré au hasard. Le contenu d'un message ne peut donc pas se faire passer
     pour un autre interlocuteur. Un tour qui échoue est retiré de la conversation.
+13. **Une erreur de fournisseur de modèle reste chez le maître** (journal) ; les enfants n'en
+    reçoivent qu'un message neutre.
 14. **SQLite est embarqué dans l'exécutable**, le même pour tous les agents (environ 1 Mo de plus).
     Chaque agent a sa base dans le dossier d'état : `talixio.db` pour le maître,
     `agents/<identifiant>.db` pour un enfant. Elle n'est accessible que par les outils de mémoire :
     le dossier d'état reste interdit aux outils de fichiers et de commandes.
 15. **Le maître tourne sur un serveur toujours allumé** (une VM), pas sur un poste. Le poste et le
     téléphone ne servent qu'à l'interface.
-13. **Une erreur de fournisseur de modèle reste chez le maître** (journal) ; les enfants n'en
-    reçoivent qu'un message neutre.
 
 ## 5. Architecture
 
