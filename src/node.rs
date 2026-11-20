@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::{broadcast, mpsc, Notify};
 
-use crate::config::{Bootstrap, RootConfig, Timing};
+use crate::config::{Bootstrap, RootConfig, Target, Timing};
 use crate::link::Uplink;
 use crate::model::{ModelRequest, ModelResponse, Providers};
 use crate::policy::Capabilities;
@@ -71,6 +71,8 @@ pub struct Node {
     pub cert: OnceLock<String>,
     /// Nom ou adresse annoncé aux enfants d'autres machines.
     pub advertise: Option<String>,
+    /// Cibles de déploiement. Seul le maître en a : lui seul écoute hors de sa machine.
+    pub targets: BTreeMap<String, Target>,
     /// Signale que l'arbre a changé et doit être renvoyé au parent.
     pub tree_dirty: Notify,
     /// Où en est la mission confiée par le parent.
@@ -151,6 +153,8 @@ pub struct ChildRec {
     pub mission_open: bool,
     /// Comptes rendus reçus depuis la dernière consigne.
     pub reports: u32,
+    /// La cible où il a été déployé, s'il n'est pas sur la machine du parent.
+    pub target: Option<Target>,
     pub process: Option<tokio::process::Child>,
 }
 
@@ -265,6 +269,7 @@ impl Node {
             listen: OnceLock::new(),
             cert: OnceLock::new(),
             advertise: cfg.advertise.clone(),
+            targets: cfg.targets.clone(),
             tree_dirty: Notify::new(),
             mission: Mutex::new(Mission::default()),
         };
@@ -306,6 +311,7 @@ impl Node {
             listen: OnceLock::new(),
             cert: OnceLock::new(),
             advertise: None,
+            targets: BTreeMap::new(),
             tree_dirty: Notify::new(),
             mission: Mutex::new(Mission::default()),
         };
@@ -491,7 +497,7 @@ impl Node {
 
     /// Arrête un enfant direct : ordre d'extinction, puis fin du process après un court délai.
     pub fn stop_child(&self, child_id: &str, reason: &str) {
-        let (name, mut process) = {
+        let (name, mut process, target) = {
             let mut children = self.children.lock().unwrap();
             let Some(child) = children.get_mut(child_id) else { return };
             if child.stopped {
@@ -502,18 +508,27 @@ impl Node {
             }
             child.stopped = true;
             child.conn = None;
-            (child.name.clone(), child.process.take())
+            (child.name.clone(), child.process.take(), child.target.clone())
         };
         self.emit("status", format!("agent {name} arrêté : {reason}"));
         self.tree_dirty.notify_one();
-        if let Some(mut child) = process.take() {
-            tokio::spawn(async move {
-                // le temps pour lui d'éteindre sa propre descendance
+        let id = child_id.to_string();
+        tokio::spawn(async move {
+            // le temps pour lui d'éteindre sa propre descendance
+            if let Some(mut child) = process.take() {
                 if tokio::time::timeout(Duration::from_secs(5), child.wait()).await.is_err() {
                     let _ = child.kill().await;
                 }
-            });
-        }
+            } else if target.is_some() {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+            // déployé ailleurs : il est aussi désinstallé
+            if let Some(target) = target {
+                if let Err(e) = crate::spawn::uninstall(&target, &id).await {
+                    eprintln!("désinstallation de {id} : {e}");
+                }
+            }
+        });
     }
 
     pub fn live_children(&self) -> usize {
@@ -535,10 +550,20 @@ impl Node {
         if !ids.is_empty() {
             tokio::time::sleep(Duration::from_millis(500)).await;
         }
-        let processes: Vec<tokio::process::Child> = {
+        let (processes, deployed): (Vec<tokio::process::Child>, Vec<(String, Target)>) = {
             let mut children = self.children.lock().unwrap();
-            children.values_mut().filter_map(|c| c.process.take()).collect()
+            let deployed = children.iter().filter_map(|(id, c)| Some((id.clone(), c.target.clone()?))).collect();
+            (children.values_mut().filter_map(|c| c.process.take()).collect(), deployed)
         };
+        // les agents déployés ailleurs sont désinstallés, sans que cela puisse retenir l'extinction
+        let cleanup = async {
+            for (id, target) in &deployed {
+                if let Err(e) = crate::spawn::uninstall(target, id).await {
+                    eprintln!("désinstallation de {id} : {e}");
+                }
+            }
+        };
+        let _ = tokio::time::timeout(Duration::from_secs(10), cleanup).await;
         for mut process in processes {
             let _ = process.start_kill();
         }

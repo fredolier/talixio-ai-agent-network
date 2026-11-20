@@ -164,6 +164,12 @@ max_depth = 1
     assert!(reqwest::get(format!("http://127.0.0.1:{port}/api/health")).await.is_err());
     assert!(reqwest::get(format!("https://127.0.0.1:{port}/api/health")).await.is_err());
 
+    // les notes de version, pour l'interface
+    let notes = api.get("/api/releases").await;
+    assert_eq!(notes["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(notes["releases"][0]["version"], notes["version"]);
+    assert!(notes["releases"][0]["changes"][0]["kind"].is_string());
+
     // sans jeton : rien
     let denied = api.http.get(format!("{}/api/tree", api.base)).send().await.unwrap();
     assert_eq!(denied.status(), 401);

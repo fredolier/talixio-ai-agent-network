@@ -606,7 +606,12 @@ pub async fn run_child_monitor(node: Arc<Node>) {
         {
             let mut children = node.children.lock().unwrap();
             for child in children.values_mut().filter(|c| !c.stopped) {
-                let exited = child.process.as_mut().is_some_and(|p| matches!(p.try_wait(), Ok(Some(_))));
+                let mut exited = child.process.as_mut().is_some_and(|p| matches!(p.try_wait(), Ok(Some(_))));
+                // par ssh, ce process n'est que la session qui a lancé l'agent : sa fin ne dit rien de lui
+                if exited && child.target.as_ref().is_some_and(|t| t.kind == "ssh") && child.ever_connected {
+                    child.process = None;
+                    exited = false;
+                }
                 let silent = child.conn.is_none() && child.last_seen.elapsed() >= node.timing.die_after();
                 if exited {
                     gone.push((child.id.clone(), child.name.clone(), "son process s'est terminé"));

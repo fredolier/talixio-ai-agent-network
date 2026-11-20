@@ -45,6 +45,12 @@ talixio-agent tree
 talixio-agent stop <identifiant>
 ```
 
+Ce qui a changé de version en version :
+
+```bash
+talixio-agent releases
+```
+
 L'API JSON est décrite dans la spécification.
 
 ## Tester
@@ -55,7 +61,9 @@ cargo test
 
 ## Limites actuelles
 
-- Les enfants sont lancés sur la machine du parent seulement ; Docker et SSH viennent ensuite.
+- Déploiement par SSH et dans Docker (`[targets]`, voir `talixio.example.toml`) : écrit et testé avec des
+  programmes factices, pas encore essayé sur une vraie machine. La cible doit avoir le même système et le
+  même processeur que le maître.
 - Le cloisonnement est fait par le process lui-même, pas encore par le système d'exploitation :
   une commande autorisée s'exécute avec tous les droits du compte. N'autoriser que des commandes
   inoffensives, et lancer le maître sous un compte dédié sans privilèges (voir la spécification, §7).

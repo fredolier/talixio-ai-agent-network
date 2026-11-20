@@ -51,13 +51,22 @@ pub struct SpawnPolicy {
     pub max_children: u32,
     /// Nombre de niveaux autorisés sous cet agent (1 : des enfants, mais pas de petits-enfants).
     pub max_depth: u32,
-    /// Modes de déploiement autorisés. Seul `local` existe pour l'instant.
+    /// Où l'agent peut créer ses enfants : `local` (sa propre machine), ou le nom d'une cible
+    /// de déploiement définie dans la configuration du maître (`[targets.<nom>]`).
     #[serde(default = "local_only")]
     pub targets: Vec<String>,
 }
 
 fn local_only() -> Vec<String> {
     vec!["local".to_string()]
+}
+
+/// Un nom de cible : minuscules, chiffres, tirets.
+pub fn valid_target_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 40
+        && !name.starts_with('-')
+        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 fn check_plain_path(path: &Path) -> Result<(), String> {
@@ -92,8 +101,21 @@ impl Capabilities {
             }
         }
         if let Some(spawn) = &self.spawn {
-            if let Some(target) = spawn.targets.iter().find(|t| t.as_str() != "local") {
-                return Err(format!("mode de déploiement inconnu : {target}"));
+            if let Some(target) = spawn.targets.iter().find(|t| !valid_target_name(t)) {
+                return Err(format!("nom de cible invalide : {target}"));
+            }
+        }
+        Ok(())
+    }
+
+    /// Vérifié par l'enfant, sur la machine où il arrive : ses dossiers, une fois résolus sur
+    /// cette machine, tiennent-ils dans le plafond de la cible ? Le parent n'a pu comparer que
+    /// des noms ; un lien symbolique de la machine d'arrivée ne doit pas élargir le droit.
+    pub fn check_ceiling(&self, ceiling: &Capabilities) -> Result<(), String> {
+        let real = |list: &[PathBuf]| list.iter().filter_map(|p| p.canonicalize().ok()).collect::<Vec<_>>();
+        for (wanted, held) in [(&self.fs_read, real(&ceiling.fs_read)), (&self.fs_write, real(&ceiling.fs_write))] {
+            if let Some(path) = wanted.iter().find(|path| !held.iter().any(|root| path.starts_with(root))) {
+                return Err(format!("{} sort du plafond de droits de cette machine", path.display()));
             }
         }
         Ok(())

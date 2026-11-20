@@ -36,6 +36,121 @@ pub struct RootConfig {
     pub models: BTreeMap<String, ModelConfig>,
     #[serde(default)]
     pub capabilities: Capabilities,
+    /// Cibles de déploiement : d'autres machines (SSH) ou des conteneurs (Docker).
+    #[serde(default)]
+    pub targets: BTreeMap<String, Target>,
+}
+
+/// Une cible de déploiement : où et comment lancer un enfant ailleurs que sur la machine du
+/// parent, et le plafond de ses droits là-bas.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Target {
+    /// `ssh` ou `docker`.
+    pub kind: String,
+    /// SSH : la machine, et le compte sous lequel l'agent tournera.
+    pub host: Option<String>,
+    /// SSH : compte distant. Docker : numéro du compte dans le conteneur (`--user`), jamais 0.
+    pub user: Option<String>,
+    pub port: Option<u16>,
+    /// SSH : clé privée à utiliser. Sans elle, celles du compte du maître.
+    pub identity_file: Option<PathBuf>,
+    /// SSH : dossier distant, réservé aux agents, où déposer l'exécutable et l'état.
+    pub remote_dir: Option<String>,
+    /// Docker : l'image du conteneur.
+    pub image: Option<String>,
+    /// Docker : dossiers de la machine montrés au conteneur.
+    #[serde(default)]
+    pub mounts: Vec<Mount>,
+    /// Le programme `ssh` ou `docker`. Par défaut `/usr/bin/ssh`, `/usr/bin/docker`.
+    pub program: Option<PathBuf>,
+    /// Plafond des droits d'un agent sur cette cible : dossiers et commandes, tels qu'ils
+    /// existent là-bas. Un enfant déployé ici n'en reçoit jamais plus.
+    #[serde(default)]
+    pub capabilities: Capabilities,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Mount {
+    pub host: PathBuf,
+    pub container: PathBuf,
+    #[serde(default)]
+    pub write: bool,
+}
+
+/// Rien, dans une cible, ne doit pouvoir passer pour une option ou un morceau de commande :
+/// ces valeurs finissent sur une ligne de commande, parfois interprétée par un shell distant.
+fn plain(value: &str, extra: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 255
+        && !value.starts_with('-')
+        && value.chars().all(|c| c.is_ascii_alphanumeric() || extra.contains(c))
+}
+
+impl Target {
+    pub fn validate(&self) -> Result<()> {
+        self.capabilities.validate().map_err(anyhow::Error::msg)?;
+        if self.capabilities.spawn.is_some() || !self.capabilities.models.is_empty() || self.capabilities.max_tokens.is_some() {
+            bail!("le plafond d'une cible ne porte que sur les dossiers et les commandes");
+        }
+        if let Some(program) = &self.program {
+            if !program.is_absolute() {
+                bail!("`program` doit être un chemin absolu");
+            }
+        }
+        match self.kind.as_str() {
+            "ssh" => {
+                check_host(self.host.as_deref().context("cible ssh : `host` manquant")?)?;
+                let user = self.user.as_deref().context("cible ssh : `user` manquant")?;
+                if !plain(user, "_-.") {
+                    bail!("cible ssh : `user` invalide");
+                }
+                let dir = self.remote_dir.as_deref().context("cible ssh : `remote_dir` manquant")?;
+                if !dir.starts_with('/') || !plain(&dir[1..], "/._-") || dir.contains("..") || dir.len() < 2 {
+                    bail!("cible ssh : `remote_dir` doit être un chemin absolu simple (lettres, chiffres, / . _ -)");
+                }
+                if self.image.is_some() || !self.mounts.is_empty() {
+                    bail!("cible ssh : `image` et `mounts` ne valent que pour docker");
+                }
+            }
+            "docker" => {
+                if !plain(self.image.as_deref().context("cible docker : `image` manquante")?, "/._:@-") {
+                    bail!("cible docker : `image` invalide");
+                }
+                if self.user.as_deref().is_some_and(|u| u.is_empty() || !u.split(':').all(|n| n.parse::<u32>().is_ok_and(|n| n > 0)) || u.split(':').count() > 2) {
+                    bail!("cible docker : `user` doit être un numéro de compte non privilégié, « 1000 » ou « 1000:1000 »");
+                }
+                for mount in &self.mounts {
+                    for path in [&mount.host, &mount.container] {
+                        let text = path.to_str().unwrap_or("");
+                        if !path.is_absolute() || !plain(&text[1..], "/._-") || text.contains("..") {
+                            bail!("cible docker : montage invalide ({})", path.display());
+                        }
+                    }
+                }
+                if self.host.is_some() || self.identity_file.is_some() || self.remote_dir.is_some() || self.port.is_some() {
+                    bail!("cible docker : `host`, `port`, `identity_file` et `remote_dir` ne valent que pour ssh");
+                }
+            }
+            other => bail!("type de cible inconnu : « {other} » (ssh ou docker)"),
+        }
+        Ok(())
+    }
+
+    /// Une ligne pour décrire la cible à un agent.
+    pub fn describe(&self) -> String {
+        let place = match self.kind.as_str() {
+            "ssh" => format!("machine {} (ssh)", self.host.as_deref().unwrap_or("?")),
+            _ => format!("conteneur {} (docker)", self.image.as_deref().unwrap_or("?")),
+        };
+        let list = |paths: &[PathBuf]| {
+            if paths.is_empty() { "aucun".to_string() } else { paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ") }
+        };
+        let caps = &self.capabilities;
+        let commands = if caps.exec.is_empty() { "aucune".to_string() } else { caps.exec.iter().map(|r| r.describe()).collect::<Vec<_>>().join(" ; ") };
+        format!("{place} — droits au plus : lecture {} ; écriture {} ; commandes {commands}", list(&caps.fs_read), list(&caps.fs_write))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -130,13 +245,25 @@ impl RootConfig {
         if let Some(host) = &cfg.advertise {
             check_host(host)?;
         }
+        for (name, target) in &cfg.targets {
+            if !crate::policy::valid_target_name(name) || name == "local" || name == "root" {
+                bail!("nom de cible invalide : « {name} » (minuscules, chiffres, tirets)");
+            }
+            target.validate().with_context(|| format!("[targets.{name}]"))?;
+        }
+        if let Some(spawn) = &cfg.capabilities.spawn {
+            if let Some(unknown) = spawn.targets.iter().find(|t| *t != "local" && !cfg.targets.contains_key(*t)) {
+                bail!("capabilities.spawn.targets cite une cible non définie : « {unknown} »");
+            }
+        }
         Ok(cfg)
     }
 
     /// Ce que les outils des agents ne doivent jamais atteindre : les fichiers de clés.
     pub fn secret_paths(&self) -> Vec<PathBuf> {
         let keys = self.models.values().filter_map(|m| m.api_key_file.as_ref());
-        keys.chain(self.tls.as_ref().map(|t| &t.key_file)).filter_map(|p| p.canonicalize().ok()).collect()
+        let ssh = self.targets.values().filter_map(|t| t.identity_file.as_ref());
+        keys.chain(ssh).chain(self.tls.as_ref().map(|t| &t.key_file)).filter_map(|p| p.canonicalize().ok()).collect()
     }
 }
 
@@ -205,6 +332,9 @@ pub struct Bootstrap {
     pub depth: u32,
     pub target: String,
     pub timing: Timing,
+    /// Déployé sur une cible : le plafond de droits de celle-ci, que l'enfant revérifie à l'arrivée.
+    #[serde(default)]
+    pub ceiling: Option<Capabilities>,
 }
 
 fn default_name() -> String {

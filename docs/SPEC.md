@@ -42,7 +42,7 @@ Exemples visés :
 
 | N° | Exigence | État |
 |---|---|---|
-| A1 | Un seul exécutable Rust et des fichiers de configuration, rien d'autre à déployer. L'interface web fait exception, mais elle est embarquée dans l'exécutable du maître. | 🟡 exécutable seul fait (4,6 Mo, SQLite compris) ; interface à faire |
+| A1 | Un seul exécutable Rust et des fichiers de configuration, rien d'autre à déployer. L'interface web fait exception, mais elle est embarquée dans l'exécutable du maître. | 🟡 exécutable seul fait (5,2 Mo, SQLite et TLS compris) ; interface à faire |
 | A2 | Tourne sur Linux, macOS et Windows. | 🟡 code portable ; testé sous Linux seulement |
 | A3 | Se connecte à n'importe quel modèle : Anthropic, et tout serveur compatible OpenAI (OpenAI, Gemini, Mistral, Ollama, vLLM, OpenRouter), comme dans Talixio AI Assistant. | ✅ |
 | A4 | Exécutable de petite taille. | ✅ profil de compilation optimisé en taille |
@@ -75,12 +75,12 @@ Exemples visés :
 | G2 | Un enfant ne communique qu'avec son parent. Le maître reçoit ainsi tout ce qui remonte. | ✅ |
 | G3 | Un enfant peut demander de l'aide à son parent (information, droit, décision). | ✅ outil `ask_parent` |
 | G4 | L'enfant doit voir son parent : c'est lui qui se connecte. Le parent installe et lance l'enfant par le moyen de son choix. | ✅ en local |
-| G5 | Déploiement d'un enfant : sur la machine, dans Docker, par SSH, ou par un autre moyen d'accès distant. | 🟡 local seulement |
+| G5 | Déploiement d'un enfant : sur la machine, dans Docker, par SSH, ou par un autre moyen d'accès distant. | 🟡 local, SSH et Docker (le maître seul déploie hors de sa machine ; même système et même processeur). Essayé avec un faux `ssh` ; pas encore sur une vraie machine ni un vrai démon Docker |
 | G6 | Lien chiffré et authentifié dès qu'il quitte la machine (port HTTPS ou TCP ouvert par le parent). | ✅ TLS 1.3 partout (lien et API) ; l'enfant n'accepte que le certificat de son parent, épinglé au lancement ; authentification mutuelle liée à ce certificat |
 | G7 | Lien coupé : l'enfant se met en veille ; si le parent ne revient pas, il s'éteint avec sa descendance. Jamais d'enfant autonome sans parent. | ✅ |
 | G8 | Aucun message perdu pendant une coupure. | ✅ numérotation et acquittement |
 | G9 | Un parent peut arrêter un enfant. | ✅ |
-| G10 | Un parent peut désinstaller un enfant de la machine où il l'a déployé. | ⬜ va avec le déploiement distant |
+| G10 | Un parent peut désinstaller un enfant de la machine où il l'a déployé. | ✅ à l'arrêt de l'enfant ou du maître : exécutable, base et journal retirés de la cible ; conteneur supprimé |
 | G11 | Chaque agent a un nom et un rôle, et déclare sa machine, son OS et son adresse IP. | ✅ |
 
 ### Autonomie
@@ -104,6 +104,17 @@ Exemples visés :
 | B5 | Quotas d'un abonnement (fenêtres d'usage) : les voir, et les répartir comme un budget. | ❓ voir Q8 |
 | B6 | Budgets et consommation visibles dans l'interface, agent par agent. | 🟡 consommation dans `/api/tree` ; budget restant à ajouter |
 
+### Fournisseurs, modèles et capacités
+
+Demandé le 2026-11-20, sur le modèle de Talixio AI Assistant. Rien n'est codé.
+
+| N° | Exigence | État |
+|---|---|---|
+| F1 | Le maître tient un catalogue de fournisseurs ; chaque fournisseur offre des modèles de plusieurs natures : texte (LLM), image, voix, et d'autres. | ⬜ aujourd'hui : une liste plate d'alias de modèles de texte |
+| F2 | Un agent reçoit le droit d'utiliser tel modèle de tel fournisseur, nature par nature. Ses enfants n'en reçoivent jamais plus. | 🟡 fait pour les modèles de texte (`capabilities.models`) |
+| F3 | À la création d'un enfant, le parent choisit son modèle, son niveau d'effort, la taille de son contexte, ses instructions, et ses capacités (texte, image, voix), en plus de ses droits sur les dossiers et les commandes. | 🟡 modèle, instructions et droits ; l'effort et le contexte sont fixés par l'alias, pas par enfant |
+| F4 | Les appels d'image et de voix passent par le maître, comme ceux de texte : les clés ne descendent jamais, et chaque appel est compté dans le budget. | ⬜ voir Q10 |
+
 ### Stockage et mémoire
 
 | N° | Exigence | État |
@@ -119,6 +130,7 @@ Exemples visés :
 | P1 | API JSON au niveau du maître, utilisable par Talixio AI Assistant. | ✅ |
 | P2 | Interface web soignée (shadcn/ui) : la grappe en direct, chaque agent avec nom, rôle, machine, IP, état ; le fil des messages ; le dialogue avec le maître. | ⬜ |
 | P3 | Vue de la grappe et du journal en ligne de commande. | ✅ |
+| P5 | Notes de version, tenues à chaque version, lisibles en ligne de commande et dans l'interface web. | 🟡 `releases.toml` embarqué, `talixio-agent releases`, `GET /api/releases` ; l'écran viendra avec l'interface |
 | P4 | Pilotage depuis un téléphone (Android) : discuter avec le maître, voir la grappe, être prévenu. | ❓ voir Q9 |
 
 ## 4. Décisions
@@ -169,6 +181,22 @@ Exemples visés :
     sont figés au démarrage, et toute information nouvelle (note de mémoire, message, résultat)
     s'ajoute à la fin. C'est la condition pour que le cache du fournisseur de modèles serve :
     modifier le début ferait repayer toute la conversation à chaque appel.
+17. **Hors de la machine, c'est la cible qui borne les droits** : chaque cible de déploiement
+    (`[targets.<nom>]`, SSH ou Docker) porte son plafond de dossiers et de commandes, écrit par
+    l'humain dans la configuration du maître. Un enfant déployé ne reçoit jamais plus que ce
+    plafond, quoi que demande son parent, et il le revérifie à l'arrivée sur les chemins réels de
+    sa machine. Modèles, budget et descendance restent bornés par le parent. Seul le maître
+    déploie sur une cible ; les descendants d'un agent déployé naissent sur sa machine.
+18. **SSH : rien d'interactif, rien de deviné.** Machine déjà connue exigée (jamais de confiance
+    à la première vue), pas de transfert d'agent ni de port ; l'exécutable et les consignes
+    passent par l'entrée standard de `ssh`, jamais par la ligne de commande. Tout ce qui vient de
+    la configuration d'une cible est validé caractère par caractère : rien ne peut y passer pour
+    une option ou une commande.
+19. **Docker : conteneur jetable et fermé.** Aucune capacité, pas de nouveaux privilèges, système
+    en lecture seule, mémoire et process bornés, état en mémoire, jamais root, image jamais
+    téléchargée d'office, seuls les montages de la cible.
+20. **Les notes de version ont une source unique**, `releases.toml`, embarquée dans l'exécutable.
+    Chaque version y ajoute une entrée ; un test refuse une version sans note.
 
 ## 5. Architecture
 
@@ -234,13 +262,14 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 | GET | `/api/events?after=N` | Le journal en continu (Server-Sent Events). |
 | POST | `/api/messages` `{ "text": … }` | Un message au maître. |
 | POST | `/api/agents/{id}/stop` | Arrête un agent et sa descendance. |
+| GET | `/api/releases` | La version qui tourne et les notes de version. |
 
 ## 6. Questions ouvertes
 
 | N° | Question | Piste |
 |---|---|---|
 | Q1 | ~~Où tourne le maître ?~~ | Tranché : sur une VM toujours allumée (décision 15). |
-| Q2 | Droits d'un enfant sur une autre machine : les chemins et commandes du parent n'y ont pas de sens. | Un plafond de droits par cible de déploiement, défini dans le droit de créer des enfants. |
+| Q2 | ~~Droits d'un enfant sur une autre machine~~ | Tranché : un plafond de droits par cible de déploiement (décision 17). |
 | Q3 | ~~Chiffrement du lien~~ | Tranché : certificat du parent épinglé chez l'enfant (décision 9). |
 | Q4 | Service ou démon (A5, A6) : systemd, launchd, service Windows ; un agent « hôte » par machine qui lance les autres. | À étudier à l'étape 3. |
 | Q5 | Assistant sur poste de travail : il observe une personne. | Visible et accepté par elle ; étape à part. |
@@ -248,6 +277,7 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 | Q7 | Stockage et mémoire des agents (S1–S3) : dossier, SQLite, ou les deux ? | Tranché pour la mémoire et le journal : SQLite embarqué, pour tous les agents (décision 14). Reste à faire : un dossier de travail par agent, ajouté d'office à ses droits (S1) ; l'arbre et les conversations sur disque (S3) ; effacement de la base d'un enfant à sa désinstallation ; mémoire partagée entre agents, si un usage le demande. |
 | Q8 | Abonnement Claude Max au lieu d'une clé d'API (B5). | À vérifier avant tout : qu'un abonnement Max puisse servir à des agents tiers n'est pas acquis, ni techniquement ni dans les conditions d'Anthropic. La voie sûre est la clé d'API avec un solde. Si c'est permis : lire les limites renvoyées par le fournisseur à chaque réponse, et les traiter comme un budget qui se recharge. |
 | Q9 | Android (P4) : piloter depuis le téléphone, ou y faire tourner un agent ? | Piloter : l'interface web, installable comme application (PWA), suffit ; elle demande HTTPS et un maître joignable depuis le téléphone, donc l'étape 2. Agent sur le téléphone : Rust se compile pour Android, mais le système arrête les process d'arrière-plan et enferme chaque application ; à n'étudier que si un usage le demande. |
+| Q10 | Catalogue de fournisseurs et capacités image et voix (F1–F4). | Config : `[providers.<nom>]` (adresse, clé) puis des modèles par nature ; droits de la forme `fournisseur/modèle`. Côté maître, du code propre à chaque nature : le lien ne porte aujourd'hui que des demandes de texte ; image et voix demandent de nouveaux messages, des tailles bornées autrement (un son ou une image pèse lourd), un comptage en argent plutôt qu'en tokens (donc B4), et des outils nouveaux chez l'agent (`generate_image`, `speak`, `transcribe`). Reprendre le catalogue de l'assistant plutôt que d'en réinventer un : son format est à récupérer. Nouvelle surface : revue de sécurité avant de coder. |
 
 ## 7. Sécurité
 
@@ -275,6 +305,18 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
    Seul le cloisonnement par le système la ferme.
 5. Un enfant décrit lui-même sa propre descendance : le parent borne et nettoie, mais ne peut pas
    vérifier ce qu'il ne voit pas.
+6. **Sur une cible SSH, le plafond de droits est tenu par l'agent lui-même**, comme en local
+   (limite 1) : le vrai garde-fou est le compte distant. Lui donner un compte dédié, sans
+   privilèges, qui ne voit que ce que l'agent doit voir. Ce compte peut lire et remplacer
+   l'exécutable déposé : ne jamais le partager avec autre chose.
+7. **Le compte du maître détient la clé SSH** : qui prend le maître prend les machines cibles,
+   dans la limite de leurs comptes dédiés. Le fichier de clé est interdit aux outils des agents.
+8. **Un conteneur garde le réseau** : il doit joindre le maître. Il peut donc aussi joindre le
+   reste du réseau de la machine. À fermer par un réseau Docker dédié, côté machine.
+9. **Lancer `docker` revient à être root sur la machine** : le maître d'une cible Docker doit
+   être tenu pour tel. Le socket Docker n'est jamais montré à un conteneur d'agent.
+10. Un agent déployé qui ne répond plus (machine éteinte, réseau coupé) s'éteint seul, mais sa
+    désinstallation échoue si la cible est injoignable : l'échec est journalisé, pas rejoué.
 
 ### Première passe (2026-11-20) : constats et traitement
 

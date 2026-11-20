@@ -50,6 +50,7 @@ pub async fn start_listener(
         router = router
             .route("/api/health", get(|| async { Json(json!({ "ok": true })) }))
             .route("/api/tree", get(tree))
+            .route("/api/releases", get(releases))
             .route("/api/activity", get(activity))
             .route("/api/events", get(events))
             .route("/api/messages", post(message))
@@ -69,6 +70,14 @@ pub async fn start_listener(
         }
     });
     Ok(local)
+}
+
+/// Les notes de version, pour l'interface : la version qui tourne, puis toutes les notes.
+async fn releases(State(app): State<App>, headers: HeaderMap) -> Response {
+    if let Err(response) = authorize(&app, &headers) {
+        return response;
+    }
+    Json(json!({ "version": crate::releases::VERSION, "releases": crate::releases::all() })).into_response()
 }
 
 async fn link(State(app): State<App>, headers: HeaderMap, upgrade: WebSocketUpgrade) -> Response {

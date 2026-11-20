@@ -35,6 +35,12 @@ enum Command {
     },
     /// Affiche la grappe.
     Tree(Remote),
+    /// Affiche les notes de version de cet exécutable.
+    Releases {
+        /// Seulement la dernière version.
+        #[arg(long)]
+        last: bool,
+    },
     /// Envoie un message à l'agent maître.
     Send {
         text: String,
@@ -73,6 +79,15 @@ async fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Root { config } => run_root(&config).await,
         Command::Child { state_dir } => run_child(state_dir).await,
+        Command::Releases { last } => {
+            use std::io::IsTerminal;
+            let mut releases = talixio_agent::releases::all();
+            if last {
+                releases.truncate(1);
+            }
+            print!("{}", talixio_agent::releases::render(&releases, std::io::stdout().is_terminal()));
+            Ok(())
+        }
         Command::Tree(remote) => {
             let tree: NodeInfo = serde_json::from_value(remote.get("/api/tree").await?)?;
             print_tree(&tree, 0);
@@ -142,6 +157,9 @@ async fn run_child(state_dir: PathBuf) -> Result<()> {
     spawn::harden_process();
     let mut boot: Bootstrap = serde_json::from_str(&raw).context("consignes de démarrage invalides")?;
     boot.capabilities.canonicalize().map_err(anyhow::Error::msg)?;
+    if let Some(ceiling) = &boot.ceiling {
+        boot.capabilities.check_ceiling(ceiling).map_err(anyhow::Error::msg)?;
+    }
     let state_dir = state_dir.canonicalize().context("dossier d'état")?;
     let (node, inbox) = Node::new_child(&boot, state_dir).map_err(anyhow::Error::msg)?;
     if node.caps.spawn.is_some() {

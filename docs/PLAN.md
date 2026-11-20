@@ -35,11 +35,14 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 - [ ] Budgets : l'agent voit son budget et son reste, le répartit entre ses enfants sans dépasser ce qui lui reste, alerte son parent à un seuil, en cascade ; budget en argent (B1–B4, B6) ; quotas d'abonnement à étudier (B5, Q8)
 - [x] SQLite embarqué : mémoire par agent, journal du maître sur disque (S2, S3)
 - [ ] Stockage, suite : dossier de travail par agent (S1) ; arbre et conversations sur disque (S3) ; effacement à la désinstallation
-- [ ] Plafond de droits par cible de déploiement (Q2)
-- [ ] Déploiement Docker (G5)
-- [ ] Déploiement SSH : copie de l'exécutable, lancement, désinstallation (G5, G10)
+- [x] Plafond de droits par cible de déploiement (Q2, décision 17)
+- [x] Déploiement Docker (G5) — arguments vérifiés en test ; **pas encore essayé avec un vrai démon**
+- [x] Déploiement SSH : copie de l'exécutable, lancement, désinstallation (G5, G10) — essayé de bout en bout avec un faux `ssh` (`tests/deploy.rs`) ; **pas encore sur une vraie machine**
+- [ ] Essai réel de SSH et de Docker sur les VM ; exécutable statique (musl) pour ne pas dépendre de la glibc de la cible ; cibles d'un autre système ou processeur
+- [x] Notes de version : `releases.toml`, `talixio-agent releases`, `GET /api/releases` (P5)
+- [ ] Catalogue de fournisseurs, modèles par nature (texte, image, voix), effort et contexte par enfant (F1–F4, Q10)
 - [ ] Interface web shadcn/ui embarquée : arbre en direct, journal, dialogue avec le maître (P2, A1) ; utilisable sur téléphone et installable (PWA) (P4, Q9)
-- [ ] Passe de sécurité sur le lien distant et les déploiements (D11)
+- [ ] Passe de sécurité indépendante sur le lien distant et les déploiements (D11) — relecture faite à l'écriture (SPEC §7, limites 6 à 10), audit complet à faire
 
 ## Étape 3 — durcir et durer
 
@@ -63,3 +66,4 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 | 2026-11-20 | Étape 1 : cœur écrit, tests verts, exécutable de 3,3 Mo. Première passe de sécurité lancée. |
 | 2026-11-20 | Audit rendu : 17 constats vérifiés, tous traités et rejoués en test (SPEC §7). Nouvelle syntaxe des règles de commande, authentification mutuelle du lien, budgets par réservation. Exigences de stockage et de mémoire (S1–S3, Q7), de budgets et de quotas (B1–B6, Q8) ajoutées. |
 | 2026-11-20 | SQLite embarqué (exécutable : 4,6 Mo) : mémoire des agents, journal du maître repris au redémarrage. Décidé : le maître tourne sur une VM. |
+| 2026-11-20 | v0.3.0 : TLS 1.3 partout, certificat épinglé. v0.4.0 : cibles de déploiement SSH et Docker avec plafond de droits, désinstallation, notes de version. Exigences F1–F4 (catalogue de fournisseurs, image, voix) inscrites. |

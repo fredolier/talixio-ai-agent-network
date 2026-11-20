@@ -11,6 +11,7 @@ pub mod model;
 pub mod node;
 pub mod policy;
 pub mod protocol;
+pub mod releases;
 pub mod spawn;
 pub mod store;
 pub mod tls;

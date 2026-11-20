@@ -53,6 +53,7 @@ fn enroll(node: &Node, id: &str, name: &str, token: &str) {
             meter: Meter::default(),
             mission_open: false,
             reports: 0,
+            target: None,
             process: None,
         },
     );

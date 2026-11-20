@@ -82,6 +82,32 @@ cwd = "/srv/projet"          # dossier d'exécution ; absent : le dossier tempor
 program = "/usr/bin/wc"
 args = ["-l", "{read}"]
 
+# Cibles de déploiement : où le maître peut installer des agents hors de sa machine.
+# Il faut alors que le maître écoute hors de sa machine (`listen`, `advertise`).
+# Chaque cible a son plafond de droits : un agent déployé là n'en reçoit jamais plus.
+#
+# [targets.vm-build]
+# kind = "ssh"
+# host = "build.exemple.net"            # doit déjà figurer dans known_hosts du compte du maître
+# user = "talixio"                      # compte dédié, sans privilèges
+# identity_file = "/home/maitre/.ssh/talixio_ed25519"
+# remote_dir = "/home/talixio/agents"   # réservé aux agents
+#
+# [targets.vm-build.capabilities]
+# fs_read = ["/srv/projet"]
+# fs_write = ["/srv/projet/sortie"]
+#
+# [targets.bac]
+# kind = "docker"
+# image = "debian:12-slim"              # déjà présente sur la machine ; glibc compatible
+# user = "1000:1000"
+# mounts = [{ host = "/srv/projet", container = "/data" }]   # write = true pour l'écriture
+#
+# [targets.bac.capabilities]
+# fs_read = ["/data"]
+#
+# Puis : targets = ["local", "vm-build", "bac"] dans [capabilities.spawn].
+
 [capabilities.spawn]
 max_children = 5   # enfants directs en vie
 max_depth = 2      # niveaux sous le maître

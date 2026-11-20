@@ -81,7 +81,7 @@ pub fn specs(node: &Node) -> Vec<ToolSpec> {
         tools.push(spec(
             "spawn_agent",
             format!(
-                "Crée un agent enfant, sur cette machine, pour lui confier une mission. Il travaille seul jusqu'à \
+                "Crée un agent enfant, sur cette machine ou sur une cible de déploiement, pour lui confier une mission. Il travaille seul jusqu'à \
                  atteindre le critère de réussite ou constater que c'est impossible, puis te rend compte ; son compte \
                  rendu arrive plus tard, dans un message. Il ne voit pas ta conversation : mets dans la mission tout \
                  ce qu'il doit savoir. Ses droits ne peuvent pas dépasser les tiens ; donne-lui le strict nécessaire. \
@@ -95,6 +95,10 @@ pub fn specs(node: &Node) -> Vec<ToolSpec> {
                 "objective": { "type": "string", "description": "La mission à accomplir." },
                 "success_criteria": { "type": "string", "description": "Critère de réussite mesurable : ce qui, vérifié, prouve que la mission est accomplie." },
                 "model": { "type": "string", "description": format!("Alias du modèle, parmi : {}. Par défaut : le tien.", caps.models.join(", ")) },
+                "target": { "type": "string", "description": format!(
+                    "Où le créer. « local » : sur ta machine, dans la limite de tes propres droits.{} Par défaut : local.",
+                    policy.targets.iter().filter_map(|t| node.targets.get(t).map(|d| format!(" « {t} » : {}.", d.describe()))).collect::<String>()
+                ) },
                 "capabilities": {
                     "type": "object",
                     "description": "Ses droits. Tout ce qui est omis est refusé.",
@@ -446,13 +450,47 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
     };
     let model = input["model"].as_str().unwrap_or(&node.model).to_string();
     caps.models = vec![model.clone()];
+    let target_name = input["target"].as_str().unwrap_or("local").to_string();
+    if !policy.targets.contains(&target_name) {
+        return Err(format!("cible « {target_name} » : hors de vos propres droits"));
+    }
+    let target = match target_name.as_str() {
+        "local" => None,
+        name => Some(node.targets.get(name).cloned().ok_or_else(|| format!("cible « {name} » inconnue"))?),
+    };
+    // seul le maître déploie ailleurs : ses descendants ne créent que sur leur propre machine
     if let Some(spawn) = &mut caps.spawn {
         spawn.targets = vec!["local".into()];
     }
-    // les dossiers sont accordés par leur chemin réel : un lien ne peut pas élargir les droits
-    caps.canonicalize()?;
-    node.caps.check_grant(&caps)?;
-    let parent_addr = node.dial_addr(false)?;
+    let ceiling = match &target {
+        None => {
+            // les dossiers sont accordés par leur chemin réel : un lien ne peut pas élargir les droits
+            caps.canonicalize()?;
+            node.caps.check_grant(&caps)?;
+            None
+        }
+        Some(target) => {
+            // ailleurs, les dossiers et commandes du parent n'ont pas de sens : c'est le plafond
+            // de la cible qui borne l'enfant. Modèles, budget et descendance restent bornés par le parent.
+            let limit = Capabilities {
+                fs_read: target.capabilities.fs_read.clone(),
+                fs_write: target.capabilities.fs_write.clone(),
+                exec: target.capabilities.exec.clone(),
+                ..node.caps.clone()
+            };
+            limit.check_grant(&caps)?;
+            Some(target.capabilities.clone())
+        }
+    };
+    let parent_addr = match target.as_ref().map(|t| t.kind.as_str()) {
+        None => node.dial_addr(false)?,
+        // depuis un conteneur, la machine du parent s'appelle host.docker.internal
+        Some("docker") => {
+            let addr = node.dial_addr(true)?;
+            format!("host.docker.internal:{}", addr.rsplit(':').next().unwrap_or(""))
+        }
+        Some(_) => node.dial_addr(true)?,
+    };
     let parent_cert = node.cert.get().cloned().ok_or("cet agent n'accepte pas de connexion d'enfants")?;
 
     let boot = Bootstrap {
@@ -468,8 +506,9 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
         parent_cert,
         token: random_hex(2),
         depth: node.depth + 1,
-        target: "local".into(),
+        target: target_name.clone(),
         timing: node.timing,
+        ceiling,
     };
     let placeholder = NodeInfo {
         id: boot.agent_id.clone(),
@@ -518,11 +557,12 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
                 meter: Meter::default(),
                 mission_open: false,
                 reports: 0,
+                target: target.clone(),
                 process: None,
             },
         );
     }
-    match spawn::spawn_local(node, &boot).await {
+    match spawn::launch(node, &boot, target.as_ref()).await {
         Ok(process) => {
             if let Some(child) = node.children.lock().unwrap().get_mut(&boot.agent_id) {
                 child.process = Some(process);

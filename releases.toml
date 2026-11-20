@@ -1,0 +1,123 @@
+# Notes de version de Talixio Agent Network.
+#
+# Source unique : ce fichier est embarqué dans l'exécutable (`talixio-agent releases`) et servi
+# par l'API du maître (`GET /api/releases`), d'où l'interface web le lit.
+# La version la plus récente en premier ; elle doit être celle de Cargo.toml (un test le vérifie).
+# Genres d'un changement : nouveau, sécurité, amélioration, correction, attention.
+# « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
+
+[[release]]
+version = "0.4.0"
+date = "2026-11-20"
+title = "Sortir de la machine"
+summary = "Le maître peut installer des agents sur d'autres machines par SSH et dans des conteneurs Docker, avec un plafond de droits propre à chaque cible. Les notes de version arrivent."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Cibles de déploiement `[targets.<nom>]` : `ssh` (une autre machine) et `docker` (un conteneur). `spawn_agent` accepte une cible."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Chaque cible a son plafond de droits (dossiers, commandes) : un agent déployé n'en reçoit jamais plus, et il le revérifie lui-même à l'arrivée, sur les chemins réels de sa machine."
+
+[[release.changes]]
+kind = "sécurité"
+text = "SSH sans rien d'interactif : machine déjà connue exigée (`StrictHostKeyChecking=yes`), aucun transfert d'agent ni de port ; l'exécutable et les consignes voyagent dans le canal SSH, jamais sur la ligne de commande."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Conteneurs fermés : aucune capacité, pas de nouveaux privilèges, système en lecture seule, mémoire et nombre de process bornés, seuls les dossiers montés par la cible."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Désinstallation : un agent déployé est retiré de sa cible (exécutable, base, journal) quand il est arrêté ou quand le maître s'éteint."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Notes de version : `talixio-agent releases` et `GET /api/releases`."
+
+[[release.changes]]
+kind = "attention"
+text = "Seul le maître déploie sur une cible ; il doit écouter hors de sa machine (`listen`, `advertise`). Machine cible : même système et même processeur que le maître."
+
+[[release]]
+version = "0.3.0"
+date = "2026-11-20"
+title = "Tout est chiffré"
+summary = "Le lien entre agents et l'API passent en TLS 1.3. Plus rien ne circule en clair, même sur la machine."
+
+[[release.changes]]
+kind = "sécurité"
+text = "TLS 1.3 partout : lien parent-enfant et API JSON. Chaque agent a son certificat ; l'enfant n'accepte que celui de son parent, reconnu à son empreinte."
+
+[[release.changes]]
+kind = "sécurité"
+text = "La preuve d'identité de la poignée de main est liée au certificat : un intermédiaire ne peut pas la rejouer."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Le maître peut écouter hors de sa machine (`listen`, `advertise`) et utiliser un certificat public (`[tls]`)."
+
+[[release.changes]]
+kind = "attention"
+text = "L'API n'est plus servie qu'en HTTPS. La ligne de commande reconnaît le maître à son empreinte (`.talixio/tls-fingerprint`, ou `--fingerprint`)."
+
+[[release]]
+version = "0.2.0"
+date = "2026-11-20"
+title = "Audit de sécurité et mémoire"
+summary = "Les 17 constats de la première passe de sécurité sont traités et rejoués en test. Chaque agent reçoit une mémoire qui dure."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Règles de commande réécrites : programme par chemin absolu, arguments décrits un à un, une option n'est jamais devinée."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Lien : authentification mutuelle, tailles et cadences bornées, un enfant ne peut ni saturer son parent ni se faire passer pour un autre."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Fichiers : chemins réels vérifiés, liens symboliques non suivis à l'écriture, dossier d'état et clés interdits aux outils."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Budgets réservés avant chaque appel au modèle : plus de dépassement par appels simultanés. Rien de ce qu'un agent lance ne lui survit."
+
+[[release.changes]]
+kind = "nouveau"
+text = "SQLite embarqué : mémoire par agent (`memory_write`, `memory_read`), journal du maître repris au redémarrage."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Le début de la conversation d'un agent ne change jamais ; tout ce qui est nouveau s'ajoute à la fin, pour que le cache du fournisseur de modèles serve."
+
+[[release.changes]]
+kind = "attention"
+text = "La syntaxe de `[[capabilities.exec]]` a changé : voir `talixio.example.toml`."
+
+[[release]]
+version = "0.1.0"
+date = "2026-11-20"
+title = "Le cœur"
+summary = "Un exécutable, un maître, des enfants : la grappe fonctionne sur une machine."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Agent maître et agents enfants en arbre ; un enfant ne parle qu'à son parent, et n'a jamais plus de droits que lui."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Droits refusés par défaut : dossiers en lecture, en écriture, commandes, modèles, budget de tokens, droit de créer des enfants."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Missions à objectif et critère de réussite mesurable ; compte rendu au parent."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Les clés des modèles restent chez le maître : les enfants passent par lui (Anthropic, OpenAI et compatibles)."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Lien perdu : l'enfant se met en veille, puis s'éteint. API JSON et ligne de commande : `tree`, `send`, `watch`, `stop`."
