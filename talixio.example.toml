@@ -11,8 +11,10 @@ Délègue ce qui peut l'être à des agents spécialisés, avec le strict minimu
 # Alias du modèle du maître, parmi ceux définis plus bas.
 model = "main"
 
-# Adresse de l'API et du lien avec les enfants. Seule l'interface locale est acceptée pour l'instant.
+# Adresse de l'API et du lien avec les enfants, toujours en TLS. Par défaut : cette machine seule.
+# Pour des enfants sur d'autres machines ou dans Docker : "0.0.0.0:7700", derrière un pare-feu.
 listen = "127.0.0.1:7700"
+# advertise = "maitre.exemple.net"   # nom ou adresse par lequel les enfants distants joignent le maître
 
 # Dossier d'état : jeton de l'API, journaux des enfants, bases SQLite (mémoire des agents, journal).
 state_dir = ".talixio"
@@ -21,6 +23,12 @@ state_dir = ".talixio"
 heartbeat_secs = 5        # un battement toutes les 5 s
 suspend_after_secs = 20   # sans nouvelles du parent : mise en veille
 die_after_secs = 300      # toujours sans nouvelles : extinction, descendance comprise
+
+# Le maître fabrique son certificat au premier démarrage (dossier d'état). Pour un certificat
+# reconnu par les navigateurs, fournir le vôtre :
+# [tls]
+# cert_file = "/etc/talixio/cert.pem"
+# key_file = "/etc/talixio/key.pem"     # en 0600
 
 # --- Modèles -------------------------------------------------------------------------------
 # Les clés restent chez le maître : les enfants passent par lui pour appeler un modèle.

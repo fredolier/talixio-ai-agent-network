@@ -30,7 +30,7 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 
 ## Étape 2 — sortir de la machine
 
-- [ ] Lien chiffré (G6, Q3) — l'authentification mutuelle est faite ; lever alors l'interdiction d'écoute distante
+- [x] Lien et API chiffrés : TLS 1.3, certificat du parent épinglé chez l'enfant, écoute distante permise (G6)
 - [ ] Écoute du lien séparée de celle de l'API ; socket Unix pour les enfants locaux ; correspondant qui envoie au compte-gouttes (SPEC §7)
 - [ ] Budgets : l'agent voit son budget et son reste, le répartit entre ses enfants sans dépasser ce qui lui reste, alerte son parent à un seuil, en cascade ; budget en argent (B1–B4, B6) ; quotas d'abonnement à étudier (B5, Q8)
 - [x] SQLite embarqué : mémoire par agent, journal du maître sur disque (S2, S3)

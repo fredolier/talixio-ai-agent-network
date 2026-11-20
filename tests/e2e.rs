@@ -142,12 +142,27 @@ max_depth = 1
         .spawn()
         .unwrap();
 
-    let api = Api { http: reqwest::Client::new(), base: format!("http://127.0.0.1:{port}") };
+    // le maître écrit l'empreinte de son certificat dans son dossier d'état : on n'accepte que lui
     let start = Instant::now();
-    while api.http.get(format!("{}/api/health", api.base)).send().await.is_err() {
+    let fingerprint = loop {
+        if let Ok(fingerprint) = std::fs::read_to_string(tmp.join("state/tls-fingerprint")) {
+            break fingerprint;
+        }
         assert!(start.elapsed() < Duration::from_secs(15), "le maître ne démarre pas");
         tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    let pinned = talixio_agent::tls::pinned_client(&fingerprint).unwrap();
+    let api = Api {
+        http: reqwest::Client::builder().use_preconfigured_tls(pinned).build().unwrap(),
+        base: format!("https://127.0.0.1:{port}"),
+    };
+    while api.http.get(format!("{}/api/health", api.base)).send().await.is_err() {
+        assert!(start.elapsed() < Duration::from_secs(15), "le maître ne répond pas");
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
+    // en clair, ou sans épingler le bon certificat : rien
+    assert!(reqwest::get(format!("http://127.0.0.1:{port}/api/health")).await.is_err());
+    assert!(reqwest::get(format!("https://127.0.0.1:{port}/api/health")).await.is_err());
 
     // sans jeton : rien
     let denied = api.http.get(format!("{}/api/tree", api.base)).send().await.unwrap();

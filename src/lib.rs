@@ -13,6 +13,7 @@ pub mod policy;
 pub mod protocol;
 pub mod spawn;
 pub mod store;
+pub mod tls;
 pub mod tools;
 
 pub fn now_ms() -> u64 {
@@ -28,8 +29,10 @@ pub fn random_hex(uuids: usize) -> String {
 }
 
 /// Preuve qu'on détient un secret, sans le montrer : HMAC-SHA256 du rôle (`parent` ou
-/// `child`) et des éléments de l'échange, chacun précédé de sa longueur.
-pub fn proof(secret: &str, side: &str, parts: [&str; 3]) -> String {
+/// `child`) et des éléments de l'échange, chacun précédé de sa longueur. Ces éléments sont
+/// l'aléa de l'enfant, celui du parent, l'identifiant de l'enfant et l'empreinte du certificat
+/// du parent : la preuve ne vaut que sur la connexion chiffrée où elle a été faite.
+pub fn proof(secret: &str, side: &str, parts: [&str; 4]) -> String {
     use hmac::{Hmac, Mac};
     let mut mac = Hmac::<sha2::Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC accepte toute taille de clé");
     for part in std::iter::once(side).chain(parts) {

@@ -76,7 +76,7 @@ Exemples visés :
 | G3 | Un enfant peut demander de l'aide à son parent (information, droit, décision). | ✅ outil `ask_parent` |
 | G4 | L'enfant doit voir son parent : c'est lui qui se connecte. Le parent installe et lance l'enfant par le moyen de son choix. | ✅ en local |
 | G5 | Déploiement d'un enfant : sur la machine, dans Docker, par SSH, ou par un autre moyen d'accès distant. | 🟡 local seulement |
-| G6 | Lien chiffré et authentifié dès qu'il quitte la machine (port HTTPS ou TCP ouvert par le parent). | 🟡 authentification mutuelle faite (le secret ne circule jamais) ; chiffrement à faire : interface locale seulement, écoute distante refusée |
+| G6 | Lien chiffré et authentifié dès qu'il quitte la machine (port HTTPS ou TCP ouvert par le parent). | ✅ TLS 1.3 partout (lien et API) ; l'enfant n'accepte que le certificat de son parent, épinglé au lancement ; authentification mutuelle liée à ce certificat |
 | G7 | Lien coupé : l'enfant se met en veille ; si le parent ne revient pas, il s'éteint avec sa descendance. Jamais d'enfant autonome sans parent. | ✅ |
 | G8 | Aucun message perdu pendant une coupure. | ✅ numérotation et acquittement |
 | G9 | Un parent peut arrêter un enfant. | ✅ |
@@ -142,8 +142,13 @@ Exemples visés :
    parent lui connaît.
 8. **Seuls `ask_parent` et `finish_mission` parviennent au parent.** Le reste de ce qu'écrit un
    enfant va au journal, pas dans la conversation du parent.
-9. **Sans chiffrement, pas d'écoute hors de la machine** : toute adresse non locale est refusée
-   au démarrage tant que le lien chiffré n'existe pas.
+9. **Tout est chiffré, sans autorité de certification à gérer.** Chaque agent qui écoute a son
+   certificat, signé par lui-même ; le lien et l'API sont en TLS 1.3, jamais en clair. L'enfant
+   reçoit au lancement l'empreinte du certificat de son parent et refuse tout autre
+   correspondant. La preuve du secret partagé inclut cette empreinte : elle ne vaut que sur
+   cette connexion, ce qui exclut l'écoute comme le relais. Le certificat du maître est gardé
+   dans le dossier d'état (son empreinte sert à la ligne de commande) ; l'exploitant peut
+   fournir le sien (`[tls]`), d'une autorité reconnue, pour les navigateurs.
 10. **Interface** : React et shadcn/ui, compilée puis embarquée dans l'exécutable du maître. Elle
     n'utilise que l'API JSON publique.
 11. **Les dossiers accordés sont des chemins réels**, résolus une fois quand le droit est donné. Un
@@ -160,6 +165,10 @@ Exemples visés :
     le dossier d'état reste interdit aux outils de fichiers et de commandes.
 15. **Le maître tourne sur un serveur toujours allumé** (une VM), pas sur un poste. Le poste et le
     téléphone ne servent qu'à l'interface.
+16. **Le début de la conversation d'un agent ne change jamais** : consignes, droits et mémoire
+    sont figés au démarrage, et toute information nouvelle (note de mémoire, message, résultat)
+    s'ajoute à la fin. C'est la condition pour que le cache du fournisseur de modèles serve :
+    modifier le début ferait repayer toute la conversation à chaque appel.
 
 ## 5. Architecture
 
@@ -175,6 +184,7 @@ src/
   tools.rs      outils : fichiers, commandes, enfants, mission
   spawn.rs      lancement d'un enfant (process local)
   store.rs      base SQLite de l'agent : mémoire, journal du maître
+  tls.rs        certificats, TLS 1.3, épinglage par empreinte
   api.rs        écoute réseau : lien des enfants, API JSON du maître
   model/        format neutre ; connecteurs Anthropic et compatible OpenAI
 tests/e2e.rs       la grappe de bout en bout, avec un faux serveur de modèles
@@ -183,7 +193,7 @@ tests/security.rs  les attaques de l'audit, rejouées : chacune doit échouer
 
 ### Lien parent-enfant
 
-Trames JSON `{ "seq": n?, "msg": { "type": … } }` sur WebSocket, point d'entrée `/link`.
+Trames JSON `{ "seq": n?, "msg": { "type": … } }` sur WebSocket chiffré (TLS 1.3), point d'entrée `/link`.
 
 | Sens | Messages |
 |---|---|
@@ -195,7 +205,7 @@ Les messages portant un `seq` sont acquittés et renvoyés après une reconnexio
 écarte les doublons. Délais réglables (`[timing]`) : battement, mise en veille, extinction.
 
 Présentation : `hello` → `challenge` → `proof` → `welcome`, en 10 s au plus. La preuve de chacun
-est `HMAC-SHA256(secret, rôle ‖ aléa de l'enfant ‖ aléa du parent ‖ identifiant)`. Huit
+est `HMAC-SHA256(secret, rôle ‖ aléa de l'enfant ‖ aléa du parent ‖ identifiant ‖ empreinte du certificat du parent)`. Huit
 présentations simultanées au plus ; une requête portant un en-tête `Origin` (un navigateur) est
 refusée. Trames : 16 Mio au plus pour un appel de modèle, 1 Mio pour le reste. Un compte rendu
 n'est accepté que d'un enfant en mission, 20 au plus entre deux consignes, 20 000 caractères au plus.
@@ -213,7 +223,7 @@ n'est accepté que d'un enfant en mission, 20 au plus entre deux consignes, 20 0
 
 ### API JSON du maître
 
-Authentification : `Authorization: Bearer <jeton>`. Le jeton vient de `TALIXIO_API_TOKEN`, sinon il
+En HTTPS seulement. Authentification : `Authorization: Bearer <jeton>`. Le jeton vient de `TALIXIO_API_TOKEN`, sinon il
 est créé au premier démarrage dans `<state_dir>/api-token`.
 
 | Méthode | Chemin | Rôle |
@@ -231,7 +241,7 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 |---|---|---|
 | Q1 | ~~Où tourne le maître ?~~ | Tranché : sur une VM toujours allumée (décision 15). |
 | Q2 | Droits d'un enfant sur une autre machine : les chemins et commandes du parent n'y ont pas de sens. | Un plafond de droits par cible de déploiement, défini dans le droit de créer des enfants. |
-| Q3 | Chiffrement du lien : certificat du parent épinglé chez l'enfant au lancement, ou autorité propre à la grappe. | À concevoir à l'étape 2, avec l'audit. |
+| Q3 | ~~Chiffrement du lien~~ | Tranché : certificat du parent épinglé chez l'enfant (décision 9). |
 | Q4 | Service ou démon (A5, A6) : systemd, launchd, service Windows ; un agent « hôte » par machine qui lance les autres. | À étudier à l'étape 3. |
 | Q5 | Assistant sur poste de travail : il observe une personne. | Visible et accepté par elle ; étape à part. |
 | Q6 | Coffre des clés au niveau 0. | Fichier chiffré ou coffre du système, à choisir. En attendant : fichier de clé en 0600. À terme, les clés devraient vivre sous un autre compte que celui des agents. |
@@ -255,8 +265,9 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
    s'exécute avec tous les droits du compte : elle peut lire et écrire hors des dossiers accordés.
    Tant que D5 n'est pas fait, on n'autorise que des commandes inoffensives, écrites au plus serré,
    et le maître tourne sous un compte dédié sans privilèges.
-2. **Le lien n'est pas chiffré.** L'authentification mutuelle empêche de se faire passer pour un
-   parent ou un enfant, pas d'écouter ni de relayer. D'où l'écoute locale seulement.
+2. **Le certificat fabriqué par le maître n'est pas reconnu par les navigateurs** : pour
+   l'interface web, fournir un certificat d'une autorité reconnue (`[tls]`), ou vérifier
+   l'empreinte affichée au démarrage. La ligne de commande, elle, épingle l'empreinte.
 3. **L'injection par le sens** : aucun balisage n'empêche un modèle d'être convaincu par un texte.
    Les droits minimaux, les budgets et, à venir, la validation humaine (D9) limitent les dégâts.
 4. La vérification d'un chemin puis son ouverture ne sont pas une seule opération : la fenêtre est

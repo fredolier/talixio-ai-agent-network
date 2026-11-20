@@ -17,7 +17,6 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio_stream::wrappers::BroadcastStream;
 
-use crate::config::ensure_loopback;
 use crate::link::{serve_child, MAX_FRAME};
 use crate::node::{Input, Node};
 use crate::secret_eq;
@@ -36,10 +35,15 @@ const MAX_HANDSHAKES: usize = 8;
 /// Taille maximale d'un message envoyé au maître par l'API, en caractères.
 const MAX_MESSAGE_CHARS: usize = 100_000;
 
-/// Ouvre l'écoute. `api_token` présent : l'API JSON du maître est servie aussi.
-pub async fn start_listener(node: Arc<Node>, addr: SocketAddr, api_token: Option<String>) -> Result<SocketAddr> {
-    ensure_loopback(&addr)?;
-    let listener = tokio::net::TcpListener::bind(addr).await.with_context(|| format!("écoute sur {addr}"))?;
+/// Ouvre l'écoute, en TLS. `api_token` présent : l'API JSON du maître est servie aussi.
+pub async fn start_listener(
+    node: Arc<Node>,
+    addr: SocketAddr,
+    api_token: Option<String>,
+    identity: crate::tls::Identity,
+) -> Result<SocketAddr> {
+    let listener = std::net::TcpListener::bind(addr).with_context(|| format!("écoute sur {addr}"))?;
+    listener.set_nonblocking(true)?;
     let local = listener.local_addr()?;
     let mut router = Router::new().route("/link", get(link));
     if api_token.is_some() {
@@ -57,8 +61,10 @@ pub async fn start_listener(node: Arc<Node>, addr: SocketAddr, api_token: Option
         handshakes: Arc::new(tokio::sync::Semaphore::new(MAX_HANDSHAKES)),
     });
     let _ = node.listen.set(local);
+    let _ = node.cert.set(identity.fingerprint.clone());
+    let tls = axum_server::tls_rustls::RustlsConfig::from_config(identity.server);
     tokio::spawn(async move {
-        if let Err(e) = axum::serve(listener, app).await {
+        if let Err(e) = axum_server::from_tcp_rustls(listener, tls).serve(app.into_make_service()).await {
             eprintln!("écoute interrompue : {e}");
         }
     });

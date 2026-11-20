@@ -15,7 +15,7 @@ use talixio_agent::model::Providers;
 use talixio_agent::node::{ChildRec, Input, Meter, Node};
 use talixio_agent::policy::Capabilities;
 use talixio_agent::protocol::{NodeInfo, Outbox, ReportKind};
-use talixio_agent::{api, proof, tools};
+use talixio_agent::{api, proof, tls, tools};
 
 /// Un maître, sans modèle joignable, avec les droits donnés (TOML de `[capabilities]`).
 fn root(dir: &Path, capabilities: &str) -> (Arc<Node>, UnboundedReceiver<Input>) {
@@ -66,7 +66,20 @@ fn info(id: &str, children: Vec<Value>) -> Value {
     })
 }
 
-type Ws = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+type Ws = tokio_tungstenite::WebSocketStream<tokio_rustls::client::TlsStream<tokio::net::TcpStream>>;
+
+/// Ouvre le lien comme le ferait un enfant qui a épinglé le certificat d'empreinte `pin`.
+async fn connect(addr: std::net::SocketAddr, pin: &str, origin: Option<&str>) -> Option<Ws> {
+    let connector = tokio_rustls::TlsConnector::from(Arc::new(tls::pinned_client(pin).unwrap()));
+    let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let name = rustls::pki_types::ServerName::try_from(tls::NAME).unwrap();
+    let stream = connector.connect(name, tcp).await.ok()?;
+    let mut request = format!("wss://{addr}/link").into_client_request().unwrap();
+    if let Some(origin) = origin {
+        request.headers_mut().insert("origin", origin.parse().unwrap());
+    }
+    tokio_tungstenite::client_async(request, stream).await.ok().map(|(ws, _)| ws)
+}
 
 async fn send(ws: &mut Ws, msg: Value) {
     ws.send(Message::Text(json!({ "msg": msg }).to_string().into())).await.unwrap();
@@ -89,7 +102,7 @@ async fn next(ws: &mut Ws) -> Option<Value> {
 }
 
 /// Se présente comme l'enfant `id`. Renvoie la réponse finale du parent.
-async fn handshake(ws: &mut Ws, id: &str, token: &str, tree: Value) -> Option<Value> {
+async fn handshake(ws: &mut Ws, cert: &str, id: &str, token: &str, tree: Value) -> Option<Value> {
     send(ws, json!({ "type": "hello", "agent_id": id, "nonce": "alea-enfant" })).await;
     let challenge = next(ws).await?;
     if challenge["type"] != "challenge" {
@@ -97,8 +110,8 @@ async fn handshake(ws: &mut Ws, id: &str, token: &str, tree: Value) -> Option<Va
     }
     let theirs = challenge["nonce"].as_str().unwrap();
     // le parent a prouvé qu'il détient le secret
-    assert_eq!(challenge["proof"], proof("le-bon-secret", "parent", ["alea-enfant", theirs, id]));
-    send(ws, json!({ "type": "proof", "proof": proof(token, "child", ["alea-enfant", theirs, id]), "node": tree })).await;
+    assert_eq!(challenge["proof"], proof("le-bon-secret", "parent", ["alea-enfant", theirs, id, cert]));
+    send(ws, json!({ "type": "proof", "proof": proof(token, "child", ["alea-enfant", theirs, id, cert]), "node": tree })).await;
     next(ws).await
 }
 
@@ -106,28 +119,41 @@ async fn handshake(ws: &mut Ws, id: &str, token: &str, tree: Value) -> Option<Va
 async fn the_link_trusts_nothing_a_child_says() {
     let tmp = tempfile::tempdir().unwrap();
     let (node, mut inbox) = root(tmp.path(), "");
-    let addr = api::start_listener(node.clone(), ([127, 0, 0, 1], 0).into(), None).await.unwrap();
-    let url = format!("ws://{addr}/link");
+    let identity = tls::ephemeral().unwrap();
+    let cert = identity.fingerprint.clone();
+    let cert = cert.as_str();
+    let addr = api::start_listener(node.clone(), ([127, 0, 0, 1], 0).into(), None, identity).await.unwrap();
+
+    // le lien est chiffré : une connexion en clair n'obtient rien, et un enfant qui attend un
+    // autre certificat (un faux parent) refuse de poursuivre
+    assert!(tokio_tungstenite::connect_async(format!("ws://{addr}/link")).await.is_err());
+    assert!(connect(addr, &tls::ephemeral().unwrap().fingerprint, None).await.is_none());
     enroll(&node, "a-enfant", "honnête", "le-bon-secret");
     enroll(&node, "a-voisin", "voisin", "autre-secret");
 
     // une page web (en-tête Origin) n'atteint pas le lien
-    let mut request = url.as_str().into_client_request().unwrap();
-    request.headers_mut().insert("origin", "http://evil.example".parse().unwrap());
-    assert!(tokio_tungstenite::connect_async(request).await.is_err());
+    assert!(connect(addr, cert, Some("http://evil.example")).await.is_none());
 
     // un inconnu, ou un agent sans le secret, est refusé — et le secret n'a jamais circulé
-    let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
-    assert_eq!(handshake(&mut ws, "a-inconnu", "x", info("a-inconnu", vec![])).await.unwrap()["type"], "rejected");
-    let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
-    let refused = handshake(&mut ws, "a-enfant", "mauvais-secret", info("a-enfant", vec![])).await.unwrap();
+    let mut ws = connect(addr, cert, None).await.unwrap();
+    assert_eq!(handshake(&mut ws, cert, "a-inconnu", "x", info("a-inconnu", vec![])).await.unwrap()["type"], "rejected");
+    let mut ws = connect(addr, cert, None).await.unwrap();
+    let refused = handshake(&mut ws, cert, "a-enfant", "mauvais-secret", info("a-enfant", vec![])).await.unwrap();
     assert_eq!(refused["type"], "rejected");
     assert!(node.children.lock().unwrap()["a-enfant"].conn.is_none());
 
     // le bon secret : accueilli. L'arbre qu'il déclare revendique le voisin et le maître : refusé
     let hostile = info("a-enfant", vec![info("a-voisin", vec![]), info(&node.id, vec![])]);
-    let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
-    assert_eq!(handshake(&mut ws, "a-enfant", "le-bon-secret", hostile).await.unwrap()["type"], "welcome");
+    // une preuve faite pour une autre connexion (autre certificat) ne vaut rien ici
+    let mut ws = connect(addr, cert, None).await.unwrap();
+    send(&mut ws, json!({ "type": "hello", "agent_id": "a-enfant", "nonce": "alea-enfant" })).await;
+    let challenge = next(&mut ws).await.unwrap();
+    let elsewhere = proof("le-bon-secret", "child", ["alea-enfant", challenge["nonce"].as_str().unwrap(), "a-enfant", "autre-certificat"]);
+    send(&mut ws, json!({ "type": "proof", "proof": elsewhere, "node": info("a-enfant", vec![]) })).await;
+    assert_eq!(next(&mut ws).await.unwrap()["type"], "rejected");
+
+    let mut ws = connect(addr, cert, None).await.unwrap();
+    assert_eq!(handshake(&mut ws, cert, "a-enfant", "le-bon-secret", hostile).await.unwrap()["type"], "welcome");
     let seen = node.snapshot();
     let child = seen.children.iter().find(|c| c.id == "a-enfant").unwrap();
     assert!(child.children.is_empty(), "un enfant a revendiqué des agents qui ne sont pas à lui");

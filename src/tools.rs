@@ -452,7 +452,8 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
     // les dossiers sont accordés par leur chemin réel : un lien ne peut pas élargir les droits
     caps.canonicalize()?;
     node.caps.check_grant(&caps)?;
-    let listen = node.listen.get().ok_or("cet agent n'accepte pas de connexion d'enfants")?;
+    let parent_addr = node.dial_addr(false)?;
+    let parent_cert = node.cert.get().cloned().ok_or("cet agent n'accepte pas de connexion d'enfants")?;
 
     let boot = Bootstrap {
         agent_id: format!("a-{}", &random_hex(1)[..20]),
@@ -463,7 +464,8 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
         capabilities: caps.clone(),
         parent_id: node.id.clone(),
         parent_name: node.name.clone(),
-        parent_url: format!("ws://{listen}/link"),
+        parent_addr,
+        parent_cert,
         token: random_hex(2),
         depth: node.depth + 1,
         target: "local".into(),

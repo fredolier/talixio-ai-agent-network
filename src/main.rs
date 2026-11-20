@@ -10,7 +10,7 @@ use talixio_agent::config::{ensure_private, prepare_state_dir, Bootstrap, RootCo
 use talixio_agent::model::Providers;
 use talixio_agent::node::Node;
 use talixio_agent::protocol::{ActivityEvent, NodeInfo};
-use talixio_agent::{agent, api, clean, link, random_hex, spawn};
+use talixio_agent::{agent, api, clean, link, random_hex, spawn, tls};
 
 #[derive(Parser)]
 #[command(name = "talixio-agent", version, about = "Agents IA autonomes en grappe")]
@@ -54,8 +54,15 @@ enum Command {
 #[derive(clap::Args)]
 struct Remote {
     /// Adresse de l'API du maître.
-    #[arg(long, env = "TALIXIO_URL", default_value = "http://127.0.0.1:7700")]
+    #[arg(long, env = "TALIXIO_URL", default_value = "https://127.0.0.1:7700")]
     url: String,
+    /// Empreinte du certificat du maître. Par défaut : lue dans .talixio/tls-fingerprint.
+    /// Avec `--public-cert`, le certificat est vérifié comme celui d'un site web ordinaire.
+    #[arg(long, env = "TALIXIO_TLS_FINGERPRINT")]
+    fingerprint: Option<String>,
+    /// Le maître présente un certificat d'une autorité reconnue : pas d'empreinte à épingler.
+    #[arg(long)]
+    public_cert: bool,
     /// Jeton de l'API. Par défaut : lu dans .talixio/api-token.
     #[arg(long, env = "TALIXIO_API_TOKEN", hide_env_values = true)]
     token: Option<String>,
@@ -111,8 +118,15 @@ async fn run_root(config: &Path) -> Result<()> {
     let providers = Providers::from_config(&cfg.models)?;
     let token = api_token(&cfg.state_dir)?;
     let (node, inbox) = Node::new_root(&cfg, providers).map_err(anyhow::Error::msg)?;
-    let addr = api::start_listener(node.clone(), cfg.listen, Some(token)).await?;
-    eprintln!("[{}] agent maître {} — API sur http://{addr}", node.name, node.id);
+    let identity = match &cfg.tls {
+        Some(files) => tls::from_files(&files.cert_file, &files.key_file)?,
+        None => tls::load_or_create(&cfg.state_dir)?,
+    };
+    std::fs::write(cfg.state_dir.join("tls-fingerprint"), &identity.fingerprint)?;
+    let fingerprint = identity.fingerprint.clone();
+    let addr = api::start_listener(node.clone(), cfg.listen, Some(token), identity).await?;
+    eprintln!("[{}] agent maître {} — API sur https://{addr}", node.name, node.id);
+    eprintln!("[{}] empreinte du certificat : {fingerprint}", node.name);
     eprintln!("[{}] jeton de l'API : {}", node.name, cfg.state_dir.join("api-token").display());
 
     tokio::spawn(link::run_child_monitor(node.clone()));
@@ -131,10 +145,10 @@ async fn run_child(state_dir: PathBuf) -> Result<()> {
     let state_dir = state_dir.canonicalize().context("dossier d'état")?;
     let (node, inbox) = Node::new_child(&boot, state_dir).map_err(anyhow::Error::msg)?;
     if node.caps.spawn.is_some() {
-        api::start_listener(node.clone(), ([127, 0, 0, 1], 0).into(), None).await?;
+        api::start_listener(node.clone(), ([127, 0, 0, 1], 0).into(), None, tls::ephemeral()?).await?;
         tokio::spawn(link::run_child_monitor(node.clone()));
     }
-    tokio::spawn(link::run_uplink(node.clone(), boot.parent_url.clone(), boot.token.clone()));
+    tokio::spawn(link::run_uplink(node.clone(), boot.parent_addr.clone(), boot.parent_cert.clone(), boot.token.clone()));
     tokio::spawn(link::run_tree_reporter(node.clone()));
     tokio::select! {
         _ = agent::run_agent(node.clone(), inbox) => Ok(()),
@@ -231,6 +245,19 @@ impl Remote {
             .context("jeton introuvable : passez --token, ou lancez la commande depuis le dossier du maître")
     }
 
+    /// Un client qui n'accepte que le certificat du maître.
+    fn http(&self) -> Result<reqwest::Client> {
+        if self.public_cert {
+            return Ok(reqwest::Client::new());
+        }
+        let fingerprint = match &self.fingerprint {
+            Some(fingerprint) => fingerprint.clone(),
+            None => std::fs::read_to_string(".talixio/tls-fingerprint")
+                .context("empreinte du certificat introuvable : passez --fingerprint, ou lancez la commande depuis le dossier du maître")?,
+        };
+        Ok(reqwest::Client::builder().use_preconfigured_tls(tls::pinned_client(&fingerprint)?).build()?)
+    }
+
     async fn call(&self, request: reqwest::RequestBuilder) -> Result<Value> {
         let response = request.bearer_auth(self.token()?).timeout(Duration::from_secs(30)).send().await?;
         let status = response.status();
@@ -242,10 +269,10 @@ impl Remote {
     }
 
     async fn get(&self, path: &str) -> Result<Value> {
-        self.call(reqwest::Client::new().get(format!("{}{path}", self.url.trim_end_matches('/')))).await
+        self.call(self.http()?.get(format!("{}{path}", self.url.trim_end_matches('/')))).await
     }
 
     async fn post(&self, path: &str, body: Value) -> Result<Value> {
-        self.call(reqwest::Client::new().post(format!("{}{path}", self.url.trim_end_matches('/'))).json(&body)).await
+        self.call(self.http()?.post(format!("{}{path}", self.url.trim_end_matches('/'))).json(&body)).await
     }
 }

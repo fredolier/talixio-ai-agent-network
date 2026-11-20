@@ -67,6 +67,10 @@ pub struct Node {
     pub activity: Option<ActivityLog>,
     /// Adresse où les enfants se connectent, une fois l'écoute ouverte.
     pub listen: OnceLock<SocketAddr>,
+    /// Empreinte du certificat TLS de cette écoute.
+    pub cert: OnceLock<String>,
+    /// Nom ou adresse annoncé aux enfants d'autres machines.
+    pub advertise: Option<String>,
     /// Signale que l'arbre a changé et doit être renvoyé au parent.
     pub tree_dirty: Notify,
     /// Où en est la mission confiée par le parent.
@@ -259,6 +263,8 @@ impl Node {
             activity: Some(ActivityLog::new(store.clone())),
             store,
             listen: OnceLock::new(),
+            cert: OnceLock::new(),
+            advertise: cfg.advertise.clone(),
             tree_dirty: Notify::new(),
             mission: Mutex::new(Mission::default()),
         };
@@ -298,6 +304,8 @@ impl Node {
             activity: None,
             store,
             listen: OnceLock::new(),
+            cert: OnceLock::new(),
+            advertise: None,
             tree_dirty: Notify::new(),
             mission: Mutex::new(Mission::default()),
         };
@@ -326,6 +334,25 @@ impl Node {
             capabilities: self.caps.clone(),
             children,
         }
+    }
+
+    /// L'adresse que doit joindre un enfant : sur cette machine (`remote` faux), ou depuis une autre.
+    pub fn dial_addr(&self, remote: bool) -> Result<String, String> {
+        let listen = self.listen.get().ok_or("cet agent n'accepte pas de connexion d'enfants")?;
+        let port = listen.port();
+        if !remote {
+            let ip = if listen.ip().is_unspecified() { std::net::Ipv4Addr::LOCALHOST.into() } else { listen.ip() };
+            return Ok(SocketAddr::new(ip, port).to_string());
+        }
+        if listen.ip().is_loopback() {
+            return Err("cet agent n'écoute que sur sa propre machine : un enfant distant ne pourrait pas le joindre (réglage `listen`)".into());
+        }
+        let host = match (&self.advertise, listen.ip().is_unspecified()) {
+            (Some(host), _) => host.clone(),
+            (None, false) => listen.ip().to_string(),
+            (None, true) => self.host.ips.first().cloned().ok_or("adresse de cette machine inconnue : réglage `advertise`")?,
+        };
+        Ok(if host.contains(':') && !host.starts_with('[') { format!("[{host}]:{port}") } else { format!("{host}:{port}") })
     }
 
     pub fn set_status(&self, status: Status) {

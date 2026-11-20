@@ -146,12 +146,16 @@ enum Ended {
 }
 
 /// Maintient le lien vers le parent, pour toute la vie de l'enfant.
-pub async fn run_uplink(node: Arc<Node>, url: String, token: String) {
+pub async fn run_uplink(node: Arc<Node>, addr: String, cert: String, token: String) {
+    let Ok(tls) = crate::tls::pinned_client(&cert) else {
+        node.terminate("empreinte du certificat du parent invalide", 2).await
+    };
+    let tls = tokio_rustls::TlsConnector::from(Arc::new(tls));
     let uplink = node.uplink.clone().expect("un enfant a un lien vers son parent");
     let mut lost_since = Instant::now();
     let mut backoff = Duration::from_millis(250);
     loop {
-        match session(&node, &uplink, &url, &token).await {
+        match session(&node, &uplink, &addr, &cert, &tls, &token).await {
             Ended::Dismissed(reason) => node.terminate(&reason, 0).await,
             Ended::Lost { was_connected } => {
                 if was_connected {
@@ -170,13 +174,26 @@ pub async fn run_uplink(node: Arc<Node>, url: String, token: String) {
     }
 }
 
-async fn session(node: &Arc<Node>, uplink: &Arc<Uplink>, url: &str, token: &str) -> Ended {
+async fn session(
+    node: &Arc<Node>,
+    uplink: &Arc<Uplink>,
+    addr: &str,
+    cert: &str,
+    tls: &tokio_rustls::TlsConnector,
+    token: &str,
+) -> Ended {
     let lost = Ended::Lost { was_connected: false };
     let config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
         .max_message_size(Some(MAX_FRAME))
         .max_frame_size(Some(MAX_FRAME));
-    let connect = tokio_tungstenite::connect_async_with_config(url, Some(config), false);
-    let Ok(Ok((ws, _))) = tokio::time::timeout(HANDSHAKE, connect).await else { return lost };
+    // connexion chiffrée : seul le certificat attendu est accepté, quel que soit le nom présenté
+    let connect = async {
+        let tcp = tokio::net::TcpStream::connect(addr).await.ok()?;
+        let name = rustls::pki_types::ServerName::try_from(crate::tls::NAME).ok()?;
+        let stream = tls.connect(name, tcp).await.ok()?;
+        tokio_tungstenite::client_async_with_config(format!("wss://{addr}/link"), stream, Some(config)).await.ok()
+    };
+    let Ok(Some((ws, _))) = tokio::time::timeout(HANDSHAKE, connect).await else { return lost };
     let (mut sink, mut stream) = ws.split();
 
     // présentation : le parent doit prouver qui il est avant que l'enfant ne lui dise quoi que ce soit
@@ -188,10 +205,10 @@ async fn session(node: &Arc<Node>, uplink: &Arc<Uplink>, url: &str, token: &str)
         let Some(Ok(TMessage::Text(text))) = stream.next().await else { return None };
         // un refus à ce stade ne prouve rien sur son auteur : il ne vaut pas ordre d'arrêt
         let Some(Msg::Challenge { nonce: theirs, proof }) = decode(text.as_str()).map(|f| f.msg) else { return None };
-        if theirs.len() > 128 || !secret_eq(&proof, &crate::proof(token, "parent", [&mine, &theirs, &node.id])) {
+        if theirs.len() > 128 || !secret_eq(&proof, &crate::proof(token, "parent", [&mine, &theirs, &node.id, cert])) {
             return None;
         }
-        let proof = crate::proof(token, "child", [&mine, &theirs, &node.id]);
+        let proof = crate::proof(token, "child", [&mine, &theirs, &node.id, cert]);
         if !put::<_, TMessage>(&mut sink, &plain(Msg::Proof { proof, node: Box::new(node.snapshot()) })).await {
             return None;
         }
@@ -339,7 +356,8 @@ pub async fn serve_child(node: Arc<Node>, socket: WebSocket, permit: tokio::sync
         let token = node.children.lock().unwrap().get(&agent_id).map(|c| c.token.clone());
         let Some(token) = token.filter(|_| theirs.len() <= 128) else { return Err(Some(REFUSED)) };
         let mine = random_hex(1);
-        let proof = crate::proof(&token, "parent", [&theirs, &mine, &agent_id]);
+        let cert = node.cert.get().map(String::as_str).unwrap_or_default();
+        let proof = crate::proof(&token, "parent", [&theirs, &mine, &agent_id, cert]);
         if !put::<_, WsMessage>(&mut sink, &plain(Msg::Challenge { nonce: mine.clone(), proof })).await {
             return Err(None);
         }
@@ -347,7 +365,7 @@ pub async fn serve_child(node: Arc<Node>, socket: WebSocket, permit: tokio::sync
         let Some(Msg::Proof { proof, node: info }) = decode_quiet(text.as_str()).map(|f| f.msg) else {
             return Err(Some(REFUSED));
         };
-        if !secret_eq(&proof, &crate::proof(&token, "child", [&theirs, &mine, &agent_id])) {
+        if !secret_eq(&proof, &crate::proof(&token, "child", [&theirs, &mine, &agent_id, cert])) {
             return Err(Some(REFUSED));
         }
         Ok((agent_id, info))

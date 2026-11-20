@@ -27,7 +27,7 @@ ANTHROPIC_API_KEY=... target/release/talixio-agent root --config talixio.toml
 
 ## Piloter
 
-Depuis le dossier du maître (le jeton de l'API est lu dans `.talixio/api-token`) :
+Depuis le dossier du maître (le jeton de l'API et l'empreinte de son certificat sont lus dans `.talixio/`) :
 
 ```bash
 talixio-agent send "Audite le dossier /srv/projet et dis-moi ce qui cloche."
@@ -56,7 +56,6 @@ cargo test
 ## Limites actuelles
 
 - Les enfants sont lancés sur la machine du parent seulement ; Docker et SSH viennent ensuite.
-- Le lien n'est pas chiffré : l'écoute hors de l'interface locale est refusée.
 - Le cloisonnement est fait par le process lui-même, pas encore par le système d'exploitation :
   une commande autorisée s'exécute avec tous les droits du compte. N'autoriser que des commandes
   inoffensives, et lancer le maître sous un compte dédié sans privilèges (voir la spécification, §7).

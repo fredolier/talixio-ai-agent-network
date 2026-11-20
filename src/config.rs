@@ -21,8 +21,14 @@ pub struct RootConfig {
     pub instructions: String,
     /// Alias du modèle du maître, parmi `models`.
     pub model: String,
+    /// Adresse d'écoute : l'API et le lien des enfants, en TLS. Par défaut, la machine seule.
     #[serde(default = "default_listen")]
     pub listen: SocketAddr,
+    /// Nom ou adresse par lequel les enfants d'autres machines joignent le maître. Par défaut :
+    /// l'adresse d'écoute, ou l'adresse de sortie de la machine si l'écoute est sur toutes les interfaces.
+    pub advertise: Option<String>,
+    /// Certificat TLS fourni par l'exploitant. Absent : le maître fabrique le sien.
+    pub tls: Option<TlsFiles>,
     #[serde(default = "default_state_dir")]
     pub state_dir: PathBuf,
     #[serde(default)]
@@ -30,6 +36,15 @@ pub struct RootConfig {
     pub models: BTreeMap<String, ModelConfig>,
     #[serde(default)]
     pub capabilities: Capabilities,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TlsFiles {
+    /// Certificat (et sa chaîne), au format PEM.
+    pub cert_file: PathBuf,
+    /// Clé privée, au format PEM, lisible par son seul propriétaire.
+    pub key_file: PathBuf,
 }
 
 #[derive(Debug, Deserialize)]
@@ -112,13 +127,16 @@ impl RootConfig {
         }
         // les dossiers accordés sont figés sur leur chemin réel, une fois pour toutes
         cfg.capabilities.canonicalize().map_err(|e| anyhow::anyhow!("[capabilities] : {e}"))?;
-        ensure_loopback(&cfg.listen)?;
+        if let Some(host) = &cfg.advertise {
+            check_host(host)?;
+        }
         Ok(cfg)
     }
 
     /// Ce que les outils des agents ne doivent jamais atteindre : les fichiers de clés.
     pub fn secret_paths(&self) -> Vec<PathBuf> {
-        self.models.values().filter_map(|m| m.api_key_file.as_ref()).filter_map(|p| p.canonicalize().ok()).collect()
+        let keys = self.models.values().filter_map(|m| m.api_key_file.as_ref());
+        keys.chain(self.tls.as_ref().map(|t| &t.key_file)).filter_map(|p| p.canonicalize().ok()).collect()
     }
 }
 
@@ -155,10 +173,14 @@ pub fn prepare_state_dir(path: &Path) -> Result<PathBuf> {
     path.canonicalize().with_context(|| format!("{}", path.display()))
 }
 
-/// Tant que le lien n'est pas chiffré, on n'écoute que sur la machine elle-même.
-pub fn ensure_loopback(addr: &SocketAddr) -> Result<()> {
-    if !addr.ip().is_loopback() {
-        bail!("écoute sur {addr} refusée : sans chiffrement, seule l'interface locale (127.0.0.1) est permise");
+/// Un nom de machine ou une adresse, sans rien qui puisse passer pour une option ou un morceau de commande.
+pub fn check_host(host: &str) -> Result<()> {
+    let ok = !host.is_empty()
+        && host.len() <= 253
+        && !host.starts_with('-')
+        && host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '_'));
+    if !ok {
+        bail!("nom de machine invalide : « {host} »");
     }
     Ok(())
 }
@@ -174,7 +196,10 @@ pub struct Bootstrap {
     pub capabilities: Capabilities,
     pub parent_id: String,
     pub parent_name: String,
-    pub parent_url: String,
+    /// Où joindre le parent : `machine:port`.
+    pub parent_addr: String,
+    /// Empreinte du certificat TLS du parent : l'enfant refuse tout autre correspondant.
+    pub parent_cert: String,
     /// Secret partagé avec le parent. Il ne circule jamais sur le lien : chacun prouve qu'il le détient.
     pub token: String,
     pub depth: u32,
