@@ -47,6 +47,15 @@ ANTHROPIC_API_KEY=... target/release/talixio-agent root --config talixio.toml
 
 ## Piloter
 
+### Dans un navigateur
+
+Ouvrir l'adresse du maître (`https://127.0.0.1:7700/` par défaut) et saisir le jeton de l'API
+(`.talixio/api-token`). Sur un téléphone, la page s'installe comme une application.
+
+![La grappe](docs/images/interface-grappe.png)
+
+### En ligne de commande
+
 Depuis le dossier du maître (le jeton de l'API et l'empreinte de son certificat sont lus dans `.talixio/`) :
 
 ```bash

@@ -164,6 +164,17 @@ max_depth = 1
     assert!(reqwest::get(format!("http://127.0.0.1:{port}/api/health")).await.is_err());
     assert!(reqwest::get(format!("https://127.0.0.1:{port}/api/health")).await.is_err());
 
+    // l'interface web : servie sans jeton, enfermée par sa politique de contenu, sans secret dedans
+    let page = api.http.get(format!("{}/", api.base)).send().await.unwrap();
+    assert_eq!(page.status(), 200);
+    let csp = page.headers()["content-security-policy"].to_str().unwrap().to_string();
+    assert!(csp.contains("default-src 'none'") && csp.contains("frame-ancestors 'none'") && !csp.contains("unsafe"));
+    let html = page.text().await.unwrap();
+    assert!(html.contains("/app.js") && !html.contains(TOKEN));
+    for path in ["/app.js", "/app.css", "/icon.svg", "/manifest.webmanifest"] {
+        assert_eq!(api.http.get(format!("{}{path}", api.base)).send().await.unwrap().status(), 200, "{path}");
+    }
+
     // les notes de version, pour l'interface
     let notes = api.get("/api/releases").await;
     assert_eq!(notes["version"], env!("CARGO_PKG_VERSION"));

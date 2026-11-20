@@ -48,6 +48,11 @@ pub async fn start_listener(
     let mut router = Router::new().route("/link", get(link));
     if api_token.is_some() {
         router = router
+            .route("/", get(|| async { asset("text/html; charset=utf-8", include_str!("../web/index.html")) }))
+            .route("/app.js", get(|| async { asset("text/javascript; charset=utf-8", include_str!("../web/app.js")) }))
+            .route("/app.css", get(|| async { asset("text/css; charset=utf-8", include_str!("../web/app.css")) }))
+            .route("/icon.svg", get(|| async { asset("image/svg+xml", include_str!("../web/icon.svg")) }))
+            .route("/manifest.webmanifest", get(|| async { asset("application/manifest+json", include_str!("../web/manifest.webmanifest")) }))
             .route("/api/health", get(|| async { Json(json!({ "ok": true })) }))
             .route("/api/tree", get(tree))
             .route("/api/releases", get(releases))
@@ -70,6 +75,27 @@ pub async fn start_listener(
         }
     });
     Ok(local)
+}
+
+/// Ce que la page a le droit de faire : charger ses propres fichiers et appeler sa propre API.
+/// Ni script ni style en ligne, aucune ressource d'ailleurs, jamais dans un cadre.
+const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; \
+                   manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+
+/// Un fichier de l'interface web, embarqué dans l'exécutable. Rien de secret : servi sans jeton.
+fn asset(content_type: &'static str, body: &'static str) -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, content_type),
+            (header::CONTENT_SECURITY_POLICY, CSP),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::REFERRER_POLICY, "no-referrer"),
+            (header::CACHE_CONTROL, "no-cache"),
+            (header::STRICT_TRANSPORT_SECURITY, "max-age=31536000"),
+        ],
+        body,
+    )
+        .into_response()
 }
 
 /// Les notes de version, pour l'interface : la version qui tourne, puis toutes les notes.

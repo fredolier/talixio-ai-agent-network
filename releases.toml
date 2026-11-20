@@ -7,6 +7,28 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.5.0"
+date = "2026-11-20"
+title = "L'interface"
+summary = "Le maître sert son interface web : la grappe en direct, le dialogue, le journal et ces notes de version. Elle tient dans l'exécutable et s'installe sur un téléphone."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Interface web à l'adresse du maître (`https://…:7700/`) : arbre des agents avec leur état, leurs droits et leur budget ; dialogue avec le maître ; journal filtrable ; arrêt d'un agent."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Utilisable sur téléphone et installable comme application (PWA) ; thème clair ou sombre selon l'appareil."
+
+[[release.changes]]
+kind = "sécurité"
+text = "La page ne charge que ses propres fichiers et n'appelle que sa propre API (politique de contenu stricte, jamais dans un cadre). Ce qu'écrit un agent n'est jamais interprété comme du HTML. Le jeton reste demandé pour toute donnée."
+
+[[release.changes]]
+kind = "attention"
+text = "Le certificat fabriqué par le maître déclenche un avertissement du navigateur : comparer l'empreinte affichée au démarrage, ou fournir un certificat reconnu (`[tls]`). Un téléphone n'installe l'application qu'avec un certificat reconnu."
+
+[[release]]
 version = "0.4.0"
 date = "2026-11-20"
 title = "Sortir de la machine"

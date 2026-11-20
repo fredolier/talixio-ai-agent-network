@@ -42,7 +42,7 @@ Exemples visés :
 
 | N° | Exigence | État |
 |---|---|---|
-| A1 | Un seul exécutable Rust et des fichiers de configuration, rien d'autre à déployer. L'interface web fait exception, mais elle est embarquée dans l'exécutable du maître. | 🟡 exécutable seul fait (5,2 Mo, SQLite et TLS compris) ; interface à faire |
+| A1 | Un seul exécutable Rust et des fichiers de configuration, rien d'autre à déployer. L'interface web fait exception, mais elle est embarquée dans l'exécutable du maître. | 🟡 exécutable seul fait (5,2 Mo, SQLite et TLS compris) ; interface embarquée (5 fichiers statiques, sans étape de construction) |
 | A2 | Tourne sur Linux, macOS et Windows. | 🟡 code portable ; testé sous Linux seulement |
 | A3 | Se connecte à n'importe quel modèle : Anthropic, et tout serveur compatible OpenAI (OpenAI, Gemini, Mistral, Ollama, vLLM, OpenRouter), comme dans Talixio AI Assistant. | ✅ |
 | A4 | Exécutable de petite taille. | ✅ profil de compilation optimisé en taille |
@@ -138,10 +138,10 @@ Demandé le 2026-11-20. Rien n'est codé.
 | N° | Exigence | État |
 |---|---|---|
 | P1 | API JSON au niveau du maître, utilisable par Talixio AI Assistant. | ✅ |
-| P2 | Interface web soignée (shadcn/ui) : la grappe en direct, chaque agent avec nom, rôle, machine, IP, état ; le fil des messages ; le dialogue avec le maître. | ⬜ |
+| P2 | Interface web soignée (shadcn/ui) : la grappe en direct, chaque agent avec nom, rôle, machine, IP, état ; le fil des messages ; le dialogue avec le maître. | 🟡 servie par le maître à `/` : grappe, détail et arrêt d'un agent, dialogue, journal, nouveautés. Aux couleurs de shadcn/ui mais écrite à la main, sans React ni étape de construction (décision 22). Restent : budgets, validations, réglages |
 | P3 | Vue de la grappe et du journal en ligne de commande. | ✅ |
-| P5 | Notes de version, tenues à chaque version, lisibles en ligne de commande et dans l'interface web. | 🟡 `releases.toml` embarqué, `talixio-agent releases`, `GET /api/releases` ; l'écran viendra avec l'interface |
-| P4 | Pilotage depuis un téléphone (Android) : discuter avec le maître, voir la grappe, être prévenu. | ❓ voir Q9 |
+| P5 | Notes de version, tenues à chaque version, lisibles en ligne de commande et dans l'interface web. | 🟡 `releases.toml` embarqué, `talixio-agent releases`, `GET /api/releases` ; écran « Nouveautés » de l'interface |
+| P4 | Pilotage depuis un téléphone (Android) : discuter avec le maître, voir la grappe, être prévenu. | 🟡 l'interface s'adapte au téléphone et porte un manifeste d'application ; l'installation demande un certificat reconnu ; pas encore de notification |
 
 ## 4. Décisions
 
@@ -213,6 +213,14 @@ Demandé le 2026-11-20. Rien n'est codé.
     musl est plus lent sous forte charge (sans effet pour un agent, qui attend surtout son
     modèle), et la résolution de noms ignore NSS (pas de LDAP ni de mDNS ; `/etc/hosts` et DNS
     seulement).
+22. **L'interface web est faite de fichiers statiques embarqués** (`web/`), sans React ni étape
+    de construction : l'exécutable reste petit et se compile avec `cargo` seul. Elle reprend
+    l'allure de shadcn/ui. Elle est servie sans jeton (elle ne contient rien de secret) ; toute
+    donnée passe par l'API, avec le jeton saisi par l'utilisateur, gardé dans le navigateur
+    (session, ou appareil s'il le demande). Politique de contenu stricte : aucun script ni style
+    en ligne, aucune ressource extérieure, jamais dans un cadre ; tout texte venu de la grappe
+    est posé comme du texte, jamais comme du HTML. Si l'interface grossit au point de justifier
+    React et shadcn/ui, le résultat construit prendra la place de ces fichiers.
 20. **Les notes de version ont une source unique**, `releases.toml`, embarquée dans l'exécutable.
     Chaque version y ajoute une entrée ; un test refuse une version sans note.
 
@@ -274,6 +282,7 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 
 | Méthode | Chemin | Rôle |
 |---|---|---|
+| GET | `/`, `/app.js`, `/app.css`, `/icon.svg`, `/manifest.webmanifest` | L'interface web (sans jeton). |
 | GET | `/api/health` | Vie du maître (sans jeton). |
 | GET | `/api/tree` | La grappe : chaque agent avec nom, rôle, état, machine, OS, IP, droits, tokens, enfants. |
 | GET | `/api/activity?after=N&limit=M` | Le journal après l'événement N. |
