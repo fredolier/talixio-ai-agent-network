@@ -6,11 +6,11 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 
-use talixio_agent::config::{Bootstrap, RootConfig};
+use talixio_agent::config::{ensure_private, prepare_state_dir, Bootstrap, RootConfig};
 use talixio_agent::model::Providers;
 use talixio_agent::node::Node;
 use talixio_agent::protocol::{ActivityEvent, NodeInfo};
-use talixio_agent::{agent, api, link, random_hex};
+use talixio_agent::{agent, api, clean, link, random_hex, spawn};
 
 #[derive(Parser)]
 #[command(name = "talixio-agent", version, about = "Agents IA autonomes en grappe")]
@@ -85,8 +85,29 @@ async fn main() -> Result<()> {
     }
 }
 
+/// Attend une demande d'arrêt : Ctrl-C, ou, sous Unix, SIGTERM (arrêt de service) ou SIGHUP.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        let (Ok(mut term), Ok(mut hup)) = (signal(SignalKind::terminate()), signal(SignalKind::hangup())) else {
+            let _ = tokio::signal::ctrl_c().await;
+            return;
+        };
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = term.recv() => {}
+            _ = hup.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = tokio::signal::ctrl_c().await;
+}
+
 async fn run_root(config: &Path) -> Result<()> {
-    let cfg = RootConfig::load(config)?;
+    spawn::harden_process();
+    let mut cfg = RootConfig::load(config)?;
+    cfg.state_dir = prepare_state_dir(&cfg.state_dir)?;
     let providers = Providers::from_config(&cfg.models)?;
     let token = api_token(&cfg.state_dir)?;
     let (node, inbox) = Node::new_root(&cfg, providers);
@@ -97,15 +118,17 @@ async fn run_root(config: &Path) -> Result<()> {
     tokio::spawn(link::run_child_monitor(node.clone()));
     tokio::spawn(print_activity(node.clone()));
     tokio::spawn(agent::run_agent(node.clone(), inbox));
-    tokio::signal::ctrl_c().await?;
+    shutdown_signal().await;
     node.terminate("arrêt du maître", 0).await
 }
 
 async fn run_child(state_dir: PathBuf) -> Result<()> {
     let mut raw = String::new();
     std::io::stdin().read_to_string(&mut raw).context("lecture des consignes")?;
-    let boot: Bootstrap = serde_json::from_str(&raw).context("consignes de démarrage invalides")?;
-    boot.capabilities.validate().map_err(anyhow::Error::msg)?;
+    spawn::harden_process();
+    let mut boot: Bootstrap = serde_json::from_str(&raw).context("consignes de démarrage invalides")?;
+    boot.capabilities.canonicalize().map_err(anyhow::Error::msg)?;
+    let state_dir = state_dir.canonicalize().context("dossier d'état")?;
     let (node, inbox) = Node::new_child(&boot, state_dir);
     if node.caps.spawn.is_some() {
         api::start_listener(node.clone(), ([127, 0, 0, 1], 0).into(), None).await?;
@@ -113,8 +136,10 @@ async fn run_child(state_dir: PathBuf) -> Result<()> {
     }
     tokio::spawn(link::run_uplink(node.clone(), boot.parent_url.clone(), boot.token.clone()));
     tokio::spawn(link::run_tree_reporter(node.clone()));
-    agent::run_agent(node, inbox).await;
-    Ok(())
+    tokio::select! {
+        _ = agent::run_agent(node.clone(), inbox) => Ok(()),
+        _ = shutdown_signal() => node.terminate("signal d'arrêt", 0).await,
+    }
 }
 
 /// Le jeton de l'API : celui de l'environnement, sinon un jeton créé une fois et gardé dans le dossier d'état.
@@ -122,16 +147,19 @@ fn api_token(state_dir: &Path) -> Result<String> {
     if let Some(token) = std::env::var("TALIXIO_API_TOKEN").ok().filter(|t| t.len() >= 16) {
         return Ok(token);
     }
-    std::fs::create_dir_all(state_dir)?;
     let path = state_dir.join("api-token");
-    if let Ok(existing) = std::fs::read_to_string(&path) {
-        if existing.trim().len() >= 16 {
-            return Ok(existing.trim().to_string());
+    if path.symlink_metadata().is_ok() {
+        // un jeton déjà là n'est repris que s'il est bien à nous, et à nous seuls
+        ensure_private(&path)?;
+        let existing = std::fs::read_to_string(&path)?;
+        if existing.trim().len() < 32 {
+            bail!("{} ne contient pas un jeton valide : supprimez-le", path.display());
         }
+        return Ok(existing.trim().to_string());
     }
     let token = random_hex(2);
     let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -156,8 +184,9 @@ async fn print_activity(node: std::sync::Arc<Node>) {
 }
 
 fn format_event(event: &ActivityEvent) -> String {
-    let text: String = event.text.chars().take(600).collect();
-    format!("[{}] {} : {}", event.agent_name, event.kind, text.replace('\n', " ⏎ "))
+    // rien de ce qu'un agent écrit ne doit pouvoir piloter le terminal qui l'affiche
+    let text = clean(&event.text.replace('\n', " ⏎ "), 600, false);
+    format!("[{}] {} : {}", clean(&event.agent_name, 80, false), clean(&event.kind, 32, false), text)
 }
 
 fn print_tree(node: &NodeInfo, indent: usize) {

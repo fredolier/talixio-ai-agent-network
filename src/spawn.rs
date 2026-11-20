@@ -22,6 +22,31 @@ pub fn apply_safe_env(command: &mut Command) {
             command.env(name, value);
         }
     }
+    // git exécute ce que sa configuration lui dit : celle de la machine et du compte est ignorée
+    command.env("GIT_CONFIG_NOSYSTEM", "1").env("GIT_CONFIG_GLOBAL", if cfg!(windows) { "NUL" } else { "/dev/null" });
+}
+
+/// Tue un groupe de process entier : la commande et tout ce qu'elle a lancé.
+pub fn kill_group(group: i32) {
+    #[cfg(unix)]
+    if group > 1 {
+        // SAFETY: simple appel système ; un groupe disparu renvoie une erreur sans autre effet.
+        unsafe {
+            libc::killpg(group, libc::SIGKILL);
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = group;
+}
+
+/// Ferme la mémoire et l'environnement du process aux autres process du même compte
+/// (`/proc/<pid>/environ`, `ptrace`) : c'est là que vivent les clés chez le maître.
+pub fn harden_process() {
+    #[cfg(target_os = "linux")]
+    // SAFETY: simple appel système, sans pointeur.
+    unsafe {
+        libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0);
+    }
 }
 
 /// Lance le même exécutable en mode enfant. Les consignes, jeton compris, passent par

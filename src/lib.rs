@@ -26,6 +26,29 @@ pub fn random_hex(uuids: usize) -> String {
     (0..uuids).map(|_| uuid::Uuid::new_v4().simple().to_string()).collect()
 }
 
+/// Preuve qu'on détient un secret, sans le montrer : HMAC-SHA256 du rôle (`parent` ou
+/// `child`) et des éléments de l'échange, chacun précédé de sa longueur.
+pub fn proof(secret: &str, side: &str, parts: [&str; 3]) -> String {
+    use hmac::{Hmac, Mac};
+    let mut mac = Hmac::<sha2::Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC accepte toute taille de clé");
+    for part in std::iter::once(side).chain(parts) {
+        mac.update(&(part.len() as u64).to_be_bytes());
+        mac.update(part.as_bytes());
+    }
+    mac.finalize().into_bytes().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Texte venu d'ailleurs, rendu inoffensif à l'affichage : sans caractères de contrôle
+/// (sauts de ligne gardés si `multiline`), et coupé à `max` caractères.
+pub fn clean(text: &str, max: usize, multiline: bool) -> String {
+    let keep = |c: &char| !c.is_control() || (multiline && (*c == '\n' || *c == '\t'));
+    let mut out: String = text.chars().filter(keep).take(max).collect();
+    if text.chars().filter(keep).nth(max).is_some() {
+        out.push_str("… [tronqué]");
+    }
+    out
+}
+
 /// Comparaison en temps constant, pour les jetons.
 pub fn secret_eq(a: &str, b: &str) -> bool {
     let (a, b) = (a.as_bytes(), b.as_bytes());

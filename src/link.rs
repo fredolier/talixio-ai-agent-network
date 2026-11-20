@@ -1,6 +1,7 @@
 //! Le lien entre un enfant et son parent.
 //!
-//! L'enfant se connecte au parent (WebSocket) et prouve qui il est par son jeton. Chaque
+//! L'enfant se connecte au parent (WebSocket). Chacun prouve à l'autre qu'il détient leur
+//! secret partagé, sans jamais l'envoyer (défi-réponse HMAC, dans les deux sens). Chaque
 //! côté surveille l'autre par des battements. Sans parent, l'enfant se met en veille ;
 //! si le parent ne revient pas, il s'éteint avec toute sa descendance.
 
@@ -10,18 +11,41 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::extract::ws::{Message as WsMessage, WebSocket};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{Sink, SinkExt, StreamExt};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_tungstenite::tungstenite::Message as TMessage;
 
 use crate::model::{ModelRequest, ModelResponse};
-use crate::node::{Input, Node};
-use crate::protocol::{Frame, Msg, Outbox, ReportKind, Status};
+use crate::node::{Input, Node, MAX_REPORTS};
+use crate::protocol::{Frame, Msg, NodeInfo, Outbox, ReportKind, Status};
 use crate::{now_ms, random_hex, secret_eq};
 
+/// Durée maximale de toute la présentation, de la première trame à l'accueil.
 const HANDSHAKE: Duration = Duration::from_secs(10);
+/// Un envoi qui n'aboutit pas dans ce délai : le lien est considéré comme perdu.
+const SEND_TIMEOUT: Duration = Duration::from_secs(30);
 /// Taille maximale d'une trame : une conversation entière y passe à chaque appel de modèle.
-pub const MAX_FRAME: usize = 64 * 1024 * 1024;
+pub const MAX_FRAME: usize = 16 * 1024 * 1024;
+/// Taille maximale de toute autre trame venue d'un enfant (arbre, compte rendu, journal).
+const MAX_SMALL_FRAME: usize = 1024 * 1024;
+/// Un arbre déclaré par un enfant : nombre d'agents et profondeur au plus.
+const MAX_TREE_NODES: usize = 2000;
+const MAX_TREE_DEPTH: usize = 32;
+/// Longueur maximale d'un compte rendu d'enfant, en caractères.
+const MAX_REPORT_CHARS: usize = 20_000;
+
+/// Envoie une trame, sans attendre indéfiniment un correspondant qui ne lit plus.
+async fn put<S, M>(sink: &mut S, frame: &Frame) -> bool
+where
+    S: Sink<M> + Unpin,
+    M: From<String>,
+{
+    matches!(tokio::time::timeout(SEND_TIMEOUT, sink.send(M::from(encode(frame)))).await, Ok(Ok(())))
+}
+
+fn plain(msg: Msg) -> Frame {
+    Frame { seq: None, msg }
+}
 
 // ---------------------------------------------------------------------------------------
 // Côté enfant
@@ -155,16 +179,32 @@ async fn session(node: &Arc<Node>, uplink: &Arc<Uplink>, url: &str, token: &str)
     let Ok(Ok((ws, _))) = tokio::time::timeout(HANDSHAKE, connect).await else { return lost };
     let (mut sink, mut stream) = ws.split();
 
-    let hello = Msg::Hello { agent_id: node.id.clone(), token: token.to_string(), node: Box::new(node.snapshot()) };
-    if sink.send(TMessage::Text(encode(&Frame { seq: None, msg: hello }).into())).await.is_err() {
-        return lost;
-    }
-    match tokio::time::timeout(HANDSHAKE, stream.next()).await {
-        Ok(Some(Ok(TMessage::Text(text)))) => match decode(text.as_str()).map(|f| f.msg) {
-            Some(Msg::Welcome) => {}
-            Some(Msg::Rejected { reason }) => return Ended::Dismissed(format!("refusé par le parent : {reason}")),
-            _ => return lost,
-        },
+    // présentation : le parent doit prouver qui il est avant que l'enfant ne lui dise quoi que ce soit
+    let handshake = async {
+        let mine = random_hex(1);
+        if !put::<_, TMessage>(&mut sink, &plain(Msg::Hello { agent_id: node.id.clone(), nonce: mine.clone() })).await {
+            return None;
+        }
+        let Some(Ok(TMessage::Text(text))) = stream.next().await else { return None };
+        // un refus à ce stade ne prouve rien sur son auteur : il ne vaut pas ordre d'arrêt
+        let Some(Msg::Challenge { nonce: theirs, proof }) = decode(text.as_str()).map(|f| f.msg) else { return None };
+        if theirs.len() > 128 || !secret_eq(&proof, &crate::proof(token, "parent", [&mine, &theirs, &node.id])) {
+            return None;
+        }
+        let proof = crate::proof(token, "child", [&mine, &theirs, &node.id]);
+        if !put::<_, TMessage>(&mut sink, &plain(Msg::Proof { proof, node: Box::new(node.snapshot()) })).await {
+            return None;
+        }
+        let Some(Ok(TMessage::Text(text))) = stream.next().await else { return None };
+        match decode(text.as_str()).map(|f| f.msg) {
+            Some(Msg::Welcome) => Some(Ok(())),
+            Some(Msg::Rejected { reason }) => Some(Err(crate::clean(&reason, 200, false))),
+            _ => None,
+        }
+    };
+    match tokio::time::timeout(HANDSHAKE, handshake).await {
+        Ok(Some(Ok(()))) => {}
+        Ok(Some(Err(reason))) => return Ended::Dismissed(format!("refusé par le parent : {reason}")),
         _ => return lost,
     }
 
@@ -187,7 +227,7 @@ async fn session(node: &Arc<Node>, uplink: &Arc<Uplink>, url: &str, token: &str)
     let mut backlog = backlog.into_iter();
     'link: loop {
         if let Some(frame) = backlog.next() {
-            if sink.send(TMessage::Text(encode(&frame).into())).await.is_err() {
+            if !put::<_, TMessage>(&mut sink, &frame).await {
                 break;
             }
             continue;
@@ -198,7 +238,7 @@ async fn session(node: &Arc<Node>, uplink: &Arc<Uplink>, url: &str, token: &str)
                     last_rx = Instant::now();
                     let Some(frame) = decode(text.as_str()) else { continue };
                     for reply in child_receive(node, uplink, frame, &mut ended) {
-                        if sink.send(TMessage::Text(encode(&reply).into())).await.is_err() {
+                        if !put::<_, TMessage>(&mut sink, &reply).await {
                             break 'link;
                         }
                     }
@@ -210,7 +250,7 @@ async fn session(node: &Arc<Node>, uplink: &Arc<Uplink>, url: &str, token: &str)
                 Some(Ok(_)) => last_rx = Instant::now(),
             },
             Some(frame) = rx.recv() => {
-                if sink.send(TMessage::Text(encode(&frame).into())).await.is_err() {
+                if !put::<_, TMessage>(&mut sink, &frame).await {
                     break;
                 }
             }
@@ -218,7 +258,7 @@ async fn session(node: &Arc<Node>, uplink: &Arc<Uplink>, url: &str, token: &str)
                 if last_rx.elapsed() >= node.timing.suspend_after() {
                     break;
                 }
-                if sink.send(TMessage::Text(encode(&Frame { seq: None, msg: Msg::Ping }).into())).await.is_err() {
+                if !put::<_, TMessage>(&mut sink, &plain(Msg::Ping)).await {
                     break;
                 }
             }
@@ -284,45 +324,67 @@ pub async fn run_tree_reporter(node: Arc<Node>) {
 
 static CONNECTION: AtomicU64 = AtomicU64::new(1);
 
-/// Sert la connexion d'un enfant, du premier message à la coupure.
-pub async fn serve_child(node: Arc<Node>, socket: WebSocket) {
+/// Sert la connexion d'un enfant, du premier message à la coupure. `permit` : la place
+/// occupée parmi les présentations en cours, rendue dès que l'enfant est reconnu ou refusé.
+pub async fn serve_child(node: Arc<Node>, socket: WebSocket, permit: tokio::sync::OwnedSemaphorePermit) {
     let (mut sink, mut stream) = socket.split();
-    let reject = |reason: &str| {
-        WsMessage::Text(encode(&Frame { seq: None, msg: Msg::Rejected { reason: reason.to_string() } }).into())
-    };
+    const REFUSED: &str = "présentation refusée";
 
-    // la première trame doit prouver l'identité de l'enfant
-    let first = match tokio::time::timeout(HANDSHAKE, stream.next()).await {
-        Ok(Some(Ok(WsMessage::Text(text)))) => decode(text.as_str()),
-        _ => None,
+    // présentation : rien n'est cru, ni journalisé, tant que l'enfant n'a pas prouvé qui il est
+    let handshake = async {
+        let Some(Ok(WsMessage::Text(text))) = stream.next().await else { return Err(None) };
+        let Some(Msg::Hello { agent_id, nonce: theirs }) = decode_quiet(text.as_str()).map(|f| f.msg) else {
+            return Err(None);
+        };
+        let token = node.children.lock().unwrap().get(&agent_id).map(|c| c.token.clone());
+        let Some(token) = token.filter(|_| theirs.len() <= 128) else { return Err(Some(REFUSED)) };
+        let mine = random_hex(1);
+        let proof = crate::proof(&token, "parent", [&theirs, &mine, &agent_id]);
+        if !put::<_, WsMessage>(&mut sink, &plain(Msg::Challenge { nonce: mine.clone(), proof })).await {
+            return Err(None);
+        }
+        let Some(Ok(WsMessage::Text(text))) = stream.next().await else { return Err(None) };
+        let Some(Msg::Proof { proof, node: info }) = decode_quiet(text.as_str()).map(|f| f.msg) else {
+            return Err(Some(REFUSED));
+        };
+        if !secret_eq(&proof, &crate::proof(&token, "child", [&theirs, &mine, &agent_id])) {
+            return Err(Some(REFUSED));
+        }
+        Ok((agent_id, info))
     };
-    let Some(Frame { msg: Msg::Hello { agent_id, token, node: info }, .. }) = first else {
-        let _ = sink.send(reject("présentation attendue")).await;
-        return;
+    let (agent_id, info) = match tokio::time::timeout(HANDSHAKE, handshake).await {
+        Ok(Ok(proven)) => proven,
+        Ok(Err(Some(reason))) => {
+            let _ = put::<_, WsMessage>(&mut sink, &plain(Msg::Rejected { reason: reason.into() })).await;
+            return;
+        }
+        _ => return,
     };
+    drop(permit);
+
     let (tx, mut rx) = mpsc::unbounded_channel::<Frame>();
     let conn_id = CONNECTION.fetch_add(1, Ordering::Relaxed);
     let accepted = {
         let mut children = node.children.lock().unwrap();
         match children.get_mut(&agent_id) {
-            Some(child) if !child.stopped && secret_eq(&child.token, &token) && info.id == agent_id => {
+            Some(child) if !child.stopped => {
                 child.conn = Some((conn_id, tx));
                 child.ever_connected = true;
                 child.last_seen = Instant::now();
                 child.last_seen_ms = now_ms();
-                child.subtree = sanitize(*info, child);
                 Some((child.outbox.pending(), child.name.clone()))
             }
             _ => None,
         }
     };
     let Some((backlog, child_name)) = accepted else {
-        let _ = sink.send(reject("agent inconnu, arrêté, ou jeton invalide")).await;
+        let _ = put::<_, WsMessage>(&mut sink, &plain(Msg::Rejected { reason: "agent arrêté".into() })).await;
         return;
     };
+    accept_tree(&node, &agent_id, *info);
     node.tree_dirty.notify_one();
     node.emit("link", format!("agent {child_name} connecté"));
-    if sink.send(WsMessage::Text(encode(&Frame { seq: None, msg: Msg::Welcome }).into())).await.is_err() {
+    if !put::<_, WsMessage>(&mut sink, &plain(Msg::Welcome)).await {
         return;
     }
 
@@ -331,7 +393,7 @@ pub async fn serve_child(node: Arc<Node>, socket: WebSocket) {
     let mut backlog = backlog.into_iter();
     'link: loop {
         if let Some(frame) = backlog.next() {
-            if sink.send(WsMessage::Text(encode(&frame).into())).await.is_err() {
+            if !put::<_, WsMessage>(&mut sink, &frame).await {
                 break;
             }
             continue;
@@ -341,8 +403,12 @@ pub async fn serve_child(node: Arc<Node>, socket: WebSocket) {
                 Some(Ok(WsMessage::Text(text))) => {
                     last_rx = Instant::now();
                     let Some(frame) = decode(text.as_str()) else { continue };
+                    // seul un appel de modèle (une conversation entière) peut être volumineux
+                    if text.len() > MAX_SMALL_FRAME && !matches!(frame.msg, Msg::ModelRequest { .. }) {
+                        continue;
+                    }
                     for reply in parent_receive(&node, &agent_id, frame) {
-                        if sink.send(WsMessage::Text(encode(&reply).into())).await.is_err() {
+                        if !put::<_, WsMessage>(&mut sink, &reply).await {
                             break 'link;
                         }
                     }
@@ -353,7 +419,7 @@ pub async fn serve_child(node: Arc<Node>, socket: WebSocket) {
             outgoing = rx.recv() => match outgoing {
                 Some(frame) => {
                     let closing = matches!(frame.msg, Msg::Shutdown { .. });
-                    if sink.send(WsMessage::Text(encode(&frame).into())).await.is_err() || closing {
+                    if !put::<_, WsMessage>(&mut sink, &frame).await || closing {
                         break;
                     }
                 }
@@ -363,13 +429,13 @@ pub async fn serve_child(node: Arc<Node>, socket: WebSocket) {
                 if last_rx.elapsed() >= node.timing.suspend_after() {
                     break;
                 }
-                if sink.send(WsMessage::Text(encode(&Frame { seq: None, msg: Msg::Ping }).into())).await.is_err() {
+                if !put::<_, WsMessage>(&mut sink, &plain(Msg::Ping)).await {
                     break;
                 }
             }
         }
     }
-    let _ = sink.close().await;
+    let _ = tokio::time::timeout(Duration::from_secs(2), sink.close()).await;
     let dropped = {
         let mut children = node.children.lock().unwrap();
         match children.get_mut(&agent_id) {
@@ -386,9 +452,30 @@ pub async fn serve_child(node: Arc<Node>, socket: WebSocket) {
     }
 }
 
-/// Ce qu'un enfant déclare sur lui-même n'est pas cru sur parole : son identité et ses
-/// droits sont ceux que le parent lui a donnés.
-fn sanitize(mut info: crate::protocol::NodeInfo, child: &crate::node::ChildRec) -> crate::protocol::NodeInfo {
+/// Enregistre l'arbre qu'un enfant déclare, s'il est recevable. Rien n'y est cru sur parole :
+/// l'identité et les droits de l'enfant sont ceux que le parent lui a donnés, l'arbre est
+/// borné, et un enfant ne peut pas y revendiquer un agent qui existe ailleurs dans la grappe
+/// (il détournerait les ordres d'arrêt et signerait le journal à sa place).
+fn accept_tree(node: &Node, child_id: &str, mut info: NodeInfo) -> bool {
+    if !info.within(MAX_TREE_NODES, MAX_TREE_DEPTH) {
+        return false;
+    }
+    let mut children = node.children.lock().unwrap();
+    {
+        let mut ids = Vec::new();
+        info.descendant_ids(&mut ids);
+        let mut seen = std::collections::HashSet::new();
+        let foreign = |id: &str| {
+            id == node.id
+                || id == child_id
+                || node.parent_id.as_deref() == Some(id)
+                || children.values().any(|c| c.id != child_id && c.subtree.contains(id))
+        };
+        if ids.iter().any(|id| !seen.insert(*id) || foreign(id)) {
+            return false;
+        }
+    }
+    let Some(child) = children.get_mut(child_id) else { return false };
     info.id = child.id.clone();
     info.name = child.name.clone();
     info.role = child.subtree.role.clone();
@@ -397,7 +484,9 @@ fn sanitize(mut info: crate::protocol::NodeInfo, child: &crate::node::ChildRec) 
     info.model = child.subtree.model.clone();
     info.target = child.subtree.target.clone();
     info.capabilities = child.caps.clone();
-    info
+    info.tidy();
+    child.subtree = info;
+    true
 }
 
 /// Traite une trame venue d'un enfant. Renvoie les réponses immédiates à lui faire.
@@ -432,30 +521,49 @@ fn parent_receive(node: &Arc<Node>, child_id: &str, frame: Frame) -> Vec<Frame> 
             }
         }
         Msg::Tree { node: info } => {
-            if let Some(child) = node.children.lock().unwrap().get_mut(child_id) {
-                child.subtree = sanitize(*info, child);
+            if accept_tree(node, child_id, *info) {
+                node.tree_dirty.notify_one();
             }
-            node.tree_dirty.notify_one();
         }
         Msg::Report { kind, text } => {
-            if matches!(kind, ReportKind::Achieved | ReportKind::Impossible) {
-                if let Some(child) = node.children.lock().unwrap().get_mut(child_id) {
-                    child.mission_open = false;
+            // un compte rendu n'est attendu que d'un enfant en mission, et en nombre limité
+            let expected = {
+                let mut children = node.children.lock().unwrap();
+                let Some(child) = children.get_mut(child_id) else { return replies };
+                let expected = child.mission_open && child.reports < MAX_REPORTS;
+                if expected {
+                    child.reports += 1;
+                    if kind != ReportKind::Question {
+                        child.mission_open = false;
+                    }
                 }
-            }
-            let _ = node.inbox.send(Input::Child { id: child_id.to_string(), name: child_name, kind, text });
-        }
-        Msg::Activity { event } => {
-            // seul un agent de cette branche peut en être l'auteur
-            let known = {
-                let children = node.children.lock().unwrap();
-                children.get(child_id).is_some_and(|c| c.subtree.contains(&event.agent_id))
+                expected
             };
-            if known {
+            if expected {
+                let text = crate::clean(&text, MAX_REPORT_CHARS, true);
+                let _ = node.inbox.send(Input::Child { id: child_id.to_string(), name: child_name, kind, text });
+            } else {
+                node.emit("link", format!("compte rendu inattendu de {child_name}, ignoré"));
+            }
+        }
+        Msg::Activity { mut event } => {
+            // seul un agent de cette branche peut en être l'auteur, sous le nom qu'on lui connaît
+            let author = {
+                let children = node.children.lock().unwrap();
+                children.get(child_id).and_then(|c| c.subtree.find(&event.agent_id)).map(|n| n.name.clone())
+            };
+            if let Some(name) = author {
+                event.agent_name = name;
+                event.kind = crate::clean(&event.kind, 32, false);
+                event.text = crate::clean(&event.text, 4000, true);
                 node.record(event);
             }
         }
         Msg::ModelRequest { request_id, origin, request } => {
+            if request_id.len() > 64 {
+                return replies;
+            }
+            let origin = crate::clean(&origin, 64, false);
             let node = node.clone();
             let child_id = child_id.to_string();
             tokio::spawn(async move {
@@ -500,12 +608,16 @@ fn encode(frame: &Frame) -> String {
     serde_json::to_string(frame).expect("une trame se sérialise toujours")
 }
 
+/// Décode une trame d'un correspondant reconnu. Le journal ne reprend rien de son contenu.
 fn decode(text: &str) -> Option<Frame> {
-    match serde_json::from_str(text) {
-        Ok(frame) => Some(frame),
-        Err(e) => {
-            eprintln!("trame illisible, ignorée : {e}");
-            None
-        }
+    let frame = decode_quiet(text);
+    if frame.is_none() {
+        eprintln!("trame illisible, ignorée ({} octets)", text.len());
     }
+    frame
+}
+
+/// Décode une trame d'un inconnu : sans rien écrire nulle part.
+fn decode_quiet(text: &str) -> Option<Frame> {
+    serde_json::from_str(text).ok()
 }

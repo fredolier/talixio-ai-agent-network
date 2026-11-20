@@ -20,8 +20,11 @@ pub struct Frame {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Msg {
     // --- enfant → parent
-    /// Première trame de toute connexion : l'enfant prouve qui il est.
-    Hello { agent_id: String, token: String, node: Box<NodeInfo> },
+    /// Première trame de toute connexion : l'enfant s'annonce, avec un aléa. Le secret partagé
+    /// ne circule jamais : chacun prouve qu'il le détient (voir `Challenge` et `Proof`).
+    Hello { agent_id: String, nonce: String },
+    /// L'enfant prouve qui il est, puis décrit son état.
+    Proof { proof: String, node: Box<NodeInfo> },
     /// L'état de l'enfant et de toute sa descendance.
     Tree { node: Box<NodeInfo> },
     /// Ce que l'enfant dit à son parent : fin de mission, question, erreur.
@@ -32,6 +35,8 @@ pub enum Msg {
     ModelRequest { request_id: String, origin: String, request: Box<ModelRequest> },
 
     // --- parent → enfant
+    /// Le parent prouve qui il est, et met l'enfant au défi avec son propre aléa.
+    Challenge { nonce: String, proof: String },
     Welcome,
     Rejected { reason: String },
     Instruction { text: String },
@@ -102,7 +107,56 @@ pub struct NodeInfo {
 
 impl NodeInfo {
     pub fn contains(&self, id: &str) -> bool {
-        self.id == id || self.children.iter().any(|c| c.contains(id))
+        self.find(id).is_some()
+    }
+
+    pub fn find(&self, id: &str) -> Option<&NodeInfo> {
+        if self.id == id {
+            return Some(self);
+        }
+        self.children.iter().find_map(|c| c.find(id))
+    }
+
+    /// Les identifiants de toute la descendance (sans celui de l'agent lui-même).
+    pub fn descendant_ids<'a>(&'a self, out: &mut Vec<&'a str>) {
+        for child in &self.children {
+            out.push(&child.id);
+            child.descendant_ids(out);
+        }
+    }
+
+    /// Nombre d'agents et profondeur de l'arbre, s'il tient dans les limites.
+    pub fn within(&self, max_nodes: usize, max_depth: usize) -> bool {
+        fn walk(node: &NodeInfo, depth: usize, left: &mut usize) -> bool {
+            if depth == 0 || *left == 0 {
+                return false;
+            }
+            *left -= 1;
+            node.children.iter().all(|c| walk(c, depth - 1, left))
+        }
+        let mut left = max_nodes;
+        walk(self, max_depth, &mut left)
+    }
+
+    /// Un arbre déclaré par un enfant n'est pas cru sur parole : textes nettoyés et bornés,
+    /// profondeur et parenté recalculées.
+    pub fn tidy(&mut self) {
+        self.id = crate::clean(&self.id, 64, false);
+        self.name = crate::clean(&self.name, 80, false);
+        self.role = crate::clean(&self.role, 200, false);
+        self.model = crate::clean(&self.model, 80, false);
+        self.target = crate::clean(&self.target, 40, false);
+        self.host = crate::clean(&self.host, 255, false);
+        self.os = crate::clean(&self.os, 80, false);
+        self.ips.truncate(8);
+        for ip in &mut self.ips {
+            *ip = crate::clean(ip, 64, false);
+        }
+        for child in &mut self.children {
+            child.parent_id = Some(self.id.clone());
+            child.depth = self.depth.saturating_add(1);
+            child.tidy();
+        }
     }
 
     /// Marque l'agent et toute sa descendance avec le même état.

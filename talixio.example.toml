@@ -24,7 +24,9 @@ die_after_secs = 300      # toujours sans nouvelles : extinction, descendance co
 
 # --- Modèles -------------------------------------------------------------------------------
 # Les clés restent chez le maître : les enfants passent par lui pour appeler un modèle.
-# La clé n'est jamais écrite ici ; `api_key_env` nomme la variable d'environnement qui la contient.
+# La clé n'est jamais écrite ici. Deux façons de la fournir :
+#   api_key_file = "/etc/talixio/anthropic.key"   # fichier en 0600, à préférer
+#   api_key_env  = "ANTHROPIC_API_KEY"            # variable d'environnement du maître
 
 [models.main]
 provider = "anthropic"
@@ -45,6 +47,8 @@ api_key_env = "ANTHROPIC_API_KEY"
 
 # --- Droits du maître ----------------------------------------------------------------------
 # Tout ce qui n'est pas listé est refusé. Un enfant ne reçoit jamais plus que son parent.
+# Les dossiers doivent exister ; ils sont figés sur leur chemin réel au démarrage.
+# Le dossier d'état et les fichiers de clés restent interdits aux outils, quoi qu'on accorde ici.
 
 [capabilities]
 fs_read = ["/srv/projet"]
@@ -52,14 +56,23 @@ fs_write = ["/srv/projet/travail"]
 # models = ["main", "fast"]   # par défaut : tous les modèles définis ci-dessus
 # max_tokens = 5000000         # budget global ; absent : pas de plafond
 
-# Commandes autorisées, sans shell. `*` : un argument libre ; `**` en dernier : suite libre.
+# Commandes autorisées, sans shell. Le programme est un chemin absolu. Arguments, position par position :
+#   "texte"    cet argument exact
+#   "*"        un argument libre, jamais une option (rien qui commence par « - »)
+#   "{read}"   un chemin que l'agent a le droit de lire ; "{write}" : d'écrire
+#   "**"       en dernier : une suite d'arguments libres, sans option
+# ATTENTION : une commande autorisée s'exécute avec tous les droits du compte du process, tant
+# que le cloisonnement par le système n'est pas en place. Chaque règle est donc à écrire au plus
+# serré : jamais d'interpréteur (sh, python…), jamais `args` omis (arguments libres), et se
+# méfier des programmes dont une option écrit un fichier ou lance un autre programme.
 [[capabilities.exec]]
 program = "/usr/bin/git"
-args = ["status"]
+args = ["status", "--short"]
+cwd = "/srv/projet"          # dossier d'exécution ; absent : le dossier temporaire
 
 [[capabilities.exec]]
-program = "/usr/bin/git"
-args = ["log", "**"]
+program = "/usr/bin/wc"
+args = ["-l", "{read}"]
 
 [capabilities.spawn]
 max_children = 5   # enfants directs en vie

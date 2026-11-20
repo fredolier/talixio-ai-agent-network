@@ -9,7 +9,7 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 2. `cargo test` doit passer (tests unitaires et `tests/e2e.rs`).
 3. Continuer à la première tâche non cochée de l'étape en cours.
 
-**Étape en cours : 1 — reste à traiter les constats de l'audit de sécurité.**
+**Étape en cours : 1 — reste l'essai avec un vrai modèle. Ensuite : étape 2.**
 
 ## Étape 1 — le cœur, sur une seule machine
 
@@ -23,13 +23,17 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 - [x] Journal d'activité remonté au maître (D8)
 - [x] API JSON du maître et commandes `tree`, `send`, `watch`, `stop` (P1, P3)
 - [x] Test de bout en bout avec un faux serveur de modèles
+- [x] Tests qui rejouent les attaques de l'audit (`tests/security.rs`)
 - [x] Exécutable optimisé en taille (A4)
-- [ ] Traiter les constats de la première passe de sécurité (D11)
+- [x] Traiter les constats de la première passe de sécurité (D11, SPEC §7)
 - [ ] Essai réel avec un vrai modèle (aucune clé disponible dans l'environnement de développement)
 
 ## Étape 2 — sortir de la machine
 
-- [ ] Lien chiffré et authentifié (G6, Q3) ; lever alors l'interdiction d'écoute distante
+- [ ] Lien chiffré (G6, Q3) — l'authentification mutuelle est faite ; lever alors l'interdiction d'écoute distante
+- [ ] Écoute du lien séparée de celle de l'API ; socket Unix pour les enfants locaux ; correspondant qui envoie au compte-gouttes (SPEC §7)
+- [ ] Budgets : l'agent voit son budget et son reste, le répartit entre ses enfants sans dépasser ce qui lui reste, alerte son parent à un seuil, en cascade ; budget en argent (B1–B4, B6) ; quotas d'abonnement à étudier (B5, Q8)
+- [ ] Stockage : dossier de travail et mémoire par agent, journal et état du maître sur disque (S1–S3, Q7) — à valider avant de coder
 - [ ] Plafond de droits par cible de déploiement (Q2)
 - [ ] Déploiement Docker (G5)
 - [ ] Déploiement SSH : copie de l'exécutable, lancement, désinstallation (G5, G10)
@@ -38,9 +42,9 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 
 ## Étape 3 — durcir et durer
 
-- [ ] Cloisonnement par l'OS : utilisateur dédié, Landlock/seccomp, conteneur (D5)
+- [ ] Cloisonnement par l'OS : utilisateur dédié, Landlock/seccomp, conteneur (D5) — **prioritaire** : sans lui, une commande autorisée a tous les droits du compte
 - [ ] Validations humaines des actions sensibles, jusqu'à l'interface (D9)
-- [ ] Coffre des clés au niveau 0 (D6, Q6)
+- [ ] Coffre des clés au niveau 0, clés sous un autre compte que celui des agents (D6, Q6)
 - [ ] Conversations longues : résumé ou compaction (M4)
 - [ ] Agents permanents ; installation en service ou démon, agent hôte par machine (A5, A6, Q4)
 - [ ] Compilation et essais sous macOS et Windows (A2)
@@ -56,3 +60,4 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 | Date | Fait |
 |---|---|
 | 2026-11-20 | Étape 1 : cœur écrit, tests verts, exécutable de 3,3 Mo. Première passe de sécurité lancée. |
+| 2026-11-20 | Audit rendu : 17 constats vérifiés, tous traités et rejoués en test (SPEC §7). Nouvelle syntaxe des règles de commande, authentification mutuelle du lien, budgets par réservation. Exigences de stockage et de mémoire (S1–S3, Q7), de budgets et de quotas (B1–B6, Q8) ajoutées. |

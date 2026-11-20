@@ -39,7 +39,10 @@ pub struct ModelConfig {
     pub provider: String,
     pub model: String,
     pub base_url: Option<String>,
-    /// Nom de la variable d'environnement qui contient la clé. La clé elle-même ne va jamais dans ce fichier.
+    /// Fichier qui contient la clé, lisible par son seul propriétaire (0600). À préférer à la
+    /// variable d'environnement. La clé elle-même ne va jamais dans ce fichier-ci.
+    pub api_key_file: Option<PathBuf>,
+    /// Nom de la variable d'environnement qui contient la clé.
     pub api_key_env: Option<String>,
     /// `low`, `medium`, `high`, `xhigh` ou `max`.
     pub effort: Option<String>,
@@ -50,6 +53,11 @@ pub struct ModelConfig {
 
 impl ModelConfig {
     pub fn api_key(&self) -> Result<String> {
+        if let Some(path) = &self.api_key_file {
+            ensure_private(path)?;
+            let key = std::fs::read_to_string(path).with_context(|| format!("lecture de {}", path.display()))?;
+            return Ok(key.trim().to_string());
+        }
         match self.api_key_env.as_deref().filter(|name| !name.is_empty()) {
             Some(name) => std::env::var(name)
                 .with_context(|| format!("la variable d'environnement {name} n'est pas définie")),
@@ -102,10 +110,49 @@ impl RootConfig {
         if let Some(unknown) = cfg.capabilities.models.iter().find(|m| !cfg.models.contains_key(*m)) {
             bail!("capabilities.models cite un modèle non défini : « {unknown} »");
         }
-        cfg.capabilities.validate().map_err(anyhow::Error::msg)?;
+        // les dossiers accordés sont figés sur leur chemin réel, une fois pour toutes
+        cfg.capabilities.canonicalize().map_err(|e| anyhow::anyhow!("[capabilities] : {e}"))?;
         ensure_loopback(&cfg.listen)?;
         Ok(cfg)
     }
+
+    /// Ce que les outils des agents ne doivent jamais atteindre : les fichiers de clés.
+    pub fn secret_paths(&self) -> Vec<PathBuf> {
+        self.models.values().filter_map(|m| m.api_key_file.as_ref()).filter_map(|p| p.canonicalize().ok()).collect()
+    }
+}
+
+/// Un fichier secret doit être un vrai fichier, à nous, fermé aux autres comptes.
+pub fn ensure_private(path: &Path) -> Result<()> {
+    let meta = std::fs::symlink_metadata(path).with_context(|| format!("{}", path.display()))?;
+    if !meta.is_file() {
+        bail!("{} n'est pas un fichier ordinaire", path.display());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        // SAFETY: geteuid ne fait que lire l'identité du process.
+        let me = unsafe { libc::geteuid() };
+        if meta.uid() != me {
+            bail!("{} appartient à un autre compte", path.display());
+        }
+        if meta.mode() & 0o077 != 0 {
+            bail!("{} est lisible par d'autres comptes : chmod 600", path.display());
+        }
+    }
+    Ok(())
+}
+
+/// Crée le dossier d'état, fermé aux autres comptes, et renvoie son chemin réel.
+pub fn prepare_state_dir(path: &Path) -> Result<PathBuf> {
+    std::fs::create_dir_all(path).with_context(|| format!("création de {}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+            .with_context(|| format!("droits de {}", path.display()))?;
+    }
+    path.canonicalize().with_context(|| format!("{}", path.display()))
 }
 
 /// Tant que le lien n'est pas chiffré, on n'écoute que sur la machine elle-même.
@@ -128,7 +175,7 @@ pub struct Bootstrap {
     pub parent_id: String,
     pub parent_name: String,
     pub parent_url: String,
-    /// Secret partagé avec le parent, présenté à chaque connexion.
+    /// Secret partagé avec le parent. Il ne circule jamais sur le lien : chacun prouve qu'il le détient.
     pub token: String,
     pub depth: u32,
     pub target: String,

@@ -1,16 +1,18 @@
 //! Les outils d'un agent. Chacun n'existe que si l'agent en a le droit, et chaque appel est revérifié.
 
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Command;
 
 use crate::config::Bootstrap;
 use crate::model::ToolSpec;
-use crate::node::{ChildRec, Node};
+use crate::node::{ChildRec, Meter, Node};
 use crate::policy::Capabilities;
 use crate::protocol::{Msg, NodeInfo, Outbox, ReportKind, Status};
 use crate::{now_ms, random_hex, spawn};
@@ -63,8 +65,10 @@ pub fn specs(node: &Node) -> Vec<ToolSpec> {
         tools.push(spec(
             "run_command",
             format!(
-                "Lance un programme, sans shell (pas de redirection, de tube ni de variable). \
-                 Seules ces commandes sont autorisées, « * » valant un argument libre et « ** » la suite libre : {allowed}."
+                "Lance un programme, sans shell (pas de redirection, de tube ni de variable), par son chemin absolu. \
+                 Seules ces commandes sont autorisées — « * » : un argument libre, jamais une option ; « ** » : une \
+                 suite d'arguments libres, sans option ; « {{read}} » / « {{write}} » : un chemin que tu as le droit \
+                 de lire / d'écrire : {allowed}."
             ),
             json!({
                 "program": { "type": "string" },
@@ -103,8 +107,9 @@ pub fn specs(node: &Node) -> Vec<ToolSpec> {
                             "items": {
                                 "type": "object",
                                 "properties": {
-                                    "program": { "type": "string" },
-                                    "args": { "type": "array", "items": { "type": "string" }, "description": "Arguments exacts ; « * » : un argument libre ; « ** » en dernier : suite libre. Omis : arguments libres." }
+                                    "program": { "type": "string", "description": "Chemin absolu du programme." },
+                                    "args": { "type": "array", "items": { "type": "string" }, "description": "Recopie exacte des arguments d'une de tes règles. Omis : arguments libres, seulement si ta propre règle les laisse libres." },
+                                    "cwd": { "type": "string", "description": "Dossier d'exécution, s'il figure dans ta règle." }
                                 },
                                 "required": ["program"]
                             }
@@ -160,6 +165,83 @@ fn text<'a>(input: &'a Value, key: &str) -> Result<&'a str, String> {
     input[key].as_str().ok_or_else(|| format!("argument « {key} » manquant ou invalide"))
 }
 
+/// Travail bloquant sur les fichiers, hors du fil des tâches asynchrones.
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + Send + 'static) -> Result<T, String> {
+    tokio::task::spawn_blocking(work).await.map_err(|e| e.to_string())?
+}
+
+/// Le fichier ouvert est-il bien celui que désigne, maintenant, le chemin vérifié ? Entre la
+/// vérification et l'ouverture, un dossier du chemin a pu être remplacé par un lien.
+fn same_file(open: &std::fs::Metadata, path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let now = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+        if now.dev() != open.dev() || now.ino() != open.ino() {
+            return Err("accès refusé : le chemin a changé pendant l'opération".into());
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = (open, path);
+    Ok(())
+}
+
+/// Options d'ouverture qui ne suivent pas un lien symbolique en bout de chemin, et ne
+/// restent pas bloquées sur un tube.
+fn no_follow(options: &mut std::fs::OpenOptions) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(not(unix))]
+    let _ = options;
+}
+
+fn read_checked(caps: &Capabilities, denied: &[PathBuf], asked: &Path) -> Result<String, String> {
+    let real = caps.resolve_read(asked, denied)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    no_follow(&mut options);
+    let file = options.open(&real).map_err(|e| e.to_string())?;
+    let meta = file.metadata().map_err(|e| e.to_string())?;
+    if !meta.is_file() {
+        return Err("ce n'est pas un fichier".into());
+    }
+    same_file(&meta, &caps.resolve_read(asked, denied)?)?;
+    if meta.len() > MAX_READ {
+        return Err(format!("fichier trop gros ({} octets, maximum {MAX_READ})", meta.len()));
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_READ).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn write_checked(caps: &Capabilities, denied: &[PathBuf], asked: &Path, content: &str) -> Result<String, String> {
+    let real = caps.resolve_write(asked, denied)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true);
+    no_follow(&mut options);
+    // ouvert sans rien effacer : le contenu n'est remplacé qu'une fois le fichier vérifié
+    let mut file = options.open(&real).map_err(|e| e.to_string())?;
+    let meta = file.metadata().map_err(|e| e.to_string())?;
+    if !meta.is_file() {
+        return Err("ce n'est pas un fichier".into());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        // un lien physique donnerait un second nom, ici, à un fichier d'ailleurs
+        if meta.nlink() > 1 {
+            return Err("écriture refusée : ce fichier a plusieurs noms (lien physique)".into());
+        }
+    }
+    same_file(&meta, &caps.resolve_write(asked, denied)?)?;
+    file.set_len(0).map_err(|e| e.to_string())?;
+    file.write_all(content.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(format!("{} octets écrits dans {}", content.len(), real.display()))
+}
+
 /// Exécute un outil. Le droit est revérifié ici, quoi que le modèle ait demandé.
 pub async fn execute(node: &Arc<Node>, name: &str, input: &Value) -> Result<String, String> {
     if !input.is_object() {
@@ -168,19 +250,11 @@ pub async fn execute(node: &Arc<Node>, name: &str, input: &Value) -> Result<Stri
     let caps = &node.caps;
     match name {
         "read_file" => {
-            let path = caps.resolve_read(Path::new(text(input, "path")?))?;
-            let meta = tokio::fs::metadata(&path).await.map_err(|e| e.to_string())?;
-            if !meta.is_file() {
-                return Err("ce n'est pas un fichier".into());
-            }
-            if meta.len() > MAX_READ {
-                return Err(format!("fichier trop gros ({} octets, maximum {MAX_READ})", meta.len()));
-            }
-            let bytes = tokio::fs::read(&path).await.map_err(|e| e.to_string())?;
-            Ok(String::from_utf8_lossy(&bytes).into_owned())
+            let (node, asked) = (node.clone(), PathBuf::from(text(input, "path")?));
+            blocking(move || read_checked(&node.caps, &node.deny, &asked)).await
         }
         "list_dir" => {
-            let path = caps.resolve_read(Path::new(text(input, "path")?))?;
+            let path = caps.resolve_read(Path::new(text(input, "path")?), &node.deny)?;
             let mut dir = tokio::fs::read_dir(&path).await.map_err(|e| e.to_string())?;
             let mut entries = Vec::new();
             while let Some(entry) = dir.next_entry().await.map_err(|e| e.to_string())? {
@@ -195,12 +269,11 @@ pub async fn execute(node: &Arc<Node>, name: &str, input: &Value) -> Result<Stri
             Ok(if entries.is_empty() { "(dossier vide)".into() } else { entries.join("\n") })
         }
         "write_file" => {
-            let path = caps.resolve_write(Path::new(text(input, "path")?))?;
-            let content = text(input, "content")?;
-            tokio::fs::write(&path, content).await.map_err(|e| e.to_string())?;
-            Ok(format!("{} octets écrits dans {}", content.len(), path.display()))
+            let (node, asked) = (node.clone(), PathBuf::from(text(input, "path")?));
+            let content = text(input, "content")?.to_string();
+            blocking(move || write_checked(&node.caps, &node.deny, &asked, &content)).await
         }
-        "run_command" => run_command(caps, input).await,
+        "run_command" => run_command(node, input).await,
         "spawn_agent" => spawn_agent(node, input).await,
         "send_to_agent" => {
             let id = node.child_id(text(input, "agent")?).ok_or("aucun enfant de ce nom")?;
@@ -248,8 +321,25 @@ pub async fn execute(node: &Arc<Node>, name: &str, input: &Value) -> Result<Stri
     }
 }
 
-async fn run_command(caps: &Capabilities, input: &Value) -> Result<String, String> {
-    let program = text(input, "program")?;
+/// Lit une sortie sans jamais garder plus de `MAX_OUTPUT` octets ; le reste est lu et jeté,
+/// pour que le programme ne reste pas bloqué sur un tube plein.
+async fn read_capped(stream: Option<impl AsyncRead + Unpin>) -> (Vec<u8>, bool) {
+    let (mut kept, mut truncated) = (Vec::new(), false);
+    let Some(mut stream) = stream else { return (kept, truncated) };
+    let mut buffer = [0u8; 8192];
+    while let Ok(n) = stream.read(&mut buffer).await {
+        if n == 0 {
+            break;
+        }
+        let room = MAX_OUTPUT - kept.len();
+        kept.extend_from_slice(&buffer[..n.min(room)]);
+        truncated |= n > room;
+    }
+    (kept, truncated)
+}
+
+async fn run_command(node: &Arc<Node>, input: &Value) -> Result<String, String> {
+    let program = Path::new(text(input, "program")?);
     let args: Vec<String> = match &input["args"] {
         Value::Null => Vec::new(),
         Value::Array(items) => items
@@ -258,33 +348,60 @@ async fn run_command(caps: &Capabilities, input: &Value) -> Result<String, Strin
             .collect::<Result<_, _>>()?,
         _ => return Err("« args » doit être une liste de chaînes".into()),
     };
-    caps.check_exec(program, &args)?;
+    let (rule, args) = node.caps.check_exec(program, &args, &node.deny)?;
+    let cwd = rule.cwd.clone().unwrap_or_else(std::env::temp_dir);
 
     let mut command = Command::new(program);
-    command.args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+    command
+        .args(&args)
+        .current_dir(&cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
     spawn::apply_safe_env(&mut command);
-    let child = command.spawn().map_err(|e| format!("lancement impossible : {e}"))?;
-    let output = tokio::time::timeout(COMMAND_TIMEOUT, child.wait_with_output())
-        .await
-        .map_err(|_| format!("commande interrompue après {} s", COMMAND_TIMEOUT.as_secs()))?
-        .map_err(|e| e.to_string())?;
-
-    let clip = |bytes: &[u8]| {
-        let text = String::from_utf8_lossy(bytes);
-        if text.len() > MAX_OUTPUT {
-            let mut end = MAX_OUTPUT;
-            while !text.is_char_boundary(end) {
-                end -= 1;
+    // son propre groupe de process : à la fin, tout ce que la commande a lancé part avec elle
+    #[cfg(unix)]
+    command.process_group(0);
+    #[cfg(target_os = "linux")]
+    // SAFETY: entre fork et exec, un seul appel système sans allocation. Si l'agent meurt
+    // brutalement, la commande est tuée par le noyau.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL, 0, 0, 0) != 0 {
+                return Err(std::io::Error::last_os_error());
             }
-            format!("{}\n… [sortie tronquée]", &text[..end])
-        } else {
-            text.into_owned()
+            Ok(())
+        });
+    }
+    let mut child = command.spawn().map_err(|e| format!("lancement impossible : {e}"))?;
+    let group = child.id().map(|pid| pid as i32).unwrap_or(0);
+    node.running.lock().unwrap().insert(group);
+    let stdout = tokio::spawn(read_capped(child.stdout.take()));
+    let stderr = tokio::spawn(read_capped(child.stderr.take()));
+    let status = tokio::time::timeout(COMMAND_TIMEOUT, child.wait()).await;
+    // la commande est finie, ou trop longue : tout son groupe part avec elle, ce qui ferme ses sorties
+    spawn::kill_group(group);
+    node.running.lock().unwrap().remove(&group);
+    let collect = |reader| async {
+        // un process sorti du groupe peut encore tenir la sortie : on ne l'attend pas
+        match tokio::time::timeout(Duration::from_secs(5), reader).await {
+            Ok(Ok(read)) => read,
+            _ => (Vec::new(), true),
         }
     };
-    let code = output.status.code().map(|c| c.to_string()).unwrap_or_else(|| "interrompu".into());
-    let mut result = format!("code de sortie : {code}\n--- sortie ---\n{}", clip(&output.stdout));
-    if !output.stderr.is_empty() {
-        result.push_str(&format!("\n--- erreurs ---\n{}", clip(&output.stderr)));
+    let (stdout, stderr) = (collect(stdout).await, collect(stderr).await);
+    let Ok(status) = status else {
+        return Err(format!("commande interrompue après {} s", COMMAND_TIMEOUT.as_secs()));
+    };
+
+    let show = |(bytes, truncated): &(Vec<u8>, bool)| {
+        format!("{}{}", String::from_utf8_lossy(bytes), if *truncated { "\n… [sortie tronquée]" } else { "" })
+    };
+    let code = status.ok().and_then(|s| s.code()).map(|c| c.to_string()).unwrap_or_else(|| "interrompu".into());
+    let mut result = format!("code de sortie : {code}\n--- sortie ---\n{}", show(&stdout));
+    if !stderr.0.is_empty() {
+        result.push_str(&format!("\n--- erreurs ---\n{}", show(&stderr)));
     }
     Ok(result)
 }
@@ -312,11 +429,13 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
     if let Some(spawn) = &mut caps.spawn {
         spawn.targets = vec!["local".into()];
     }
+    // les dossiers sont accordés par leur chemin réel : un lien ne peut pas élargir les droits
+    caps.canonicalize()?;
     node.caps.check_grant(&caps)?;
     let listen = node.listen.get().ok_or("cet agent n'accepte pas de connexion d'enfants")?;
 
     let boot = Bootstrap {
-        agent_id: format!("a-{}", &random_hex(1)[..10]),
+        agent_id: format!("a-{}", &random_hex(1)[..20]),
         name: name.clone(),
         role: role.clone(),
         instructions: text(input, "instructions")?.to_string(),
@@ -374,8 +493,9 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
                 stopped: false,
                 outbox: Outbox::default(),
                 last_recv_seq: 0,
-                tokens_used: 0,
+                meter: Meter::default(),
                 mission_open: false,
+                reports: 0,
                 process: None,
             },
         );

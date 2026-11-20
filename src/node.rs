@@ -1,6 +1,6 @@
 //! Un nœud de la grappe : l'état d'un agent, ses enfants, son lien vers son parent.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -42,6 +42,14 @@ pub struct Node {
     pub timing: Timing,
     pub target: String,
     pub state_dir: PathBuf,
+    /// Chemins interdits aux outils quoi qu'accordent les droits : l'état de l'agent, les clés.
+    pub deny: Vec<PathBuf>,
+    /// Marqueur secret des messages authentiques dans la conversation de l'agent.
+    pub nonce: String,
+    /// Groupes de process des commandes en cours, à tuer si l'agent s'éteint.
+    pub running: Mutex<BTreeSet<i32>>,
+    /// Consommation de toute la grappe. Tenue chez le maître seulement.
+    pub meter: Mutex<Meter>,
     pub started_at_ms: u64,
     pub host: HostInfo,
     pub status: Mutex<Status>,
@@ -73,6 +81,47 @@ pub struct Mission {
     pub nudges: u32,
 }
 
+/// Compteur de tokens. Un appel réserve sa part avant de partir : des appels simultanés ne
+/// peuvent pas dépasser ensemble le budget.
+#[derive(Debug, Default)]
+pub struct Meter {
+    pub used: u64,
+    reserved: u64,
+    in_flight: u32,
+}
+
+impl Meter {
+    fn reserve(&mut self, limit: Option<u64>, estimate: u64, max_parallel: u32) -> Result<(), String> {
+        if self.in_flight >= max_parallel {
+            return Err("trop d'appels de modèle simultanés pour cet agent".into());
+        }
+        if let Some(limit) = limit {
+            if self.used.saturating_add(self.reserved).saturating_add(estimate) > limit {
+                return Err(format!("budget de tokens épuisé ({limit})"));
+            }
+        }
+        self.reserved += estimate;
+        self.in_flight += 1;
+        Ok(())
+    }
+
+    fn settle(&mut self, estimate: u64, actual: Option<u64>) {
+        self.reserved = self.reserved.saturating_sub(estimate);
+        self.in_flight = self.in_flight.saturating_sub(1);
+        self.used = self.used.saturating_add(actual.unwrap_or(0));
+    }
+}
+
+/// Appels de modèle simultanés au plus pour un enfant et sa descendance.
+const MAX_PARALLEL_CALLS: u32 = 16;
+/// Comptes rendus au plus entre deux consignes du parent.
+pub const MAX_REPORTS: u32 = 20;
+
+/// Coût probable d'un appel, avant de le lancer : la taille de la demande, plus une réponse.
+fn estimate(request: &ModelRequest) -> u64 {
+    serde_json::to_vec(request).map(|bytes| bytes.len() as u64 / 4).unwrap_or(0) + 4096
+}
+
 /// Ce qu'un parent sait d'un enfant.
 pub struct ChildRec {
     pub id: String,
@@ -90,9 +139,11 @@ pub struct ChildRec {
     pub outbox: Outbox,
     pub last_recv_seq: u64,
     /// Tokens consommés par l'enfant et sa descendance, comptés par le parent.
-    pub tokens_used: u64,
+    pub meter: Meter,
     /// L'enfant a une mission en cours : on attend encore son compte rendu.
     pub mission_open: bool,
+    /// Comptes rendus reçus depuis la dernière consigne.
+    pub reports: u32,
     pub process: Option<tokio::process::Child>,
 }
 
@@ -100,6 +151,8 @@ impl ChildRec {
     fn view(&self) -> NodeInfo {
         let mut node = self.subtree.clone();
         node.last_seen_ms = self.last_seen_ms;
+        // le compte du parent fait foi, pas celui que l'enfant déclare
+        node.tokens_used = self.meter.used;
         if self.stopped {
             node.set_status_deep(Status::Stopped);
         } else if self.conn.is_none() && self.ever_connected {
@@ -164,10 +217,13 @@ impl ActivityLog {
 }
 
 impl Node {
+    /// `cfg.state_dir` doit être le chemin réel du dossier d'état (voir `prepare_state_dir`).
     pub fn new_root(cfg: &RootConfig, providers: Providers) -> (Arc<Self>, mpsc::UnboundedReceiver<Input>) {
         let (inbox, rx) = mpsc::unbounded_channel();
+        let mut deny = vec![cfg.state_dir.clone()];
+        deny.extend(cfg.secret_paths());
         let node = Self {
-            id: format!("a-{}", &crate::random_hex(1)[..10]),
+            id: format!("a-{}", &crate::random_hex(1)[..20]),
             name: cfg.name.clone(),
             role: cfg.role.clone(),
             depth: 0,
@@ -179,6 +235,10 @@ impl Node {
             timing: cfg.timing,
             target: "root".into(),
             state_dir: cfg.state_dir.clone(),
+            deny,
+            nonce: crate::random_hex(1)[..16].to_string(),
+            running: Mutex::new(BTreeSet::new()),
+            meter: Mutex::new(Meter::default()),
             started_at_ms: now_ms(),
             host: HostInfo::detect(),
             status: Mutex::new(Status::Starting),
@@ -209,7 +269,11 @@ impl Node {
             caps: boot.capabilities.clone(),
             timing: boot.timing,
             target: boot.target.clone(),
+            deny: vec![state_dir.clone()],
             state_dir,
+            nonce: crate::random_hex(1)[..16].to_string(),
+            running: Mutex::new(BTreeSet::new()),
+            meter: Mutex::new(Meter::default()),
             started_at_ms: now_ms(),
             host: HostInfo::detect(),
             status: Mutex::new(Status::Starting),
@@ -292,7 +356,17 @@ impl Node {
     /// Appelle un modèle : directement chez le maître, en remontant par le parent sinon.
     pub async fn complete(&self, origin: &str, request: ModelRequest) -> Result<ModelResponse, String> {
         match (&self.providers, &self.uplink) {
-            (Some(providers), _) => providers.complete(&request).await.map_err(|e| format!("{e:#}")),
+            (Some(providers), _) => {
+                let estimate = estimate(&request);
+                self.meter.lock().unwrap().reserve(self.caps.max_tokens, estimate, u32::MAX)?;
+                let result = providers.complete(&request).await;
+                self.meter.lock().unwrap().settle(estimate, result.as_ref().ok().map(|r| r.usage.total()));
+                // le détail d'une erreur de fournisseur reste chez le maître
+                result.map_err(|e| {
+                    self.emit("error", format!("appel du modèle pour {} : {e:#}", crate::clean(origin, 64, false)));
+                    "le modèle n'a pas pu répondre (détail dans le journal du maître)".to_string()
+                })
+            }
             (None, Some(uplink)) => uplink.model_request(origin, request).await,
             (None, None) => Err("aucun accès aux modèles".into()),
         }
@@ -305,26 +379,24 @@ impl Node {
         origin: &str,
         request: ModelRequest,
     ) -> Result<ModelResponse, String> {
+        let estimate = estimate(&request);
         {
-            let children = self.children.lock().unwrap();
-            let child = children.get(child_id).ok_or("enfant inconnu")?;
+            let mut children = self.children.lock().unwrap();
+            let child = children.get_mut(child_id).ok_or("enfant inconnu")?;
             if child.stopped {
                 return Err("agent arrêté".into());
             }
             if !child.caps.models.contains(&request.model) {
-                return Err(format!("modèle « {} » non autorisé pour cet agent", request.model));
+                return Err("modèle non autorisé pour cet agent".into());
             }
-            if let Some(budget) = child.caps.max_tokens {
-                if child.tokens_used >= budget {
-                    return Err(format!("budget de tokens épuisé ({budget})"));
-                }
-            }
+            child.meter.reserve(child.caps.max_tokens, estimate, MAX_PARALLEL_CALLS)?;
         }
-        let response = self.complete(origin, request).await?;
+        let result = self.complete(origin, request).await;
         if let Some(child) = self.children.lock().unwrap().get_mut(child_id) {
-            child.tokens_used += response.usage.total();
+            child.meter.settle(estimate, result.as_ref().ok().map(|r| r.usage.total()));
         }
-        Ok(response)
+        self.tree_dirty.notify_one();
+        result
     }
 
     /// Envoie un message à un enfant. `reliable` : il sera renvoyé après une coupure.
@@ -336,6 +408,7 @@ impl Node {
         }
         if matches!(msg, Msg::Instruction { .. }) {
             child.mission_open = true;
+            child.reports = 0;
         }
         let frame = if reliable { child.outbox.push(msg) } else { Frame { seq: None, msg } };
         if let Some((_, conn)) = &child.conn {
@@ -344,12 +417,16 @@ impl Node {
         Ok(())
     }
 
-    /// Retrouve un enfant direct par son identifiant ou son nom.
+    /// Retrouve un enfant direct par son identifiant ou son nom. Un enfant en vie passe
+    /// avant un ancien enfant arrêté du même nom.
     pub fn child_id(&self, id_or_name: &str) -> Option<String> {
         let children = self.children.lock().unwrap();
+        let named = |c: &&ChildRec| c.id == id_or_name || c.name == id_or_name;
         children
             .values()
-            .find(|c| c.id == id_or_name || c.name == id_or_name)
+            .filter(|c| !c.stopped)
+            .find(named)
+            .or_else(|| children.values().find(named))
             .map(|c| c.id.clone())
     }
 
@@ -423,6 +500,10 @@ impl Node {
         };
         for mut process in processes {
             let _ = process.start_kill();
+        }
+        // rien de ce que l'agent a lancé ne lui survit
+        for group in std::mem::take(&mut *self.running.lock().unwrap()) {
+            crate::spawn::kill_group(group);
         }
         std::process::exit(code);
     }

@@ -27,7 +27,14 @@ struct App {
     node: Arc<Node>,
     /// Jeton de l'API. Absent chez les agents enfants : ils n'exposent pas d'API.
     api_token: Option<Arc<String>>,
+    /// Places pour les connexions qui n'ont pas encore prouvé qui elles sont.
+    handshakes: Arc<tokio::sync::Semaphore>,
 }
+
+/// Présentations simultanées au plus : un inconnu ne peut pas occuper le parent.
+const MAX_HANDSHAKES: usize = 8;
+/// Taille maximale d'un message envoyé au maître par l'API, en caractères.
+const MAX_MESSAGE_CHARS: usize = 100_000;
 
 /// Ouvre l'écoute. `api_token` présent : l'API JSON du maître est servie aussi.
 pub async fn start_listener(node: Arc<Node>, addr: SocketAddr, api_token: Option<String>) -> Result<SocketAddr> {
@@ -44,7 +51,11 @@ pub async fn start_listener(node: Arc<Node>, addr: SocketAddr, api_token: Option
             .route("/api/messages", post(message))
             .route("/api/agents/{id}/stop", post(stop));
     }
-    let app = router.with_state(App { node: node.clone(), api_token: api_token.map(Arc::new) });
+    let app = router.with_state(App {
+        node: node.clone(),
+        api_token: api_token.map(Arc::new),
+        handshakes: Arc::new(tokio::sync::Semaphore::new(MAX_HANDSHAKES)),
+    });
     let _ = node.listen.set(local);
     tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
@@ -54,17 +65,25 @@ pub async fn start_listener(node: Arc<Node>, addr: SocketAddr, api_token: Option
     Ok(local)
 }
 
-async fn link(State(app): State<App>, upgrade: WebSocketUpgrade) -> Response {
+async fn link(State(app): State<App>, headers: HeaderMap, upgrade: WebSocketUpgrade) -> Response {
+    // un agent n'envoie jamais d'en-tête Origin : c'est une page web qui essaie de se connecter
+    if headers.contains_key(header::ORIGIN) {
+        return error(StatusCode::FORBIDDEN, "lien réservé aux agents");
+    }
+    let Ok(permit) = app.handshakes.clone().try_acquire_owned() else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "trop de connexions en attente");
+    };
     upgrade
         .max_message_size(MAX_FRAME)
         .max_frame_size(MAX_FRAME)
-        .on_upgrade(move |socket| serve_child(app.node, socket))
+        .on_upgrade(move |socket| serve_child(app.node, socket, permit))
 }
 
 fn error(status: StatusCode, message: &str) -> Response {
     (status, Json(json!({ "error": message }))).into_response()
 }
 
+#[allow(clippy::result_large_err)]
 fn authorize(app: &App, headers: &HeaderMap) -> Result<(), Response> {
     let expected = app.api_token.as_deref().ok_or_else(|| error(StatusCode::NOT_FOUND, "pas d'API ici"))?;
     let given = headers
@@ -130,6 +149,9 @@ async fn message(State(app): State<App>, headers: HeaderMap, Json(body): Json<Va
     let Some(text) = body["text"].as_str().map(str::trim).filter(|t| !t.is_empty()) else {
         return error(StatusCode::BAD_REQUEST, "champ « text » manquant");
     };
+    if text.chars().count() > MAX_MESSAGE_CHARS {
+        return error(StatusCode::PAYLOAD_TOO_LARGE, "message trop long");
+    }
     let _ = app.node.inbox.send(Input::User(text.to_string()));
     (StatusCode::ACCEPTED, Json(json!({ "accepted": true }))).into_response()
 }

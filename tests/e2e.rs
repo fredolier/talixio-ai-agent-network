@@ -31,7 +31,7 @@ async fn fake_model(State(file): State<Arc<String>>, Json(body): Json<Value>) ->
     };
     let folder = std::path::Path::new(file.as_str()).parent().unwrap().to_str().unwrap().to_string();
     let message = match (is_root, last["role"].as_str().unwrap()) {
-        (true, "user") if text.contains("agent_report") && text.contains("SECRET-42") => say("Le lecteur dit : SECRET-42"),
+        (true, "user") if text.contains("source=\"enfant\"") && text.contains("SECRET-42") => say("Le lecteur dit : SECRET-42"),
         (true, "user") if text.contains("lance le test") => spawn("lecteur", &folder),
         (true, "user") if text.contains("escalade") => spawn("pirate", "/"),
         (true, "tool") if text.contains("Erreur") => say("Création refusée."),
@@ -181,9 +181,11 @@ max_depth = 1
     // l'environnement du maître ne passe pas à l'enfant
     #[cfg(target_os = "linux")]
     {
-        let environ = std::fs::read(format!("/proc/{child_pid}/environ")).unwrap();
-        let environ = String::from_utf8_lossy(&environ);
-        assert!(!environ.contains("SECRET_DU_MAITRE") && !environ.contains(TOKEN), "fuite : {environ}");
+        // un agent ferme son environnement aux autres process : seul root peut encore le lire
+        if let Ok(environ) = std::fs::read(format!("/proc/{child_pid}/environ")) {
+            let environ = String::from_utf8_lossy(&environ);
+            assert!(!environ.contains("SECRET_DU_MAITRE") && !environ.contains(TOKEN), "fuite : {environ}");
+        }
     }
 
     // un enfant ne peut pas recevoir plus de droits que son parent

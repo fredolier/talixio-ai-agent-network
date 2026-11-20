@@ -57,5 +57,7 @@ cargo test
 
 - Les enfants sont lancés sur la machine du parent seulement ; Docker et SSH viennent ensuite.
 - Le lien n'est pas chiffré : l'écoute hors de l'interface locale est refusée.
-- Le cloisonnement est fait par le process lui-même, pas encore par le système d'exploitation.
+- Le cloisonnement est fait par le process lui-même, pas encore par le système d'exploitation :
+  une commande autorisée s'exécute avec tous les droits du compte. N'autoriser que des commandes
+  inoffensives, et lancer le maître sous un compte dédié sans privilèges (voir la spécification, §7).
 - Testé sous Linux seulement.
