@@ -157,6 +157,9 @@ pub struct ChildRec {
     pub mission_open: bool,
     /// Comptes rendus reçus depuis la dernière consigne.
     pub reports: u32,
+    /// Événements d'un descendant que l'arbre ne montre pas encore : gardés, en nombre borné,
+    /// jusqu'au prochain arbre reçu de cet enfant.
+    pub early_events: Vec<crate::protocol::ActivityEvent>,
     /// La cible où il a été déployé, s'il n'est pas sur la machine du parent.
     pub target: Option<Target>,
     pub process: Option<tokio::process::Child>,

@@ -355,6 +355,17 @@ fn child_receive(node: &Arc<Node>, uplink: &Arc<Uplink>, frame: Frame, ended: &m
     replies
 }
 
+/// Événements gardés par enfant en attendant l'arbre qui annonce leur auteur.
+const MAX_EARLY_EVENTS: usize = 64;
+
+/// Inscrit au journal l'événement d'un descendant, sous le nom que ce nœud lui connaît.
+fn record_child_event(node: &Arc<Node>, name: String, mut event: crate::protocol::ActivityEvent) {
+    event.agent_name = name;
+    event.kind = crate::clean(&event.kind, 32, false);
+    event.text = crate::clean(&event.text, 4000, true);
+    node.record(event);
+}
+
 /// Renvoie l'arbre au parent quand il change, et régulièrement pour donner signe de vie.
 pub async fn run_tree_reporter(node: Arc<Node>) {
     let Some(uplink) = node.uplink.clone() else { return };
@@ -581,6 +592,16 @@ fn parent_receive(node: &Arc<Node>, child_id: &str, frame: Frame) -> Vec<Frame> 
             if accept_tree(node, child_id, *info) {
                 node.tree_dirty.notify_one();
             }
+            // les événements arrivés avant l'arbre qui annonce leur auteur ; les autres sont jetés
+            let known: Vec<_> = {
+                let mut children = node.children.lock().unwrap();
+                let Some(child) = children.get_mut(child_id) else { return replies };
+                let early = std::mem::take(&mut child.early_events);
+                early.into_iter().filter_map(|e| child.subtree.find(&e.agent_id).map(|n| (n.name.clone(), e))).collect()
+            };
+            for (name, event) in known {
+                record_child_event(node, name, event);
+            }
         }
         Msg::Report { kind, text } => {
             // un compte rendu n'est attendu que d'un enfant en mission, et en nombre limité
@@ -603,17 +624,20 @@ fn parent_receive(node: &Arc<Node>, child_id: &str, frame: Frame) -> Vec<Frame> 
                 node.emit("link", format!("compte rendu inattendu de {child_name}, ignoré"));
             }
         }
-        Msg::Activity { mut event } => {
+        Msg::Activity { event } => {
             // seul un agent de cette branche peut en être l'auteur, sous le nom qu'on lui connaît
             let author = {
-                let children = node.children.lock().unwrap();
-                children.get(child_id).and_then(|c| c.subtree.find(&event.agent_id)).map(|n| n.name.clone())
+                let mut children = node.children.lock().unwrap();
+                let Some(child) = children.get_mut(child_id) else { return replies };
+                let author = child.subtree.find(&event.agent_id).map(|n| n.name.clone());
+                if author.is_none() && child.early_events.len() < MAX_EARLY_EVENTS {
+                    // un descendant tout juste créé : l'arbre qui l'annonce n'est pas encore arrivé
+                    child.early_events.push(event.clone());
+                }
+                author
             };
             if let Some(name) = author {
-                event.agent_name = name;
-                event.kind = crate::clean(&event.kind, 32, false);
-                event.text = crate::clean(&event.text, 4000, true);
-                node.record(event);
+                record_child_event(node, name, event);
             }
         }
         Msg::ModelRequest { request_id, origin, request } => {

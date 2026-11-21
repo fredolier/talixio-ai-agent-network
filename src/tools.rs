@@ -524,6 +524,7 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
                 meter: Meter::default(),
                 mission_open: false,
                 reports: 0,
+                early_events: Vec::new(),
                 target: target.clone(),
                 process: None,
             },

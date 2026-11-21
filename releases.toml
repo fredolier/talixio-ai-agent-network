@@ -7,6 +7,20 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.6.2"
+date = "2026-11-21"
+title = "Journal complet des petits-enfants"
+summary = "Une vérification indépendante a passé en revue les 109 demandes du projet. Elle a trouvé un défaut, corrigé ici."
+
+[[release.changes]]
+kind = "correction"
+text = "Les tout premiers gestes d'un petit-enfant (mission reçue, première question) manquaient au journal du maître : ils arrivaient avant que le maître sache que cet agent existait, et étaient écartés. Ils sont maintenant gardés jusqu'à ce que l'arbre l'annonce."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Nouveau test sur trois niveaux d'agents réels : question au parent, compte rendu en cascade, coupure du lien puis reprise sans perte, arrêt d'un petit-enfant."
+
+[[release]]
 version = "0.6.1"
 date = "2026-11-21"
 title = "Windows et macOS"

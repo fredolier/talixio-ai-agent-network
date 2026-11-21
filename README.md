@@ -96,4 +96,4 @@ cargo test
 - Le cloisonnement est fait par le process lui-même, pas encore par le système d'exploitation :
   une commande autorisée s'exécute avec tous les droits du compte. N'autoriser que des commandes
   inoffensives, et lancer le maître sous un compte dédié sans privilèges (voir la spécification, §7).
-- Testé sous Linux seulement.
+- Testé en intégration continue sous Linux, macOS et Windows ; pas encore essayé sur un poste Windows ou macOS réel, ni avec un vrai `ssh` ou un vrai Docker.
