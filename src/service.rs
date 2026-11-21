@@ -299,6 +299,8 @@ mod tests {
         }
     }
 
+    // chemins d'Unix : sous Windows, ils ne sont pas absolus
+    #[cfg(unix)]
     #[test]
     fn systemd_du_compte() {
         let plan = install_plan(&Spec { env_file: Some("/srv/talixio/cles.env".into()), ..spec(Kind::SystemdUser) }).unwrap();
@@ -311,6 +313,8 @@ mod tests {
         assert_eq!(plan.optional, vec![words(&["loginctl", "enable-linger"])]);
     }
 
+    // chemins d'Unix : sous Windows, ils ne sont pas absolus
+    #[cfg(unix)]
     #[test]
     fn systemd_du_systeme_jamais_en_root() {
         for user in [None, Some("root"), Some("Ada"), Some("ada\nUser=root"), Some("")] {
@@ -331,6 +335,8 @@ mod tests {
         assert!(plan.optional.is_empty());
     }
 
+    // chemins d'Unix : sous Windows, ils ne sont pas absolus
+    #[cfg(unix)]
     #[test]
     fn un_chemin_ne_reecrit_pas_le_service() {
         for bad in ["relatif/talixio.toml", "/srv/a\nExecStartPre=/bin/sh", "/srv/a\" --autre \"", "/srv/%h/t.toml", "/srv/$HOME/t.toml", "/srv/<a>/t.toml", "/srv/a;b"] {
@@ -344,6 +350,8 @@ mod tests {
         assert!(install_plan(&Spec { env_file: Some("/srv/cles.env".into()), ..spec(Kind::Launchd) }).unwrap_err().contains("Linux"));
     }
 
+    // chemins d'Unix : sous Windows, ils ne sont pas absolus
+    #[cfg(unix)]
     #[test]
     fn launchd_et_windows() {
         let plan = install_plan(&spec(Kind::Launchd)).unwrap();
@@ -355,6 +363,28 @@ mod tests {
         assert!(plan.file.is_none());
         assert_eq!(plan.commands[0].last().unwrap(), "\"/home/ada/.local/bin/talixio-agent\" root --config \"/srv/talixio/talixio.toml\" --workdir \"/srv/talixio\"");
         assert!(plan.commands[0].contains(&"LIMITED".to_string()));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn tache_planifiee_sous_windows() {
+        let ici = Spec {
+            exe: r"C:\Users\ada\AppData\Local\Talixio\talixio-agent.exe".into(),
+            config: r"C:\Talixio\talixio.toml".into(),
+            workdir: r"C:\Talixio".into(),
+            home: r"C:\Users\ada".into(),
+            ..spec(Kind::WindowsTask)
+        };
+        let plan = install_plan(&ici).unwrap();
+        assert!(plan.file.is_none());
+        assert_eq!(
+            plan.commands[0].last().unwrap(),
+            r#""C:\Users\ada\AppData\Local\Talixio\talixio-agent.exe" root --config "C:\Talixio\talixio.toml" --workdir "C:\Talixio""#
+        );
+        assert!(plan.commands[0].contains(&"LIMITED".to_string()));
+        for bad in [r"relatif\talixio.toml", r#"C:\a" --autre ""#, r"C:\a&calc", r"C:\%TEMP%\t.toml", r"C:\a|b"] {
+            assert!(install_plan(&Spec { config: bad.into(), ..ici.clone() }).is_err(), "{bad}");
+        }
     }
 
     #[test]
