@@ -95,7 +95,7 @@ function Login({ login, error }: { login: (token: string, remember: boolean) => 
             <Label htmlFor="token">Jeton de l'API</Label>
             <Input id="token" type="password" autoComplete="current-password" required autoFocus value={token} onChange={(e) => setToken(e.target.value)} className="font-mono" />
             <p className="text-[13px] text-muted-foreground">
-              Il se trouve sur la machine du maître, dans <code>.talixio/api-token</code>.
+              Il se trouve sur la machine du maître, dans <code>.talixio/api-token</code>. Lancé avec <code>TALIXIO_API_TOKEN</code> (Docker) : c'est la valeur de cette variable, et le fichier n'existe pas.
             </p>
           </div>
           <Label className="font-normal">
