@@ -289,30 +289,14 @@ pub fn ensure_private(path: &Path) -> Result<()> {
     if !meta.is_file() {
         bail!("{} n'est pas un fichier ordinaire", path.display());
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        // SAFETY: geteuid ne fait que lire l'identité du process.
-        let me = unsafe { libc::geteuid() };
-        if meta.uid() != me {
-            bail!("{} appartient à un autre compte", path.display());
-        }
-        if meta.mode() & 0o077 != 0 {
-            bail!("{} est lisible par d'autres comptes : chmod 600", path.display());
-        }
-    }
+    crate::os::check_private(path).map_err(anyhow::Error::msg)?;
     Ok(())
 }
 
 /// Crée le dossier d'état, fermé aux autres comptes, et renvoie son chemin réel.
 pub fn prepare_state_dir(path: &Path) -> Result<PathBuf> {
     std::fs::create_dir_all(path).with_context(|| format!("création de {}", path.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
-            .with_context(|| format!("droits de {}", path.display()))?;
-    }
+    crate::os::make_private(path).map_err(anyhow::Error::msg)?;
     path.canonicalize().with_context(|| format!("{}", path.display()))
 }
 

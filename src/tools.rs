@@ -183,45 +183,17 @@ async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T, String> + 
     tokio::task::spawn_blocking(work).await.map_err(|e| e.to_string())?
 }
 
-/// Le fichier ouvert est-il bien celui que désigne, maintenant, le chemin vérifié ? Entre la
-/// vérification et l'ouverture, un dossier du chemin a pu être remplacé par un lien.
-fn same_file(open: &std::fs::Metadata, path: &Path) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        let now = std::fs::symlink_metadata(path).map_err(|e| e.to_string())?;
-        if now.dev() != open.dev() || now.ino() != open.ino() {
-            return Err("accès refusé : le chemin a changé pendant l'opération".into());
-        }
-    }
-    #[cfg(not(unix))]
-    let _ = (open, path);
-    Ok(())
-}
-
-/// Options d'ouverture qui ne suivent pas un lien symbolique en bout de chemin, et ne
-/// restent pas bloquées sur un tube.
-fn no_follow(options: &mut std::fs::OpenOptions) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-    }
-    #[cfg(not(unix))]
-    let _ = options;
-}
-
 fn read_checked(caps: &Capabilities, denied: &[PathBuf], asked: &Path) -> Result<String, String> {
     let real = caps.resolve_read(asked, denied)?;
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
-    no_follow(&mut options);
+    crate::os::no_follow(&mut options);
     let file = options.open(&real).map_err(|e| e.to_string())?;
     let meta = file.metadata().map_err(|e| e.to_string())?;
     if !meta.is_file() {
         return Err("ce n'est pas un fichier".into());
     }
-    same_file(&meta, &caps.resolve_read(asked, denied)?)?;
+    crate::os::same_file(&file, &caps.resolve_read(asked, denied)?)?;
     if meta.len() > MAX_READ {
         return Err(format!("fichier trop gros ({} octets, maximum {MAX_READ})", meta.len()));
     }
@@ -234,22 +206,18 @@ fn write_checked(caps: &Capabilities, denied: &[PathBuf], asked: &Path, content:
     let real = caps.resolve_write(asked, denied)?;
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true);
-    no_follow(&mut options);
+    crate::os::no_follow(&mut options);
     // ouvert sans rien effacer : le contenu n'est remplacé qu'une fois le fichier vérifié
     let mut file = options.open(&real).map_err(|e| e.to_string())?;
     let meta = file.metadata().map_err(|e| e.to_string())?;
     if !meta.is_file() {
         return Err("ce n'est pas un fichier".into());
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        // un lien physique donnerait un second nom, ici, à un fichier d'ailleurs
-        if meta.nlink() > 1 {
-            return Err("écriture refusée : ce fichier a plusieurs noms (lien physique)".into());
-        }
+    // un lien physique donnerait un second nom, ici, à un fichier d'ailleurs
+    if crate::os::link_count(&file)? > 1 {
+        return Err("écriture refusée : ce fichier a plusieurs noms (lien physique)".into());
     }
-    same_file(&meta, &caps.resolve_write(asked, denied)?)?;
+    crate::os::same_file(&file, &caps.resolve_write(asked, denied)?)?;
     file.set_len(0).map_err(|e| e.to_string())?;
     file.write_all(content.as_bytes()).map_err(|e| e.to_string())?;
     Ok(format!("{} octets écrits dans {}", content.len(), real.display()))
@@ -385,27 +353,15 @@ async fn run_command(node: &Arc<Node>, input: &Value) -> Result<String, String> 
         .kill_on_drop(true);
     spawn::apply_safe_env(&mut command);
     // son propre groupe de process : à la fin, tout ce que la commande a lancé part avec elle
-    #[cfg(unix)]
-    command.process_group(0);
-    #[cfg(target_os = "linux")]
-    // SAFETY: entre fork et exec, un seul appel système sans allocation. Si l'agent meurt
-    // brutalement, la commande est tuée par le noyau.
-    unsafe {
-        command.pre_exec(|| {
-            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL, 0, 0, 0) != 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
+    crate::os::isolate(&mut command);
     let mut child = command.spawn().map_err(|e| format!("lancement impossible : {e}"))?;
-    let group = child.id().map(|pid| pid as i32).unwrap_or(0);
+    let group = crate::os::adopt(&mut child)?;
     node.running.lock().unwrap().insert(group);
     let stdout = tokio::spawn(read_capped(child.stdout.take()));
     let stderr = tokio::spawn(read_capped(child.stderr.take()));
     let status = tokio::time::timeout(COMMAND_TIMEOUT, child.wait()).await;
     // la commande est finie, ou trop longue : tout son groupe part avec elle, ce qui ferme ses sorties
-    spawn::kill_group(group);
+    crate::os::kill_group(group);
     node.running.lock().unwrap().remove(&group);
     let collect = |reader| async {
         // un process sorti du groupe peut encore tenir la sortie : on ne l'attend pas

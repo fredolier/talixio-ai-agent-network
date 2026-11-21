@@ -15,7 +15,9 @@ use talixio_agent::model::Providers;
 use talixio_agent::node::{ChildRec, Input, Meter, Node};
 use talixio_agent::policy::Capabilities;
 use talixio_agent::protocol::{NodeInfo, Outbox, ReportKind};
-use talixio_agent::{api, proof, tls, tools};
+#[cfg(unix)]
+use talixio_agent::tools;
+use talixio_agent::{api, proof, tls};
 
 /// Un maître, sans modèle joignable, avec les droits donnés (TOML de `[capabilities]`).
 fn root(dir: &Path, capabilities: &str) -> (Arc<Node>, UnboundedReceiver<Input>) {

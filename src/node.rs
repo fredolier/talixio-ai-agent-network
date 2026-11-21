@@ -48,7 +48,7 @@ pub struct Node {
     /// Marqueur secret des messages authentiques dans la conversation de l'agent.
     pub nonce: String,
     /// Groupes de process des commandes en cours, à tuer si l'agent s'éteint.
-    pub running: Mutex<BTreeSet<i32>>,
+    pub running: Mutex<BTreeSet<crate::os::Group>>,
     /// La base locale de l'agent : sa mémoire et, chez le maître, le journal.
     pub store: Arc<Store>,
     /// Consommation de toute la grappe. Tenue chez le maître seulement.
@@ -575,7 +575,7 @@ impl Node {
         }
         // rien de ce que l'agent a lancé ne lui survit
         for group in std::mem::take(&mut *self.running.lock().unwrap()) {
-            crate::spawn::kill_group(group);
+            crate::os::kill_group(group);
         }
         std::process::exit(code);
     }

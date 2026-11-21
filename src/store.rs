@@ -41,11 +41,7 @@ impl Store {
              );",
         )
         .map_err(err)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-        }
+        let _ = crate::os::make_private(path);
         Ok(Self { db: Mutex::new(db) })
     }
 

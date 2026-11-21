@@ -26,29 +26,6 @@ pub fn apply_safe_env(command: &mut Command) {
     command.env("GIT_CONFIG_NOSYSTEM", "1").env("GIT_CONFIG_GLOBAL", if cfg!(windows) { "NUL" } else { "/dev/null" });
 }
 
-/// Tue un groupe de process entier : la commande et tout ce qu'elle a lancé.
-pub fn kill_group(group: i32) {
-    #[cfg(unix)]
-    if group > 1 {
-        // SAFETY: simple appel système ; un groupe disparu renvoie une erreur sans autre effet.
-        unsafe {
-            libc::killpg(group, libc::SIGKILL);
-        }
-    }
-    #[cfg(not(unix))]
-    let _ = group;
-}
-
-/// Ferme la mémoire et l'environnement du process aux autres process du même compte
-/// (`/proc/<pid>/environ`, `ptrace`) : c'est là que vivent les clés chez le maître.
-pub fn harden_process() {
-    #[cfg(target_os = "linux")]
-    // SAFETY: simple appel système, sans pointeur.
-    unsafe {
-        libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0);
-    }
-}
-
 /// Lance le même exécutable en mode enfant. Les consignes, jeton compris, passent par
 /// l'entrée standard : elles n'apparaissent ni dans la ligne de commande ni dans l'environnement.
 pub async fn spawn_local(node: &Node, boot: &Bootstrap, envelope: &[u8]) -> Result<Child, String> {
@@ -107,9 +84,9 @@ async fn feed(child: &mut Child, payload: &[u8]) -> Result<(), String> {
 /// `ssh` vers la cible, sans rien d'interactif : la machine doit déjà être connue
 /// (`known_hosts`), sinon la connexion est refusée — jamais de confiance à la première vue.
 fn ssh(target: &Target, remote_command: &str) -> Command {
-    let mut command = Command::new(target.program.clone().unwrap_or_else(|| "/usr/bin/ssh".into()));
+    let mut command = Command::new(target.program.clone().unwrap_or_else(|| if cfg!(windows) { r"C:\Windows\System32\OpenSSH\ssh.exe" } else { "/usr/bin/ssh" }.into()));
     // aucun fichier de réglages : ni ceux du compte ni ceux de la machine ne changent ce qui est lancé
-    command.args(["-F", "/dev/null", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10"]);
+    command.args(["-F", if cfg!(windows) { "NUL" } else { "/dev/null" }, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=10"]);
     command.args(["-o", "ServerAliveInterval=15", "-o", "ForwardAgent=no", "-o", "ClearAllForwardings=yes", "-T"]);
     if let Some(port) = target.port {
         command.arg("-p").arg(port.to_string());
@@ -189,7 +166,7 @@ async fn send_bootstrap(child: &mut Child, envelope: &[u8]) -> Result<(), String
 }
 
 fn docker(target: &Target) -> Command {
-    let mut command = Command::new(target.program.clone().unwrap_or_else(|| "/usr/bin/docker".into()));
+    let mut command = Command::new(target.program.clone().unwrap_or_else(|| if cfg!(windows) { r"C:\Program Files\Docker\Docker\resources\bin\docker.exe" } else { "/usr/bin/docker" }.into()));
     command.kill_on_drop(true);
     apply_safe_env(&mut command);
     command

@@ -125,12 +125,25 @@ async fn shutdown_signal() {
             _ = hup.recv() => {}
         }
     }
-    #[cfg(not(unix))]
-    let _ = tokio::signal::ctrl_c().await;
+    #[cfg(windows)]
+    {
+        // Ctrl-C, fermeture de la console, arrêt de la session ou de la machine
+        use tokio::signal::windows::{ctrl_close, ctrl_logoff, ctrl_shutdown};
+        let (Ok(mut close), Ok(mut logoff), Ok(mut shutdown)) = (ctrl_close(), ctrl_logoff(), ctrl_shutdown()) else {
+            let _ = tokio::signal::ctrl_c().await;
+            return;
+        };
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = close.recv() => {}
+            _ = logoff.recv() => {}
+            _ = shutdown.recv() => {}
+        }
+    }
 }
 
 async fn run_root(config: &Path) -> Result<()> {
-    spawn::harden_process();
+    talixio_agent::os::harden_process();
     let mut cfg = RootConfig::load(config)?;
     cfg.state_dir = prepare_state_dir(&cfg.state_dir)?;
     let providers = Providers::from_config(&cfg.models)?;
@@ -158,7 +171,7 @@ async fn run_root(config: &Path) -> Result<()> {
 async fn run_child(state_dir: PathBuf, log_file: Option<PathBuf>) -> Result<()> {
     let mut raw = String::new();
     std::io::stdin().read_to_string(&mut raw).context("lecture des consignes")?;
-    spawn::harden_process();
+    talixio_agent::os::harden_process();
     let envelope: Envelope = serde_json::from_str(&raw).context("consignes de démarrage invalides")?;
     drop(raw);
     // la configuration est scellée : seul le parent, une fois reconnu, en remet la clé
@@ -213,13 +226,11 @@ fn api_token(state_dir: &Path) -> Result<String> {
     let token = random_hex(2);
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
     use std::io::Write;
-    options.open(&path)?.write_all(token.as_bytes())?;
+    // créé vide et fermé aux autres comptes, puis seulement rempli
+    let mut file = options.open(&path)?;
+    talixio_agent::os::make_private(&path).map_err(anyhow::Error::msg)?;
+    file.write_all(token.as_bytes())?;
     Ok(token)
 }
 

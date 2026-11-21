@@ -93,12 +93,10 @@ fn write_private(path: &Path, content: &str) -> Result<()> {
     use std::io::Write;
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    options.open(path).and_then(|mut f| f.write_all(content.as_bytes())).with_context(|| format!("{}", path.display()))
+    // créé vide et fermé aux autres comptes, puis seulement rempli
+    let mut file = options.open(path).with_context(|| format!("{}", path.display()))?;
+    crate::os::make_private(path).map_err(anyhow::Error::msg)?;
+    file.write_all(content.as_bytes()).with_context(|| format!("{}", path.display()))
 }
 
 /// N'accepte qu'un certificat : celui dont on connaît l'empreinte.
@@ -175,12 +173,7 @@ mod tests {
         assert_eq!(first.fingerprint, again.fingerprint);
         assert_eq!(std::fs::read_to_string(dir.path().join("tls-fingerprint")).unwrap(), first.fingerprint);
         assert_ne!(ephemeral().unwrap().fingerprint, first.fingerprint);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(dir.path().join("tls-key.pem")).unwrap().permissions().mode();
-            assert_eq!(mode & 0o077, 0);
-        }
+        crate::os::check_private(&dir.path().join("tls-key.pem")).unwrap();
         assert!(pinned_client("pas-une-empreinte").is_err());
         assert!(pinned_client(&first.fingerprint).is_ok());
     }
