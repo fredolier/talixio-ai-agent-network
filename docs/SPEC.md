@@ -398,7 +398,7 @@ Revue indépendante, à la lecture, du code de déploiement et du TLS. Dix const
 
 | N° | Gravité | Constat | Traitement |
 |---|---|---|---|
-| 1 | Haute | Les fichiers de clés n'étaient interdits qu'aux outils du maître : un enfant local qui recevait le dossier pouvait les lire. | ✅ Les interdits descendent de parent en enfant sur une même machine ; le dossier `.ssh` du compte est interdit d'office ; un fichier de clé déclaré mais introuvable arrête le démarrage. Test à écrire. |
+| 1 | Haute | Les fichiers de clés n'étaient interdits qu'aux outils du maître : un enfant local qui recevait le dossier pouvait les lire. | ✅ Les interdits descendent de parent en enfant sur une même machine ; le dossier `.ssh` du compte est interdit d'office ; un fichier de clé déclaré mais introuvable arrête le démarrage. Rejoué dans `tests/security.rs`. |
 | 2 | Haute | Une cible SSH qui ne lit pas, ou répond sans fin, bloquait le maître ou épuisait sa mémoire ; sa réponse était recopiée telle quelle au modèle. | ✅ Envoi et lectures menés ensemble sous un seul délai, sorties bornées, réponse nettoyée et tronquée. |
 | 3 | Moyenne | Un agent déployé par SSH qui n'obéissait plus n'était que désinstallé, pas tué. | ✅ Son numéro de process est noté au lancement ; la désinstallation le tue, lui et son groupe. Rejoué dans `tests/deploy.rs`. |
 | 4 | Moyenne | Docker : sans `user`, l'agent tournait sous le compte de l'image, souvent root. | ✅ `user` obligatoire, numérique, jamais 0. |

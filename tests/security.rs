@@ -338,3 +338,31 @@ async fn a_budget_cannot_be_overrun_by_parallel_calls() {
     // aucun détail du fournisseur (ici : injoignable) ne redescend vers l'enfant
     assert!(results.iter().all(|r| !format!("{r:?}").contains("127.0.0.1")));
 }
+
+/// Deuxième passe, constat 1 : les fichiers de clés du maître restent hors d'atteinte de ses
+/// enfants, même quand le dossier qui les contient leur est accordé.
+#[tokio::test(flavor = "multi_thread")]
+async fn keys_stay_out_of_reach_of_children() {
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().canonicalize().unwrap();
+    let home = base.join("home");
+    std::fs::create_dir_all(home.join("state")).unwrap();
+    std::fs::write(home.join("cle-api"), "sk-secret").unwrap();
+    std::fs::write(home.join("note.txt"), "bonjour").unwrap();
+    let boot: talixio_agent::config::Bootstrap = serde_json::from_value(json!({
+        "agent_id": "a-enfant", "name": "enfant", "role": "r", "instructions": "i", "model": "main",
+        "capabilities": { "fs_read": [home], "fs_write": [home] }, "parent_id": "p", "parent_name": "maître",
+        "parent_addr": "127.0.0.1:9", "parent_cert": "c".repeat(64), "token": "t", "depth": 1, "target": "local",
+        "timing": { "heartbeat_secs": 1, "suspend_after_secs": 2, "die_after_secs": 4 },
+        "deny": [home.join("cle-api")]
+    }))
+    .unwrap();
+    let (node, _inbox) = Node::new_child(&boot, home.join("state")).unwrap();
+    let path = |name: &str| home.join(name).to_str().unwrap().to_string();
+    assert_eq!(talixio_agent::tools::execute(&node, "read_file", &json!({ "path": path("note.txt") })).await.unwrap(), "bonjour");
+    assert!(talixio_agent::tools::execute(&node, "read_file", &json!({ "path": path("cle-api") })).await.is_err());
+    assert!(talixio_agent::tools::execute(&node, "write_file", &json!({ "path": path("cle-api"), "content": "x" })).await.is_err());
+    assert_eq!(std::fs::read_to_string(home.join("cle-api")).unwrap(), "sk-secret");
+    // et l'interdit descend encore d'un niveau : il fait partie de ce que cet enfant transmettrait
+    assert!(node.deny.contains(&home.join("cle-api")));
+}

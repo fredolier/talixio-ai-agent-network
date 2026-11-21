@@ -48,7 +48,8 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 - [ ] Interface, suite : budgets, validations, réglages ; notifications ; hors ligne
 - [x] Passe de sécurité indépendante sur le déploiement et le TLS : 10 constats, 9 traités (SPEC §7, deuxième passe)
 - [x] Configuration scellée des enfants, clé remise une fois par le parent (décision 23) ; rotation des journaux (décision 24)
-- [ ] Suites de la deuxième passe : test du constat 1 (clés interdites aux enfants) ; rapatrier le journal distant ; retirer les bases des petits-enfants
+- [x] Test du constat 1 de la deuxième passe : clés interdites aux enfants (`tests/security.rs`)
+- [ ] Suites de la deuxième passe : rapatrier le journal distant ; retirer les bases des petits-enfants
 - [ ] Passe de sécurité indépendante sur l'interface web
 
 ## Étape 3 — durcir et durer
