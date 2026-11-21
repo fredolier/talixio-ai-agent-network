@@ -30,6 +30,49 @@ Le script télécharge l'exécutable de la machine, vérifie son empreinte SHA-2
 page des versions du dépôt. L'empreinte vient du même endroit que l'exécutable : elle protège
 d'un téléchargement abîmé, pas d'un dépôt compromis.
 
+## Dans Docker
+
+Pour essayer sans rien installer et sans risque pour la machine : une image qui ne contient que
+l'exécutable (6,5 Mo), sans système ni shell, où le maître tourne sous un compte sans droit.
+
+```bash
+docker build -t talixio-agent .
+```
+
+```bash
+docker run -d --name talixio -p 127.0.0.1:7700:7700 -v talixio-data:/data -e ANTHROPIC_API_KEY=... -e TALIXIO_API_TOKEN=un-jeton-long-de-votre-choix talixio-agent
+```
+
+Puis ouvrez `https://127.0.0.1:7700` (le certificat est fabriqué par le maître : le navigateur
+demande confirmation) et entrez votre jeton. Les agents ne lisent et n'écrivent que dans
+`/data/work`, et aucune commande ne leur est permise. Pour un autre modèle que Claude, montez
+votre configuration : `-v /chemin/talixio.toml:/config/talixio.toml:ro` (modèle :
+`docker/talixio.toml`). D'autres fournisseurs se connectent ensuite depuis l'interface.
+
+```bash
+docker logs talixio
+```
+
+```bash
+docker rm -f talixio
+```
+
+## En service
+
+Pour que le maître reparte seul au démarrage de la machine et après une panne, depuis le dossier
+où se trouve `talixio.toml` :
+
+```bash
+talixio-agent service install --config talixio.toml
+```
+
+Linux : unité systemd de votre compte (en root : `--user <compte>`, le maître ne tourne jamais en
+root). macOS : agent launchd. Windows : tâche planifiée à l'ouverture de session. `--print` montre
+ce qui serait fait sans rien faire ; `service status` et `service uninstall` font le reste. Un
+service n'hérite pas des variables de votre terminal : donnez les clés par `api_key_file`, depuis
+l'interface, ou sous Linux par `--env-file`. Les agents enfants ne sont pas encore recréés au
+redémarrage.
+
 ## Compiler
 
 ```bash

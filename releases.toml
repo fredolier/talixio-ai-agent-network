@@ -7,6 +7,28 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.11.0"
+date = "2026-11-21"
+title = "Le maître en service"
+summary = "Le maître s'installe en service du système : il repart seul au démarrage de la machine et après une panne."
+
+[[release.changes]]
+kind = "nouveau"
+text = "« talixio-agent service install » inscrit le maître auprès du système et le démarre : systemd sous Linux, launchd sous macOS, tâche planifiée sous Windows. « service uninstall » le retire, « service status » montre son état, « --print » montre ce qui serait fait."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Une image Docker minimale pour essayer le maître sans risque : l'exécutable seul, sans système ni shell, sous un compte sans droit. Voir « Dans Docker » dans le README."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Le service ne tourne jamais en root et sa définition ne contient aucun secret. Sous Linux, il ne peut pas gagner de privilèges."
+
+[[release.changes]]
+kind = "attention"
+text = "Au redémarrage reviennent le maître, son journal, sa mémoire, les fournisseurs connectés et les modèles activés. Ses enfants et les missions en cours ne reviennent pas encore. Un service n'hérite pas des variables de votre terminal : donnez les clés par fichier ou depuis l'interface."
+
+[[release]]
 version = "0.10.0"
 date = "2026-11-21"
 title = "Se connecter depuis la page"

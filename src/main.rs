@@ -26,6 +26,14 @@ enum Command {
         /// Fichier de configuration (TOML).
         #[arg(short, long, default_value = "talixio.toml")]
         config: PathBuf,
+        /// Dossier où se placer avant de démarrer (les chemins relatifs de la configuration en partent).
+        #[arg(long)]
+        workdir: Option<PathBuf>,
+    },
+    /// Installe le maître en service : il repart seul au démarrage de la machine et après une panne.
+    Service {
+        #[command(subcommand)]
+        action: ServiceAction,
     },
     /// Lance un agent enfant. Réservé aux agents : les consignes arrivent sur l'entrée standard.
     #[command(hide = true)]
@@ -60,6 +68,35 @@ enum Command {
     },
 }
 
+#[derive(Subcommand)]
+enum ServiceAction {
+    /// Inscrit le maître auprès du système (systemd, launchd, ou tâche planifiée) et le démarre.
+    Install {
+        /// Fichier de configuration (TOML).
+        #[arg(short, long, default_value = "talixio.toml")]
+        config: PathBuf,
+        /// Linux : fichier de variables d'environnement (les clés lues par `api_key_env`), fermé aux autres comptes.
+        #[arg(long)]
+        env_file: Option<PathBuf>,
+        /// Linux, installation en root : le compte ordinaire sous lequel le maître tournera.
+        #[arg(long)]
+        user: Option<String>,
+        /// Montre ce qui serait fait, sans rien faire.
+        #[arg(long)]
+        print: bool,
+    },
+    /// Arrête le service et le retire. La configuration, les clés et le dossier d'état restent.
+    Uninstall {
+        /// Linux, installation faite en root pour ce compte.
+        #[arg(long)]
+        user: Option<String>,
+        #[arg(long)]
+        print: bool,
+    },
+    /// Montre l'état du service.
+    Status,
+}
+
 #[derive(clap::Args)]
 struct Remote {
     /// Adresse de l'API du maître.
@@ -80,7 +117,13 @@ struct Remote {
 #[tokio::main]
 async fn main() -> Result<()> {
     match Cli::parse().command {
-        Command::Root { config } => run_root(&config).await,
+        Command::Root { config, workdir } => {
+            if let Some(dir) = workdir {
+                std::env::set_current_dir(&dir).with_context(|| format!("dossier de travail {}", dir.display()))?;
+            }
+            run_root(&config).await
+        }
+        Command::Service { action } => service(action),
         Command::Child { state_dir, log_file } => run_child(state_dir, log_file).await,
         Command::Releases { last } => {
             use std::io::IsTerminal;
@@ -108,6 +151,74 @@ async fn main() -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn is_root() -> bool {
+    #[cfg(unix)]
+    {
+        // SAFETY: sans argument ni effet.
+        unsafe { libc::geteuid() == 0 }
+    }
+    #[cfg(not(unix))]
+    false
+}
+
+fn service(action: ServiceAction) -> Result<()> {
+    use talixio_agent::service::{self, Spec};
+    let kind = service::kind_here(is_root()).map_err(anyhow::Error::msg)?;
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from).unwrap_or_default();
+    #[cfg(unix)]
+    // SAFETY: sans argument ni effet.
+    let uid = unsafe { libc::getuid() };
+    #[cfg(not(unix))]
+    let uid = 0;
+    let mut spec = Spec { kind, exe: std::env::current_exe()?, config: PathBuf::new(), workdir: std::env::current_dir()?, home, env_file: None, user: None, uid };
+    match action {
+        ServiceAction::Install { config, env_file, user, print } => {
+            // la configuration doit être bonne avant d'en faire un service qui redémarre en boucle
+            let cfg = RootConfig::load(&config)?;
+            spec.config = config.canonicalize().with_context(|| format!("configuration {}", config.display()))?;
+            if cfg!(windows) {
+                // sous Windows, le chemin canonique porte un préfixe que les autres outils ne lisent pas
+                spec.config = std::path::absolute(&config)?;
+            }
+            if let Some(env) = &env_file {
+                ensure_private(env)?;
+                spec.env_file = Some(env.canonicalize()?);
+            }
+            spec.user = user;
+            let plan = service::install_plan(&spec).map_err(anyhow::Error::msg)?;
+            let from_env: Vec<&str> = cfg.models.values().filter_map(|m| m.api_key_env.as_deref()).filter(|name| !name.is_empty()).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+            if !from_env.is_empty() && spec.env_file.is_none() {
+                println!(
+                    "Attention : la configuration lit des clés dans l'environnement ({}). Un service n'hérite pas de votre terminal : donnez-les par `api_key_file`, depuis l'interface, ou (Linux) par `--env-file`.",
+                    from_env.join(", ")
+                );
+            }
+            print!("{}", service::describe(&plan, false));
+            if !print {
+                for skipped in service::apply(&plan, false).map_err(anyhow::Error::msg)? {
+                    println!("Non fait, sans gravité : {skipped}");
+                }
+                println!("Service installé et démarré. État : talixio-agent service status");
+            }
+        }
+        ServiceAction::Uninstall { user, print } => {
+            spec.user = user;
+            let plan = service::uninstall_plan(&spec);
+            print!("{}", service::describe(&plan, true));
+            if !print {
+                service::apply(&plan, true).map_err(anyhow::Error::msg)?;
+                println!("Service retiré. La configuration, les clés et le dossier d'état sont intacts.");
+            }
+        }
+        ServiceAction::Status => {
+            let command = service::status_command(&spec);
+            let status = std::process::Command::new(&command[0]).args(&command[1..]).status().with_context(|| command[0].clone())?;
+            std::process::exit(status.code().unwrap_or(1));
+        }
+    }
+    Ok(())
 }
 
 /// Attend une demande d'arrêt : Ctrl-C, ou, sous Unix, SIGTERM (arrêt de service) ou SIGHUP.

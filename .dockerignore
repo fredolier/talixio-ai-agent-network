@@ -1,0 +1,12 @@
+# Seul ce que la compilation lit entre dans l'image de construction.
+.git
+.github
+target
+docs
+tests
+scripts
+web/node_modules
+web/src
+*.bundle
+talixio.toml
+.talixio

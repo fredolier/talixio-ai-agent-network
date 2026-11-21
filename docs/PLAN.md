@@ -63,7 +63,11 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 - [ ] Validations humaines des actions sensibles, jusqu'à l'interface (D9)
 - [ ] Coffre des clés au niveau 0, clés sous un autre compte que celui des agents (D6, Q6)
 - [ ] Conversations longues : résumé ou compaction (M4)
-- [ ] Agents permanents ; installation en service ou démon, agent hôte par machine (A5, A6, Q4)
+- [x] Le maître en service du système : `service install`, `uninstall`, `status` (A5, décision 28, D122)
+- [x] Image Docker minimale du maître, configuration par défaut (décision 29, D123)
+- [ ] Image Docker, suite : la construire et la publier avec chaque version ; essai réel
+- [ ] Service, suite : essai sur une machine qui redémarre (Linux, macOS, Windows) ; vrai service Windows
+- [ ] Agents permanents recréés au redémarrage, reprise des missions ; agent hôte par machine (A6, S2, S3, Q4, D122)
 - [x] Windows : protections propres au système (Job Objects, listes de droits, liens), tests verts en intégration continue (A2)
 - [ ] Windows : essai sur un poste réel ; agents Windows comme cibles de déploiement ; rejouer sous Windows les tests de déploiement (A2)
 - [x] macOS : compilé et testé en intégration continue (A2)
@@ -100,5 +104,6 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 | 2026-11-21 | v0.8.1 : modèles de prévision et de décision ajoutés au catalogue (10 modèles ; fournisseurs TypeSafe AI et Nixtla), listés pour comparer. |
 | 2026-11-21 | v0.9.0 : les agents appellent les modèles de service (transcription, voix, image, vision, plongements, prévision, décision) par le maître, comptés en appels par nature (`max_calls`). Sept outils, un message du lien (`service_request`), quatre familles d'API. Tests : `tests/services.rs` (faux fournisseur), scénario de prévision par un vrai enfant dans `tests/e2e.rs`. Revue de sécurité indépendante lancée, rapport attendu. D119 inscrite. Pas d'essai réel, faute de clés. |
 | 2026-11-21 | v0.10.0 : se connecter à un fournisseur et activer ses modèles depuis l'interface, à chaud (décision 26, D120) : `src/connect.rs`, six routes, table des modèles et droits du maître modifiables pendant qu'il tourne, OAuth PKCE pour OpenRouter, clé collée pour les autres, `catalog_file`. Tests : `tests/connect.rs` (vrai maître, vrai enfant, faux fournisseur). Défaut trouvé par le test et corrigé avant livraison : après redémarrage, un modèle déconnecté restait dans les droits du maître. Revue de sécurité indépendante rendue : deux constats moyens (quota de la configuration écrasable, « Désactiver » pouvant retirer un modèle de la configuration), quatre bas, tous traités sauf le `state` OAuth, noté en limite (SPEC §7, cinquième passe). Pas d'essai réel, faute de clés. |
+| 2026-11-21 | v0.11.0 : le maître en service du système (`service install`, décision 28, D122) : systemd, launchd, tâche planifiée Windows ; jamais root, aucun secret dans la définition. Image Docker minimale du maître (`FROM scratch`, 6,5 Mo, compte sans droit ; décision 29, D123), essayée hors Docker dans une racine vide. Publication d'une version aussi à la main (la pose d'étiquette est refusée depuis la session de développement). |
 | 2026-11-21 | Versions téléchargeables : publication par étiquette (cinq exécutables, empreintes), scripts d'installation en une ligne pour Linux, macOS et Windows (décision 27, D121). |
 | 2026-11-21 | v0.9.1 : revue de sécurité indépendante des modèles de service rendue : un constat haut (quota contournable par des appels échoués après envoi), un moyen (redirections suivies), six bas ; tous traités et rejoués en test (SPEC §7, quatrième passe). |

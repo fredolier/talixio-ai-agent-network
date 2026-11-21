@@ -49,7 +49,7 @@ Exemples visés :
 | A2 | Tourne sur Linux, macOS et Windows. | 🟢 Les trois compilent et passent les tests en intégration continue (`ubuntu-latest`, `macos-latest`, `windows-latest`), test de bout en bout compris. Les protections sont écrites deux fois, dans `src/os.rs`, parce qu'elles reposent sur des mécanismes propres à chaque système. **Windows** : fichiers secrets fermés par une liste de droits protégée (le compte, SYSTEM, Administrateurs) et vérifiés à l'ouverture (propriétaire, chaque entrée) ; ouverture sans suivre les liens ni les points d'analyse ; chaque commande lancée dans un Job Object qui tue toute sa descendance avec elle, et l'agent lui-même dans un Job qui emporte tout s'il meurt ; process fermé aux autres comptes. **macOS** : code Unix commun, `PT_DENY_ATTACH` ; pas de PDEATHSIG, la descendance est tuée par groupe de process. **Restes** : (1) sous Windows, le propriétaire d'un process peut réécrire ses droits : la fermeture du process y est un frein, pas une garantie ; (2) le déploiement SSH suppose une cible POSIX, un agent Windows ne peut pas encore être une cible ; (3) `tests/deploy.rs` (faux `ssh` en script shell) et un test d'outils ne tournent que sous Unix ; (4) essais faits sur les machines de l'intégration continue, jamais sur un poste réel. |
 | A3 | Se connecte à n'importe quel modèle : Anthropic, et tout serveur compatible OpenAI (OpenAI, Gemini, Mistral, Ollama, vLLM, OpenRouter), comme dans Talixio AI Assistant. | ✅ |
 | A4 | Exécutable de petite taille. | ✅ profil de compilation optimisé en taille |
-| A5 | Peut être installé en service ou en démon sur une machine. | ❓ |
+| A5 | Peut être installé en service ou en démon sur une machine. | 🟡 `talixio-agent service install` (décision 28, v0.11.0) : le maître repart au démarrage de la machine et après une panne. Linux : unité systemd, vérifiée par `systemd-analyze`, pas encore essayée sur une machine qui redémarre. macOS (launchd) et Windows (tâche planifiée à l'ouverture de session, sans relance) : écrits, non essayés. Les enfants ne sont pas encore recréés au redémarrage (agents permanents : à faire). |
 | A6 | Le premier agent installé sur une machine peut y tourner en service et servir de relais pour lancer les autres. | ❓ |
 
 ### Droits et cloisonnement
@@ -327,6 +327,39 @@ Demandé le 2026-11-20. Rien n'est codé.
     publication que l'exécutable (pas de signature) ; les exécutables macOS et Windows ne sont
     pas signés par un certificat d'éditeur, le système peut demander une confirmation au
     premier lancement ; un dépôt privé ne se télécharge pas sans compte.
+28. **Le maître s'installe en service du système.** `talixio-agent service install` écrit la
+    définition du service et le démarre ; `service uninstall` la retire sans toucher à la
+    configuration, aux clés ni au dossier d'état ; `service status` montre son état ; `--print`
+    montre ce qui serait fait, sans rien faire.
+    - **Linux** : unité systemd du compte (`~/.config/systemd/user/`), relancée après une
+      panne (`Restart=on-failure`), sans gain de privilèges possible (`NoNewPrivileges`).
+      Lancée en root, la commande exige `--user <compte>` et écrit une unité du système qui
+      tourne sous ce compte : le maître ne tourne jamais en root.
+    - **macOS** : agent launchd du compte, relancé après une panne ; il démarre à l'ouverture
+      de la session.
+    - **Windows** : tâche planifiée à l'ouverture de session, sans droits élevés ; pas de
+      relance après une panne (un vrai service Windows reste à faire).
+    - **Aucun secret dans la définition.** Les clés restent dans leurs fichiers (`api_key_file`,
+      ou saisies dans l'interface) ; sous Linux, `--env-file` désigne un fichier
+      d'environnement fermé aux autres comptes. La configuration est relue avant
+      l'installation : un service ne démarre pas en boucle sur une configuration fausse.
+    - Les chemins entrent dans la définition tels quels : un chemin relatif, ou portant un
+      guillemet, un retour à la ligne, `%`, `$`, `<`, `>`, `&`, `;` ou `|` est refusé.
+    - **Ce qui revient au redémarrage** : le maître, son journal, sa mémoire, le répertoire
+      des rôles, les fournisseurs connectés et les modèles activés. **Ce qui ne revient pas
+      encore** : ses enfants et les missions en cours.
+29. **Une image Docker minimale pour le maître** (`Dockerfile`). L'image finale part de rien
+    (`FROM scratch`) et ne contient que l'exécutable statique (6,5 Mo) et une configuration par
+    défaut (`docker/talixio.toml`) : ni système, ni shell, ni bibliothèque. Le maître y tourne
+    sous un compte sans droit (65532), jamais root. `/data` porte ce qui dure : `/data/work`,
+    seul dossier ouvert aux agents, et le dossier d'état. Aucune commande n'est accordée, et
+    l'image n'en contient aucune. Le jeton de l'API se donne par `TALIXIO_API_TOKEN` (pas de
+    shell pour aller le lire). C'est la façon la plus sûre d'essayer : ce que fait un agent
+    reste dans le conteneur et son volume. Limites : les enfants créés là tournent dans le même
+    conteneur, sous le même compte ; les cibles SSH et Docker n'y sont pas utilisables (pas de
+    client dans l'image). Essayé : l'exécutable seul dans une racine vide, sous le compte 65532
+    (démarrage, TLS, interface, API, arrêt propre). L'image elle-même n'a pas pu être
+    construite dans l'environnement de développement (pas de démon Docker).
 20. **Les notes de version ont une source unique**, `releases.toml`, embarquée dans l'exécutable.
     Chaque version y ajoute une entrée ; un test refuse une version sans note.
 
@@ -417,7 +450,7 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 | Q1 | ~~Où tourne le maître ?~~ | Tranché : sur une VM toujours allumée (décision 15). |
 | Q2 | ~~Droits d'un enfant sur une autre machine~~ | Tranché : un plafond de droits par cible de déploiement (décision 17). |
 | Q3 | ~~Chiffrement du lien~~ | Tranché : certificat du parent épinglé chez l'enfant (décision 9). |
-| Q4 | Service ou démon (A5, A6) : systemd, launchd, service Windows ; un agent « hôte » par machine qui lance les autres. | À étudier à l'étape 3. |
+| Q4 | Service ou démon (A5, A6) : systemd, launchd, service Windows ; un agent « hôte » par machine qui lance les autres. | Service : fait pour le maître (décision 28). Reste : agents permanents recréés au redémarrage, reprise des missions, agent « hôte » par machine distante. |
 | Q5 | Assistant sur poste de travail : il observe une personne. | Visible et accepté par elle ; étape à part. |
 | Q6 | Coffre des clés au niveau 0. | Fichier chiffré ou coffre du système, à choisir. En attendant : fichier de clé en 0600. À terme, les clés devraient vivre sous un autre compte que celui des agents. |
 | Q7 | Stockage et mémoire des agents (S1–S3) : dossier, SQLite, ou les deux ? | Tranché pour la mémoire et le journal : SQLite embarqué, pour tous les agents (décision 14). Reste à faire : un dossier de travail par agent, ajouté d'office à ses droits (S1) ; l'arbre et les conversations sur disque (S3) ; effacement de la base d'un enfant à sa désinstallation ; mémoire partagée entre agents, si un usage le demande. |

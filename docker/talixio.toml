@@ -1,0 +1,35 @@
+# Configuration par défaut de l'image Docker : de quoi essayer le maître en une commande.
+# Pour la vôtre : -v /chemin/talixio.toml:/config/talixio.toml:ro
+
+name = "maître"
+role = "orchestrateur"
+instructions = """
+Tu pilotes une grappe d'agents pour le compte de la personne qui te parle.
+Délègue ce qui peut l'être à des agents spécialisés, avec le strict minimum de droits.
+"""
+model = "main"
+
+# Dans un conteneur, écouter sur toutes ses interfaces : c'est `docker run -p` qui choisit qui y accède.
+listen = "0.0.0.0:7700"
+state_dir = "/data/.talixio"
+
+[models.main]
+provider = "anthropic"
+model = "claude-opus-5-5"
+api_key_env = "ANTHROPIC_API_KEY"
+
+[models.fast]
+provider = "anthropic"
+model = "claude-haiku-5-5"
+api_key_env = "ANTHROPIC_API_KEY"
+
+# Les agents ne lisent et n'écrivent que dans /data/work. Aucune commande n'est autorisée :
+# l'image ne contient d'ailleurs aucun programme à lancer.
+[capabilities]
+fs_read = ["/data/work"]
+fs_write = ["/data/work"]
+max_tokens = 2000000
+
+[capabilities.spawn]
+max_children = 4
+max_depth = 2

@@ -7,6 +7,7 @@ pub mod agent;
 pub mod api;
 pub mod catalog;
 pub mod config;
+pub mod service;
 pub mod connect;
 pub mod link;
 pub mod model;
