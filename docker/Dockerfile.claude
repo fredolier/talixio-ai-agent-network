@@ -3,12 +3,13 @@
 # le reste ; celle-ci ajoute ce que `claude` demande : un système minimal et un shell.
 #
 #   docker build -f docker/Dockerfile.claude -t talixio-agent:claude .
-#   claude setup-token                                      # sur votre poste : le jeton de votre abonnement
-#   export CLAUDE_CODE_OAUTH_TOKEN=...                      # ce jeton ; le maître ne le lit ni ne le garde
 #   export TALIXIO_API_TOKEN="$(openssl rand -hex 32)"      # le jeton de l'interface : gardez-le
 #   docker run -d --name talixio -p 127.0.0.1:7700:7700 -v talixio-data:/data \
 #     --cap-drop ALL --security-opt no-new-privileges --pids-limit 512 --memory 3g \
-#     -e CLAUDE_CODE_OAUTH_TOKEN -e TALIXIO_API_TOKEN talixio-agent:claude
+#     -e TALIXIO_API_TOKEN talixio-agent:claude
+#   docker exec -it talixio claude auth login               # une fois : `claude` se connecte lui-même
+#                                                           # (lien à ouvrir, code à recoller) ; gardé dans /data/.claude
+#   (ou, sans cette étape : -e CLAUDE_CODE_OAUTH_TOKEN, le jeton tiré par `claude setup-token`)
 #   puis https://127.0.0.1:7700 : « Fournisseurs », « Claude (abonnement) », « Connecter ».
 #
 # Chaque tour d'un agent servi par `claude` est un process : comptez quelques centaines de Mo
@@ -31,6 +32,9 @@ COPY --from=construction /src/target/release/talixio-agent /talixio-agent
 COPY docker/talixio.toml /config/talixio.toml
 USER 65532:65532
 ENV HOME=/home/talixio PATH=/home/talixio/.local/bin:/usr/local/bin:/usr/bin:/bin
+# la connexion de `claude` vit dans le volume : elle survit au remplacement du conteneur.
+# Hors de /data/work, et interdite d'office aux agents.
+ENV CLAUDE_CONFIG_DIR=/data/.claude
 # l'installation officielle, sous le compte du maître : rien n'est modifié dans ce qu'elle pose
 RUN curl -fsSL https://claude.ai/install.sh | bash && claude --version
 WORKDIR /data

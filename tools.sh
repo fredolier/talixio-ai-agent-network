@@ -3,6 +3,7 @@
 #
 #   ./tools.sh up            construit l'image vide et lance le maître
 #   ./tools.sh up claude     pareil, avec la commande `claude` (abonnement Claude Pro ou Max)
+#   ./tools.sh login         connecte `claude` à votre abonnement, une fois (lien à ouvrir, code à recoller)
 #   ./tools.sh build [claude]   construit seulement
 #   ./tools.sh run [claude]     lance seulement (l'image doit exister)
 #   ./tools.sh token         affiche le jeton de l'interface
@@ -16,10 +17,12 @@
 #   TALIXIO_BIND     adresse d'écoute sur cette machine (127.0.0.1 : cette machine seule)
 #   TALIXIO_CONFIG   votre talixio.toml, monté à la place de docker/talixio.toml
 #   TALIXIO_NAME     nom du conteneur (talixio) ; le volume de données est <nom>-data
-#   CLAUDE_CODE_OAUTH_TOKEN   pour « claude » : le jeton tiré par `claude setup-token`
+#   CLAUDE_CODE_OAUTH_TOKEN   facultatif, pour « claude » : le jeton tiré par `claude setup-token`,
+#                             à la place de « ./tools.sh login »
 #
 # Le jeton de l'interface est tiré au hasard une fois et gardé hors du dépôt, fermé aux autres
-# comptes. Le jeton d'abonnement n'est jamais écrit : il ne fait que traverser l'environnement.
+# comptes. La connexion à l'abonnement est faite par `claude` lui-même, qui la garde dans le volume
+# de données, hors de portée des agents ; ce script ne voit ni ne garde aucun jeton d'abonnement.
 
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -70,8 +73,7 @@ run() {
     export TALIXIO_API_TOKEN
     # les secrets passent par leur nom : leur valeur n'apparaît pas sur la ligne de commande
     local env=(-e TALIXIO_API_TOKEN)
-    if [ "${1:-}" = claude ]; then
-        [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || die "CLAUDE_CODE_OAUTH_TOKEN manque : lancez « claude setup-token » sur votre poste, puis « export CLAUDE_CODE_OAUTH_TOKEN=... »"
+    if [ "${1:-}" = claude ] && [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
         env+=(-e CLAUDE_CODE_OAUTH_TOKEN)
     fi
     local config=()
@@ -92,6 +94,7 @@ run() {
     echo "(certificat fabriqué par le maître : le navigateur demande confirmation)"
     echo "Jeton de l'interface : ./tools.sh token"
     if [ "${1:-}" = claude ]; then
+        [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || echo "Connectez votre abonnement, une fois : ./tools.sh login"
         echo "Puis « Fournisseurs », « Claude (abonnement) », « Connecter »."
     fi
 }
@@ -101,6 +104,7 @@ case "${1:-}" in
     run) run "${2:-}" ;;
     up) build "${2:-}"; run "${2:-}" ;;
     token) api_token; echo "$TALIXIO_API_TOKEN" ;;
+    login) docker exec -it "$NAME" claude auth login ;;
     logs) docker logs -f "$NAME" ;;
     status) docker ps -a --filter "name=^$NAME\$" --format '{{.Names}} : {{.Status}} ({{.Image}}, {{.Ports}})' | grep . || echo "$NAME : pas de conteneur" ;;
     stop) docker rm -f "$NAME" >/dev/null 2>&1 && echo "$NAME arrêté ; ses données restent dans le volume $VOLUME" || echo "$NAME ne tournait pas" ;;
@@ -113,5 +117,5 @@ case "${1:-}" in
         rm -f "$TOKEN_FILE"
         echo "Effacé."
         ;;
-    *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+    *) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

@@ -72,16 +72,20 @@ l'ajoute, pour servir des modèles avec un abonnement Claude (Pro, Max) plutôt 
 docker build -f docker/Dockerfile.claude -t talixio-agent:claude .
 ```
 
-Sur votre poste, tirez le jeton de votre abonnement avec l'outil officiel (`claude setup-token`),
-puis :
-
 ```bash
-export CLAUDE_CODE_OAUTH_TOKEN=...
+docker run -d --name talixio -p 127.0.0.1:7700:7700 -v talixio-data:/data --cap-drop ALL --security-opt no-new-privileges --pids-limit 512 --memory 3g -e TALIXIO_API_TOKEN talixio-agent:claude
 ```
 
+Puis connectez `claude` à votre abonnement, une fois (`./tools.sh login` fait la même chose) :
+
 ```bash
-docker run -d --name talixio -p 127.0.0.1:7700:7700 -v talixio-data:/data --cap-drop ALL --security-opt no-new-privileges --pids-limit 512 --memory 3g -e CLAUDE_CODE_OAUTH_TOKEN -e TALIXIO_API_TOKEN talixio-agent:claude
+docker exec -it talixio claude auth login
 ```
+
+`claude` affiche un lien : ouvrez-le, connectez-vous chez Anthropic, recollez le code. Il garde
+sa connexion dans le volume (`/data/.claude`, interdit aux agents) : elle survit aux mises à jour
+du conteneur. Autre voie, sans cette étape : tirer un jeton sur votre poste avec
+`claude setup-token` et le passer au lancement (`-e CLAUDE_CODE_OAUTH_TOKEN`).
 
 Dans « Fournisseurs », « Claude (abonnement) », « Connecter » ; puis activez Opus, Sonnet ou
 Haiku dans « Modèles ». Le maître lance la commande `claude` telle quelle : il ne lit ni ne
