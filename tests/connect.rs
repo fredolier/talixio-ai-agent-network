@@ -37,6 +37,9 @@ async fn fake_provider(State(fake): State<Arc<Fake>>, method: Method, uri: Uri, 
     match (method.as_str(), path.as_str()) {
         ("GET", "/v1/models") if good => Json(json!({ "data": [] })).into_response(),
         ("GET", "/v1/models") => StatusCode::UNAUTHORIZED.into_response(),
+        // un fournisseur ouvert aux anonymes : il refuse toute clé, même fausse
+        ("GET", "/ouvert/models") if key.is_empty() => Json(json!({ "data": [] })).into_response(),
+        ("GET", "/ouvert/models") => StatusCode::FORBIDDEN.into_response(),
         // un fournisseur qui renvoie ailleurs : la clé ne doit pas suivre
         ("GET", "/ailleurs/models") => (StatusCode::TEMPORARY_REDIRECT, [("location", "/piege")]).into_response(),
         ("POST", "/oauth/keys") => {
@@ -413,6 +416,8 @@ async fn a_master_gets_its_model_from_the_interface() {
         format!(
             "[[provider]]\nid = \"faux\"\nname = \"Fournisseur faux\"\ncountry = \"France\"\neurope = true\ntrust = \"4\"\nkind = \"Essai\"\n\
              billing = \"usage\"\napis = [\"openai\"]\nendpoint = \"http://127.0.0.1:{fp}/v1\"\nhosts = [\"127.0.0.1\"]\n\
+             [[provider]]\nid = \"ouvert\"\nname = \"Fournisseur ouvert\"\ncountry = \"France\"\neurope = true\ntrust = \"4\"\nkind = \"Essai\"\n\
+             billing = \"usage\"\napis = [\"openai\"]\nendpoint = \"http://127.0.0.1:{fp}/ouvert\"\nhosts = [\"ouvert.exemple.fr\"]\nkeyless = true\n\
              [[model]]\nname = \"Grand\"\nid = \"grand-1\"\nprovider = \"faux\"\nnature = \"LLM\"\nrank = 7\n\
              [[model]]\nname = \"Petit\"\nid = \"petit-1\"\nprovider = \"faux\"\nnature = \"LLM\"\nrank = 3\n\
              [[model]]\nname = \"Sens\"\nid = \"sens-1\"\nprovider = \"faux\"\nnature = \"Embedding\"\nrank = 5\n"
@@ -438,6 +443,13 @@ async fn a_master_gets_its_model_from_the_interface() {
     let denied = api.http.post(format!("{}/api/models/grand-1/default", api.base)).send().await.unwrap();
     assert_eq!(denied.status(), 401);
     assert!(api.refused("/api/models/grand-1/default", json!({})).await.contains("modèle activé"));
+
+    // sans clé : seulement chez un fournisseur qui l'annonce, et alors aucune clé, même fausse, ne part
+    assert!(api.refused("/api/providers/faux/connect", json!({ "key": "" })).await.contains("clé invalide"));
+    assert_eq!(api.get("/api/models").await["providers"].as_array().unwrap().iter().find(|p| p["id"] == "ouvert").unwrap()["keyless"], true);
+    assert_eq!(api.ok("/api/providers/ouvert/connect", json!({ "key": "" })).await, json!({ "connected": "ouvert", "verified": true }));
+    assert!(!state.join("keys").join("ouvert.key").exists());
+    assert!(fake.seen.lock().unwrap().iter().any(|(path, key, _)| path == "/ouvert/models" && key.is_empty()));
 
     // un modèle de service ne fait pas réfléchir le maître ; le premier modèle de texte activé devient le sien
     api.ok("/api/providers/faux/connect", json!({ "key": KEY })).await;

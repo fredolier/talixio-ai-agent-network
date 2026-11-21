@@ -17,6 +17,10 @@ kind = "nouveau"
 text = "`model` et `[models]` deviennent facultatifs dans la configuration. Sans eux, le maître démarre, ouvre son interface et attend : le premier modèle de texte activé dans « Modèles » devient le sien, et « Donner au maître » lui en donne un autre, sans redémarrage. Le choix est gardé d'un démarrage à l'autre."
 
 [[release.changes]]
+kind = "nouveau"
+text = "OVHcloud se connecte sans clé : « Connecter sans clé » dans « Fournisseurs » (accès anonyme, limites basses). De quoi essayer le maître sans compte nulle part. Essayé pour de vrai."
+
+[[release.changes]]
 kind = "amélioration"
 text = "Image Docker : plus aucune clé à fournir au lancement, seulement le jeton de l'interface."
 

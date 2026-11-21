@@ -18,11 +18,12 @@ pub struct OpenAi {
 impl OpenAi {
     pub fn new(http: reqwest::Client, cfg: &ModelConfig, key: String) -> Result<Self> {
         let mut headers = HeaderMap::new();
-        // les serveurs locaux n'attendent pas de clé
-        let bearer = if key.trim().is_empty() { "none" } else { key.trim() };
-        let mut auth = HeaderValue::from_str(&format!("Bearer {bearer}")).context("clé d'API invalide")?;
-        auth.set_sensitive(true);
-        headers.insert("authorization", auth);
+        // sans clé (serveur local, fournisseur ouvert aux anonymes) : aucun en-tête, une fausse clé serait refusée
+        if !key.trim().is_empty() {
+            let mut auth = HeaderValue::from_str(&format!("Bearer {}", key.trim())).context("clé d'API invalide")?;
+            auth.set_sensitive(true);
+            headers.insert("authorization", auth);
+        }
         let base = cfg.base_url.as_deref().unwrap_or("https://api.openai.com/v1").trim_end_matches('/');
         // au-delà de « high », ces API n'ont pas d'équivalent
         let effort = cfg.effort.as_deref().map(|e| match e {

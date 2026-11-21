@@ -144,7 +144,8 @@ On se connecte depuis la page : dans « Fournisseurs », choisissez un fournisse
 (un lien mène à la page où la créer), « Connecter ». Le maître essaie la clé, la range dans un
 fichier que seul son compte peut lire (`<state_dir>/keys/`), et ne la rend plus jamais. Dans
 « Modèles », « Activer » rend un modèle utilisable aussitôt, sans redémarrage. OpenRouter se
-connecte par autorisation dans le navigateur ; les autres (OpenAI, Anthropic, Gemini, Mistral,
+connecte par autorisation dans le navigateur ; OVHcloud se connecte aussi sans clé (« Connecter
+sans clé » : anonyme, limites basses, de quoi essayer) ; les autres (OpenAI, Anthropic, Gemini, Mistral,
 OVHcloud, AKI.IO, Scaleway, ElevenLabs, DeepSeek) par clé. Le maître lui-même reçoit son
 modèle de la même façon : sans `model` dans `talixio.toml`, il démarre sans modèle ni clé, prend
 le premier modèle de texte activé, et « Donner au maître » lui en donne un autre. Déclarer les

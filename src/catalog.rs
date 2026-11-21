@@ -34,6 +34,9 @@ pub struct Provider {
     /// La page où créer une clé chez ce fournisseur.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub keys_url: String,
+    /// Le fournisseur répond aussi sans clé, avec des limites basses : on peut s'y connecter sans rien coller.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keyless: bool,
     /// OAuth avec PKCE : la page d'autorisation, et l'adresse où échanger le code contre une clé.
     #[serde(default, skip_serializing)]
     pub oauth_authorize: String,

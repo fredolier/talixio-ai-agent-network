@@ -117,6 +117,8 @@ export interface CatalogProvider {
   connect?: 'key' | 'oauth' | 'local' | 'config'
   /** La page du fournisseur où l'on crée une clé. */
   keys_url?: string
+  /** Le fournisseur répond aussi sans clé, avec des limites basses. */
+  keyless?: boolean
 }
 
 export interface CatalogModel {

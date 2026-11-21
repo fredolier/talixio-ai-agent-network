@@ -97,6 +97,7 @@ apis = ["openai"]
 endpoint = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"
 hosts = [".endpoints.kepler.ai.cloud.ovh.net"]
 keys_url = "https://www.ovh.com/manager/#/public-cloud/"
+keyless = true
 
 [[provider]]
 id = "infomaniak"

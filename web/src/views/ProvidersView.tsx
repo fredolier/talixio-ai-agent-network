@@ -212,12 +212,20 @@ function ProviderDetail({ provider, data, cluster }: { provider: CatalogProvider
                   <span className="text-muted-foreground">Vous autorisez le maître chez le fournisseur, sans copier de clé. Sinon, collez une clé :</span>
                 </div>
               )}
+              {provider.keyless && (
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button disabled={busy} onClick={() => run(async () => { await cluster.change(`${path}/connect`, { key: '' }); return 'Connecté sans clé.' })}>
+                    Connecter sans clé
+                  </Button>
+                  <span className="text-muted-foreground">{provider.name} répond aussi sans compte, avec des limites basses : de quoi essayer. Pour un usage suivi, collez une clé :</span>
+                </div>
+              )}
               <form onSubmit={connect} className="flex flex-wrap items-end gap-3">
                 <div className="flex min-w-64 flex-1 flex-col gap-1.5">
                   <Label htmlFor="provider-key">Clé d'API {provider.name}</Label>
                   <Input id="provider-key" type="password" value={key} onChange={(e) => setKey(e.target.value)} className="font-mono" autoComplete="off" spellCheck={false} />
                 </div>
-                <Button type="submit" variant={provider.connect === 'oauth' ? 'outline' : 'default'} disabled={busy || key.trim().length < 8}>Connecter</Button>
+                <Button type="submit" variant={provider.connect === 'oauth' || provider.keyless ? 'outline' : 'default'} disabled={busy || key.trim().length < 8}>Connecter</Button>
                 {provider.keys_url && (
                   <a href={provider.keys_url} target="_blank" rel="noopener noreferrer" className="pb-2 underline underline-offset-4">Obtenir une clé</a>
                 )}

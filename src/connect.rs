@@ -303,8 +303,12 @@ fn store_key(node: &Node, provider: &Provider, key: &str) -> Result<(), String> 
     let dir = node.state_dir.join("keys");
     std::fs::create_dir_all(&dir).map_err(|e| hidden(format!("{} : {e}", dir.display())))?;
     crate::os::make_private(&dir).map_err(hidden)?;
+    let path = key_file(&node.state_dir, &provider.id);
     if !key.is_empty() {
-        write_private(&key_file(&node.state_dir, &provider.id), key.as_bytes()).map_err(hidden)?;
+        write_private(&path, key.as_bytes()).map_err(hidden)?;
+    } else if path.symlink_metadata().is_ok() {
+        // connecté sans clé : une clé d'avant ne doit plus partir
+        std::fs::remove_file(&path).map_err(|e| hidden(format!("clé non effacée : {e}")))?;
     }
     let mut saved = load(&node.state_dir);
     saved.providers.insert(provider.id.clone());
@@ -326,13 +330,18 @@ pub async fn connect(node: &Node, id: &str, key: &str) -> Result<Value, String> 
     let provider = known(id)?;
     let key = key.trim();
     let local = provider.trust == "L";
-    if !(local && key.is_empty()) && !(graphic(key, 512) && key.len() >= 8) {
+    // sans clé : une machine locale, ou un fournisseur qui répond aussi aux anonymes
+    let bare = key.is_empty() && (local || provider.keyless);
+    if !bare && !(graphic(key, 512) && key.len() >= 8) {
         return Err("clé invalide : collez la clé telle que le fournisseur la donne, sans espace".into());
     }
     let _guard = CHANGES.lock().await;
     let verified = verify(provider, key).await?;
     if local && !verified {
         return Err(format!("aucun serveur de modèles ne répond à {}", provider.endpoint));
+    }
+    if bare && !verified {
+        return Err(format!("{} ne répond pas sans clé", provider.name));
     }
     store_key(node, provider, key)?;
     node.emit("status", format!("fournisseur connecté depuis l'interface : {}", provider.name));
