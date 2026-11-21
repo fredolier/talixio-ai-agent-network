@@ -35,6 +35,12 @@ d'un téléchargement abîmé, pas d'un dépôt compromis.
 Pour essayer sans rien installer et sans risque pour la machine : une image qui ne contient que
 l'exécutable (6,5 Mo), sans système ni shell, où le maître tourne sous un compte sans droit.
 
+Le plus court, depuis le dépôt : `./tools.sh up` construit l'image et lance le maître,
+`./tools.sh token` affiche le jeton de l'interface (tiré au hasard, gardé hors du dépôt dans
+`~/.config/talixio/`), `./tools.sh up claude` fait de même avec votre abonnement Claude (voir plus
+bas), `./tools.sh logs`, `status` et `stop` font le reste. Les commandes qu'il lance sont celles
+qui suivent, à la main :
+
 ```bash
 docker build -t talixio-agent .
 ```
