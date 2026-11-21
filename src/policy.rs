@@ -391,7 +391,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let ok = |p: &str, a: &[&str]| caps.check_exec(Path::new(p), &strings(a), &[]).is_ok();
+        let ok = |p: &str, a: &[&str]| caps.check_exec(&abs(p), &strings(a), &[]).is_ok();
         assert!(ok("/usr/bin/git", &["log", "main"]));
         assert!(!ok("/usr/bin/git", &["log"]));
         assert!(!ok("/usr/bin/git", &["log", "main", "--all"]));

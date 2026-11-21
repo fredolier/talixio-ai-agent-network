@@ -33,7 +33,7 @@ async fn fake_model(State(file): State<Arc<String>>, Json(body): Json<Value>) ->
     let message = match (is_root, last["role"].as_str().unwrap()) {
         (true, "user") if text.contains("source=\"enfant\"") && text.contains("SECRET-42") => say("Le lecteur dit : SECRET-42"),
         (true, "user") if text.contains("lance le test") => spawn("lecteur", &folder),
-        (true, "user") if text.contains("escalade") => spawn("pirate", "/"),
+        (true, "user") if text.contains("escalade") => spawn("pirate", if cfg!(windows) { "C:\\" } else { "/" }),
         (true, "tool") if text.contains("Erreur") => say("Création refusée."),
         (true, _) => say("C'est noté."),
         (false, "user") if text.contains("Mission") => call("read_file", json!({ "path": file.as_str() })),
