@@ -402,13 +402,41 @@ Demandé le 2026-11-20. Rien n'est codé.
     - Un fournisseur que le catalogue dit `keyless` (OVHcloud) se connecte sans clé : accès
       anonyme, limites basses. Sans clé, aucun en-tête d'autorisation ne part (une fausse
       clé est refusée). Avec l'image Docker, on essaie donc le maître sans compte nulle part.
-    - Écarté (Q11, tranchée) : la connexion par abonnement (Claude Pro/Max,
+    - D'abord écarté, puis fait autrement (décision 32) : la connexion par abonnement (Claude Pro/Max,
       ChatGPT). L'assistant la fait pour Claude en pilotant la commande officielle `claude`,
       qui doit alors être installée à côté du maître et faire elle-même chaque appel ; le
       jeton d'abonnement ne s'emploie pas en appelant l'API directement. Incompatible avec
       l'exécutable seul et l'image vide.
     - Changer de modèle en cours de conversation envoie la conversation en cours (résultats
       d'outils compris) au nouveau fournisseur : c'est le geste de la personne qui a le jeton.
+32. **L'abonnement Claude passe par la commande officielle `claude`, jamais par l'API.**
+    Fournisseur `claude-abonnement` du catalogue, connecteur `claude-code`. Le maître lance
+    `claude -p`, non modifié, sous son propre compte ; c'est `claude` qui se connecte (sa
+    connexion sur la machine, ou `CLAUDE_CODE_OAUTH_TOKEN` tiré de `claude setup-token`). Le
+    maître ne lit, ne garde ni ne transmet aucun jeton d'abonnement, et ne propose pas lui-même
+    la connexion à claude.ai : c'est ce que les règles d'Anthropic demandent. Talixio reste un
+    exécutable seul : `claude` est un programme externe facultatif, comme `ssh` et `docker`.
+    - `claude` tient la boucle d'outils, mais l'interface reste celle des autres connecteurs
+      (une demande, une réponse), donc les contrôles aussi. Ses outils intégrés, réglages,
+      extensions et serveurs d'outils du compte sont coupés (`--tools ""`,
+      `--strict-mcp-config`, `--setting-sources ""`, `--permission-mode dontAsk`). Il n'a que
+      les outils de l'agent, servis par un pont (`talixio-agent mcp-bridge`) qu'il lance et
+      qui rappelle le maître (`POST /bridge`, jeton tiré pour ce tour). Un appel d'outil est
+      retenu et rendu à l'agent comme tout autre ; l'agent l'exécute avec ses droits ; sa
+      demande suivante libère l'appel.
+    - Une session `claude` par agent et par modèle, reprise d'un tour à l'autre. Sa clé est
+      liée, à chaque niveau de l'arbre, à l'enfant reconnu par le lien : un agent ne peut pas
+      prendre le tour d'un autre. Si la session est perdue (maître relancé, tour abandonné),
+      la conversation est redonnée en clair à une session neuve.
+    - `claude` reçoit un environnement réduit : jamais les clés du maître ni le jeton de son
+      API ; `ANTHROPIC_API_KEY` est toujours retirée (elle passerait avant l'abonnement).
+      Consignes et jeton du pont passent par des fichiers fermés du dossier d'état, pas par
+      la ligne de commande.
+    - Limites : pas d'images ; un process `claude` par tour actif (quelques centaines de Mo) ;
+      un tour qui attend un outil plus de cinq minutes est abandonné et repris dans une
+      session neuve ; les tokens d'un tour abandonné ne sont pas comptés ; l'image Docker
+      vide ne peut pas l'héberger (`docker/Dockerfile.claude`) ; `claude` garde ses propres
+      transcriptions dans le dossier personnel du compte du maître.
 20. **Les notes de version ont une source unique**, `releases.toml`, embarquée dans l'exécutable.
     Chaque version y ajoute une entrée ; un test refuse une version sans note.
 
@@ -490,6 +518,7 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 | POST | `/api/providers/{id}/oauth/finish` `{ "code": … }` | Échange le code contre une clé, que seul le maître voit. |
 | POST | `/api/models/activate` `{ "provider", "model", "alias"?, "calls"? }` | Active un modèle d'un fournisseur connecté d'ici ; rend `{ alias, nature, default, max_calls }` (`default` : il est devenu le modèle du maître, qui n'en avait pas). |
 | POST | `/api/models/{alias}/deactivate` | Désactive un modèle activé d'ici. Refusé tant qu'un agent le détient. Si c'était le modèle du maître, il n'en a plus. |
+| POST | `/bridge` | Hors de l'API de pilotage : le rappel du pont d'outils de `claude` (décision 32). Jeton d'un tour en cours, tiré pour lui ; ne permet que de poser les appels d'outils de ce tour. |
 | POST | `/api/models/{alias}/default` | Donne au maître ce modèle pour réfléchir (décision 31). Refusé si la configuration fixe `model`, si l'alias n'est pas dans ses droits ou ne tient pas une conversation. |
 | GET | `/api/roles` | Le répertoire des rôles (500 fiches au plus). |
 
@@ -507,7 +536,7 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 | Q8 | Abonnement Claude Max au lieu d'une clé d'API (B5). | À vérifier avant tout : qu'un abonnement Max puisse servir à des agents tiers n'est pas acquis, ni techniquement ni dans les conditions d'Anthropic. La voie sûre est la clé d'API avec un solde. Si c'est permis : lire les limites renvoyées par le fournisseur à chaque réponse, et les traiter comme un budget qui se recharge. |
 | Q9 | Android (P4) : piloter depuis le téléphone, ou y faire tourner un agent ? | Piloter : l'interface web, installable comme application (PWA), suffit ; elle demande HTTPS et un maître joignable depuis le téléphone, donc l'étape 2. Agent sur le téléphone : Rust se compile pour Android, mais le système arrête les process d'arrière-plan et enferme chaque application ; à n'étudier que si un usage le demande. |
 | Q10 | Catalogue de fournisseurs et capacités image et voix (F1–F4). | Fait pour l'essentiel (décisions 25 et 26, v0.9.0 et v0.10.0 : on se connecte et on active depuis la page). Reste ouvert : comptage en argent (B4) ; mise à jour du catalogue depuis les fournisseurs ; essai chez de vrais fournisseurs. Notes de l'étude : Format de l'assistant relu (`src/ModelCatalog.php`, `Sovereign.php`, `Routing.php`, `Pricing.php`) : une table de fournisseurs (identifiant, nom, pays, niveau de confiance, adresse, mode de facturation) et une table de modèles (identifiant exact de l'API, fournisseur, nature `LLM`, `Vision`, `Voice`, `Image`, `Embedding`, prix par million de tokens ou par unité : minute, image). Usages liés à un modèle : `fast`, `standard`, `deep`, `voice`, `vision`, `embedding` ; effort et tokens de réflexion portés par le palier. À reprendre ici : `[providers.<nom>]` (adresse, type d'API, fichier de clé) et des modèles par nature, avec prix ; droits de la forme `fournisseur/modèle`. À savoir : l'assistant ne tient ni taille de contexte ni effort par modèle, ne compte que les tokens (minutes et images sont affichées, pas comptées), et n'appelle aucune API d'image ni de synthèse vocale : seules la transcription (`POST /audio/transcriptions`) et les embeddings existent. Image et synthèse sont donc à écrire, pas à reprendre. Côté maître, du code par nature : nouveaux messages du lien, tailles bornées autrement (un son ou une image pèse lourd), comptage en argent (B4), nouveaux outils chez l'agent. Nouvelle surface : revue de sécurité avant de coder. |
-| Q11 | Se connecter par abonnement (Claude Pro/Max, ChatGPT) plutôt que par clé d'API ? | **Tranchée (2026-11-21) : non.** On reste sur les clés d'API et OVHcloud sans clé : aucune dépendance, un seul exécutable. Pour mémoire : L'assistant le fait pour Claude seulement, en pilotant la commande officielle `claude` (`setup-token`, puis `claude -p` à chaque tour, les outils exposés en MCP). Ici, cela demande d'installer cette commande à côté du maître, qui ne serait plus un exécutable seul, et un connecteur d'une autre nature (la commande tient elle-même la boucle d'outils). Le jeton d'abonnement ne doit pas servir à appeler l'API directement : les conditions d'Anthropic réservent cet usage à ses propres outils. Rien d'équivalent chez OpenAI dans l'assistant. |
+| Q11 | Se connecter par abonnement (Claude Pro/Max, ChatGPT) plutôt que par clé d'API ? | **Tranchée (2026-11-21) : oui, par la commande officielle `claude` seulement (décision 32).** D'abord écartée (« pas de dépendances, un seul exécutable »), puis demandée : l'abonnement Max doit pouvoir servir. Talixio reste un exécutable seul ; `claude` est un programme externe facultatif. Pour mémoire : L'assistant le fait pour Claude seulement, en pilotant la commande officielle `claude` (`setup-token`, puis `claude -p` à chaque tour, les outils exposés en MCP). Ici, cela demande d'installer cette commande à côté du maître, qui ne serait plus un exécutable seul, et un connecteur d'une autre nature (la commande tient elle-même la boucle d'outils). Le jeton d'abonnement ne doit pas servir à appeler l'API directement : les conditions d'Anthropic réservent cet usage à ses propres outils. Rien d'équivalent chez OpenAI dans l'assistant. |
 | Q11 | Répertoire des rôles (R1–R3). | Une table SQLite chez le maître. Écriture : à chaque `spawn_agent`, le rôle remonte par le lien, de parent en parent ; à chaque fin de mission, son résultat. Lecture : un outil `find_role` (recherche par mots, puis par embeddings quand F1 existera), dont la demande remonte au maître comme une demande de modèle. Sécurité, à trancher avant de coder : un rôle enregistré contient des instructions écrites par un agent, donc un texte qui peut avoir été empoisonné et que d'autres agents reliront. Il doit être présenté comme une donnée à évaluer, jamais comme une consigne ; ne jamais porter de droits (les droits restent accordés par le parent, dans la limite des siens) ; et un rôle « approuvé » par l'humain doit se distinguer d'un rôle seulement observé. Fuite : un agent d'une branche lit ce qu'une autre branche a écrit ; prévoir de quoi cloisonner. |
 
 ## 7. Sécurité

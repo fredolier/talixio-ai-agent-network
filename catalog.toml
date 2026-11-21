@@ -46,6 +46,20 @@ endpoint = "https://api.anthropic.com"
 hosts = ["api.anthropic.com"]
 keys_url = "https://console.anthropic.com/settings/keys"
 
+# L'abonnement Claude (Pro, Max) du compte qui fait tourner le maître, par la commande officielle
+# `claude` installée sur sa machine. Ni clé ni adresse : le maître lance `claude`, qui se connecte seul.
+[[provider]]
+id = "claude-abonnement"
+name = "Claude (abonnement)"
+country = "États-Unis"
+europe = false
+trust = "3"
+kind = "Abonnement personnel (conditions grand public)"
+billing = "abonnement"
+apis = ["claude-code"]
+endpoint = ""
+hosts = ["claude-code.invalid"]
+
 [[provider]]
 id = "openai"
 name = "OpenAI"
@@ -228,6 +242,27 @@ nature = "LLM"
 rank = 10
 price_in = 4.0
 price_out = 20.0
+
+[[model]]
+name = "Opus (abonnement)"
+id = "opus"
+provider = "claude-abonnement"
+nature = "LLM"
+rank = 10
+
+[[model]]
+name = "Sonnet (abonnement)"
+id = "sonnet"
+provider = "claude-abonnement"
+nature = "LLM"
+rank = 8
+
+[[model]]
+name = "Haiku (abonnement)"
+id = "haiku"
+provider = "claude-abonnement"
+nature = "LLM"
+rank = 6
 
 [[model]]
 name = "Fable 5.1"

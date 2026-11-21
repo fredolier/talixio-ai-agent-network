@@ -66,6 +66,7 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 - [x] Le maître en service du système : `service install`, `uninstall`, `status` (A5, décision 28, D122)
 - [x] Image Docker minimale du maître, configuration par défaut (décision 29, D123)
 - [x] Le maître démarre sans modèle ni clé et reçoit son modèle depuis l'interface (décision 31, D124)
+- [x] Abonnement Claude par la commande officielle `claude` : connecteur, pont d'outils, seconde image Docker (décision 32, D125)
 - [ ] Image Docker, suite : la construire et la publier avec chaque version ; essai réel
 - [ ] Service, suite : essai sur une machine qui redémarre (Linux, macOS, Windows) ; vrai service Windows
 - [x] Agents permanents du maître recréés à son redémarrage, avec leur mémoire et des droits revérifiés (décision 30, D122)
@@ -116,3 +117,4 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 | 2026-11-21 | Écran d'entrée : dit aussi où est le jeton quand le maître est lancé avec `TALIXIO_API_TOKEN` (Docker), cas où `.talixio/api-token` n'existe pas. |
 | 2026-11-21 | OVHcloud sans clé (`keyless` au catalogue, « Connecter sans clé ») ; sans clé, plus d'en-tête d'autorisation factice. **Premier essai chez un vrai fournisseur** : maître lancé sans modèle ni clé, OVHcloud connecté sans clé par l'API, `gpt-oss-120b` activé, réponse reçue. Parcours de l'assistant relu : seul Claude s'y connecte sans clé, par la commande `claude` (abonnement) ; à décider (Q11). |
 | 2026-11-21 | Q11 tranchée : pas de connexion par abonnement ; clés d'API et OVHcloud sans clé, aucune dépendance, un seul exécutable. |
+| 2026-11-21 | v0.13.0 : l'abonnement Claude par la commande officielle `claude` (décision 32, D125, Q11 rouverte et tranchée) : connecteur `claude-code` (`src/model/cli.rs`), pont d'outils (`mcp-bridge`, `POST /bridge`), clé de session liée au lien authentifié, fournisseur « Claude (abonnement) », seconde image Docker. Essai réel avec la vraie commande : maître, reprise de session, refus de droits, enfant. Test : `tests/claude.rs` (fausse commande, `examples/faux_claude.rs`). Revue de sécurité indépendante lancée, rapport attendu : ses constats suivront. Non essayé : construction de l'image, jeton `setup-token` d'un abonnement Max. |

@@ -127,6 +127,13 @@ fn check(catalog: &Catalog) -> Result<(), String> {
     Ok(())
 }
 
+impl Provider {
+    /// Servi par la commande `claude` de la machine du maître : ni adresse, ni clé.
+    pub fn cli(&self) -> bool {
+        self.apis.iter().any(|api| api == "claude-code")
+    }
+}
+
 pub fn provider(id: &str) -> Option<&'static Provider> {
     catalog().provider.iter().find(|p| p.id == id)
 }
@@ -136,7 +143,7 @@ pub fn provider(id: &str) -> Option<&'static Provider> {
 pub fn declaration(provider: &Provider, model_id: &str) -> Option<(&'static str, &'static str, bool)> {
     match catalog().model.iter().find(|m| m.provider == provider.id && m.id == model_id) {
         Some(model) => declared(model, &provider.apis).map(|(api, nature)| (api, nature, model.nature == "Vision")),
-        None => ["anthropic", "openai"].into_iter().find(|api| provider.apis.iter().any(|a| a == api)).map(|api| (api, "llm", false)),
+        None => ["anthropic", "openai", "claude-code"].into_iter().find(|api| provider.apis.iter().any(|a| a == api)).map(|api| (api, "llm", false)),
     }
 }
 
@@ -145,7 +152,7 @@ pub fn declaration(provider: &Provider, model_id: &str) -> Option<(&'static str,
 /// réel chez chaque fournisseur reste à faire.)
 fn declared(model: &Model, apis: &[String]) -> Option<(&'static str, &'static str)> {
     let (nature, wanted): (&str, &[&'static str]) = match model.nature.as_str() {
-        "LLM" | "Vision" => ("llm", &["anthropic", "openai"]),
+        "LLM" | "Vision" => ("llm", &["anthropic", "openai", "claude-code"]),
         "Voice" if model.speech => ("speech", &["openai", "elevenlabs"]),
         "Voice" => ("transcription", &["openai"]),
         "Image" => ("image", &["openai"]),
@@ -201,11 +208,12 @@ pub fn view(configured: &[ModelInfo], linked: &[String]) -> Value {
             let mine: Vec<&ModelInfo> = configured.iter().zip(&owner).filter(|(_, o)| o.is_some_and(|o| o.id == p.id)).map(|(m, _)| m).collect();
             let mut value = serde_json::to_value(p).unwrap_or_default();
             // connecté : au moins un modèle configuré chez lui, avec sa clé (une machine locale n'en demande pas)
-            value["connected"] = json!(linked.contains(&p.id) || mine.iter().any(|m| m.has_key || p.trust == "L"));
+            value["connected"] = json!(linked.contains(&p.id) || mine.iter().any(|m| m.has_key || p.trust == "L" || p.cli()));
             // connecté depuis l'interface : on peut alors activer ses modèles et le déconnecter d'ici
             value["linked"] = json!(linked.contains(&p.id));
             // ce que la page propose : une clé à coller, une autorisation dans le navigateur, ou rien
             value["connect"] = json!(match () {
+                _ if p.cli() => "cli",
                 _ if p.endpoint.is_empty() || p.apis.is_empty() => "config",
                 _ if !p.oauth_authorize.is_empty() => "oauth",
                 _ if p.trust == "L" => "local",
@@ -295,7 +303,7 @@ mod tests {
         }
         for p in &catalog.provider {
             assert!(matches!(p.trust.as_str(), "1" | "2" | "3" | "4" | "5" | "L"), "{}", p.id);
-            assert!(p.apis.iter().all(|a| matches!(a.as_str(), "anthropic" | "openai" | "elevenlabs" | "timesfm" | "systemone")), "{}", p.id);
+            assert!(p.apis.iter().all(|a| matches!(a.as_str(), "anthropic" | "openai" | "elevenlabs" | "timesfm" | "systemone" | "claude-code")), "{}", p.id);
             // sans machine connue, rien ne peut s'y rattacher : permis seulement pour ce qu'on ne sait pas appeler
             assert!(!p.hosts.is_empty() || p.apis.is_empty(), "{}", p.id);
             // « européen » veut dire souverain : jamais accordé à un niveau de confiance moindre

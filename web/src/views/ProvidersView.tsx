@@ -197,7 +197,17 @@ function ProviderDetail({ provider, data, cluster }: { provider: CatalogProvider
         </div>
       ) : provider.connect && provider.connect !== 'config' && !provider.connected ? (
         <div className="mt-3 flex flex-col gap-3 text-[13px]">
-          {provider.connect === 'local' ? (
+          {provider.connect === 'cli' ? (
+            <>
+              <p>
+                Votre abonnement Claude (Pro, Max), par la commande officielle <span className="num">claude</span> installée sur la machine du maître.
+                Le maître la lance telle quelle et ne voit ni mot de passe ni jeton : c'est elle qui se connecte. Connectez-la d'abord
+                (<span className="num">claude</span> puis <span className="num">/login</span>, ou la variable <span className="num">CLAUDE_CODE_OAUTH_TOKEN</span> tirée de <span className="num">claude setup-token</span>).
+                L'usage compte dans les limites de l'abonnement, aux conditions d'Anthropic pour un usage personnel.
+              </p>
+              <div><Button disabled={busy} onClick={() => run(async () => { await cluster.change(`${path}/connect`, { key: '' }); return 'Commande claude trouvée.' })}>Connecter</Button></div>
+            </>
+          ) : provider.connect === 'local' ? (
             <>
               <p>Une machine locale ne demande pas de clé. Le maître vérifie qu'un serveur de modèles répond à <span className="num">{provider.endpoint}</span>.</p>
               <div><Button disabled={busy} onClick={() => run(async () => { await cluster.change(`${path}/connect`, { key: '' }); return 'Connecté.' })}>Connecter</Button></div>

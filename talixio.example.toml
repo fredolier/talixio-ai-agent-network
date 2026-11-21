@@ -58,6 +58,8 @@ api_key_env = "ANTHROPIC_API_KEY"
 
 # D'autres modèles se connectent et s'activent depuis l'interface (« Fournisseurs », « Modèles »),
 # sans toucher à ce fichier. Les clés saisies là vont dans <state_dir>/keys/.
+# claude_program = "/usr/local/bin/claude"     # la commande `claude` (abonnement Claude) ; par défaut, cherchée dans PATH
+# claude_env = ["CLAUDE_CONFIG_DIR"]           # variables du maître à lui transmettre en plus du nécessaire
 # catalog_file = "/etc/talixio/catalog.toml"   # un autre catalogue que celui de l'exécutable ;
 #                                               # il fixe où vont les clés : à protéger comme ce fichier
 

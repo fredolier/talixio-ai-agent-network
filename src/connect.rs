@@ -111,7 +111,7 @@ fn prune_calls(node: &Node, saved: &mut Saved) {
 
 fn known(id: &str) -> Result<&'static Provider, String> {
     let provider = catalog::provider(id).ok_or("fournisseur inconnu du catalogue")?;
-    if provider.endpoint.is_empty() || provider.apis.is_empty() {
+    if !provider.cli() && (provider.endpoint.is_empty() || provider.apis.is_empty()) {
         return Err(format!("{} se déclare dans la configuration du maître : son adresse dépend du compte", provider.name));
     }
     Ok(provider)
@@ -158,7 +158,7 @@ fn declare(state_dir: &Path, provider: &Provider, model: &str) -> Result<(ModelC
     let cfg = ModelConfig {
         provider: api.to_string(),
         model: model.to_string(),
-        base_url: Some(provider.endpoint.clone()),
+        base_url: (!provider.cli()).then(|| provider.endpoint.clone()),
         api_key_file: key.is_file().then_some(key),
         nature: (nature != "llm").then(|| nature.to_string()),
         vision,
@@ -328,6 +328,15 @@ fn store_key(node: &Node, provider: &Provider, key: &str) -> Result<(), String> 
 /// Connecte un fournisseur avec la clé donnée. Une machine locale se connecte sans clé.
 pub async fn connect(node: &Node, id: &str, key: &str) -> Result<Value, String> {
     let provider = known(id)?;
+    if provider.cli() {
+        // ni clé ni adresse : on vérifie seulement que la commande `claude` est là. C'est elle qui
+        // se connecte, avec l'abonnement du compte du maître ; le maître ne voit aucun jeton.
+        let _guard = CHANGES.lock().await;
+        let version = crate::model::cli::probe().await?;
+        store_key(node, provider, "")?;
+        node.emit("status", format!("fournisseur connecté depuis l'interface : {} ({version})", provider.name));
+        return Ok(json!({ "connected": provider.id, "verified": true }));
+    }
     let key = key.trim();
     let local = provider.trust == "L";
     // sans clé : une machine locale, ou un fournisseur qui répond aussi aux anonymes

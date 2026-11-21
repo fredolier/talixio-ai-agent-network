@@ -48,6 +48,7 @@ pub async fn start_listener(
     let mut router = Router::new().route("/link", get(link));
     if api_token.is_some() {
         router = router
+            .route("/bridge", post(bridge))
             .route("/", get(|| async { asset("text/html; charset=utf-8", include_bytes!("../web/dist/index.html")) }))
             .route("/app.js", get(|| async { asset("text/javascript; charset=utf-8", include_bytes!("../web/dist/app.js")) }))
             .route("/app.css", get(|| async { asset("text/css; charset=utf-8", include_bytes!("../web/dist/app.css")) }))
@@ -153,6 +154,21 @@ async fn releases(State(app): State<App>, headers: HeaderMap) -> Response {
         return response;
     }
     Json(json!({ "version": crate::releases::VERSION, "releases": crate::releases::all() })).into_response()
+}
+
+/// Le rappel du pont d'outils de `claude` : un message de son protocole, la réponse en retour.
+/// Le jeton est celui d'un tour en cours, tiré au hasard pour lui, et ne donne rien d'autre :
+/// poser les appels d'outils de ce tour, que l'agent exécutera avec ses propres droits.
+async fn bridge(headers: HeaderMap, Json(message): Json<Value>) -> Response {
+    if headers.contains_key(header::ORIGIN) {
+        return error(StatusCode::FORBIDDEN, "réservé au pont");
+    }
+    let token = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer ")).unwrap_or("");
+    match crate::model::cli::bridge(token, message).await {
+        None => error(StatusCode::UNAUTHORIZED, "tour inconnu"),
+        Some(None) => StatusCode::NO_CONTENT.into_response(),
+        Some(Some(reply)) => Json(reply).into_response(),
+    }
 }
 
 async fn link(State(app): State<App>, headers: HeaderMap, upgrade: WebSocketUpgrade) -> Response {

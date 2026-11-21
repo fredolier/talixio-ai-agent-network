@@ -1,6 +1,7 @@
 //! Les modèles : un format neutre, et un connecteur par famille d'API.
 
 mod anthropic;
+pub mod cli;
 mod openai;
 pub mod service;
 
@@ -111,11 +112,15 @@ impl Message {
 pub enum Provider {
     Anthropic(Anthropic),
     OpenAi(OpenAi),
+    /// La commande `claude`, avec l'abonnement du compte du maître.
+    ClaudeCode(cli::ClaudeCode),
 }
 
 impl Provider {
-    pub async fn complete(&self, request: &ModelRequest) -> Result<ModelResponse> {
+    /// `origin` : l'agent qui demande. Seul un connecteur qui tient une session par agent s'en sert.
+    pub async fn complete(&self, origin: &str, request: &ModelRequest) -> Result<ModelResponse> {
         match self {
+            Provider::ClaudeCode(p) => p.complete(origin, request).await,
             Provider::Anthropic(p) => p.complete(request).await,
             Provider::OpenAi(p) => p.complete(request).await,
         }
@@ -184,6 +189,8 @@ impl Providers {
         let default_url = match cfg.provider.as_str() {
             "anthropic" => "https://api.anthropic.com",
             "elevenlabs" => "https://api.elevenlabs.io",
+            // pas d'adresse : c'est la commande `claude` de la machine du maître qui appelle
+            "claude-code" => "claude://claude-code.invalid",
             _ => "https://api.openai.com",
         };
         let host = reqwest::Url::parse(cfg.base_url.as_deref().unwrap_or(default_url))
@@ -212,7 +219,8 @@ impl Providers {
                 "anthropic" => Provider::Anthropic(Anthropic::new(self.http.clone(), cfg, key)?),
                 // OpenAI, Gemini, Mistral, Ollama, vLLM, OpenRouter… : la même API, une autre adresse
                 "openai" => Provider::OpenAi(OpenAi::new(self.http.clone(), cfg, key)?),
-                other => bail!("modèle « {alias} » : fournisseur inconnu « {other} » (anthropic ou openai)"),
+                "claude-code" => Provider::ClaudeCode(cli::ClaudeCode::new(cfg).with_context(|| format!("modèle « {alias} »"))?),
+                other => bail!("modèle « {alias} » : fournisseur inconnu « {other} » (anthropic, openai ou claude-code)"),
             })
         };
         let mut table = self.table.write().unwrap();
@@ -265,10 +273,10 @@ impl Providers {
         service.call(&request.input).await
     }
 
-    pub async fn complete(&self, request: &ModelRequest) -> Result<ModelResponse> {
+    pub async fn complete(&self, origin: &str, request: &ModelRequest) -> Result<ModelResponse> {
         let provider = self.table.read().unwrap().by_alias.get(&request.model).cloned();
         let provider = provider.ok_or_else(|| anyhow!("modèle inconnu : « {} »", request.model))?;
-        provider.complete(request).await
+        provider.complete(origin, request).await
     }
 }
 

@@ -114,7 +114,7 @@ export interface CatalogProvider {
   /** Connecté depuis cette interface : ses modèles s'activent et il se déconnecte d'ici. */
   linked?: boolean
   /** Ce que la page propose : une clé à coller, une autorisation dans le navigateur, rien pour une machine locale, ou la configuration. */
-  connect?: 'key' | 'oauth' | 'local' | 'config'
+  connect?: 'key' | 'oauth' | 'local' | 'cli' | 'config'
   /** La page du fournisseur où l'on crée une clé. */
   keys_url?: string
   /** Le fournisseur répond aussi sans clé, avec des limites basses. */

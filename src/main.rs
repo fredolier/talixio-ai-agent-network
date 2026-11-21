@@ -46,6 +46,9 @@ enum Command {
     },
     /// Affiche la grappe.
     Tree(Remote),
+    /// Usage interne : le pont d'outils que la commande `claude` lance et qui rappelle le maître.
+    #[command(hide = true)]
+    McpBridge,
     /// Affiche les notes de version de cet exécutable.
     Releases {
         /// Seulement la dernière version.
@@ -125,6 +128,7 @@ async fn main() -> Result<()> {
         }
         Command::Service { action } => service(action),
         Command::Child { state_dir, log_file } => run_child(state_dir, log_file).await,
+        Command::McpBridge => talixio_agent::model::cli::run_bridge().await,
         Command::Releases { last } => {
             use std::io::IsTerminal;
             let mut releases = talixio_agent::releases::all();
@@ -312,6 +316,19 @@ async fn run_root(config: &Path) -> Result<()> {
     for note in notes {
         eprintln!("[{}] {note}", cfg.name);
     }
+    // la commande `claude` travaille dans un dossier à nous, vide, hors de portée des agents
+    let claude_dir = cfg.state_dir.join("claude");
+    std::fs::create_dir_all(&claude_dir).with_context(|| format!("création de {}", claude_dir.display()))?;
+    talixio_agent::os::make_private(&claude_dir).map_err(anyhow::Error::msg)?;
+    for stale in std::fs::read_dir(&claude_dir).into_iter().flatten().flatten() {
+        let _ = std::fs::remove_file(stale.path());
+    }
+    talixio_agent::model::cli::install(talixio_agent::model::cli::Setup {
+        program: cfg.claude_program.clone().unwrap_or_else(|| "claude".into()),
+        env: cfg.claude_env.clone(),
+        workdir: claude_dir,
+        exe: std::env::current_exe().context("chemin de cet exécutable")?,
+    });
     let providers = Providers::from_config(&cfg.models)?;
     let token = api_token(&cfg.state_dir)?;
     let (node, inbox) = Node::new_root(&cfg, providers).map_err(anyhow::Error::msg)?;
@@ -323,6 +340,7 @@ async fn run_root(config: &Path) -> Result<()> {
     std::fs::write(cfg.state_dir.join("tls-fingerprint"), &identity.fingerprint)?;
     let fingerprint = identity.fingerprint.clone();
     let addr = api::start_listener(node.clone(), cfg.listen, Some(token), identity).await?;
+    talixio_agent::model::cli::set_callback(addr, &fingerprint);
     eprintln!("[{}] agent maître {} — API sur https://{addr}", node.name, node.id);
     eprintln!("[{}] empreinte du certificat : {fingerprint}", node.name);
     eprintln!("[{}] jeton de l'API : {}", node.name, cfg.state_dir.join("api-token").display());

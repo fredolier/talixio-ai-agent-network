@@ -42,6 +42,12 @@ pub struct RootConfig {
     /// Un catalogue de fournisseurs et de modèles à la place de celui de l'exécutable. Il fixe
     /// les adresses où vont les clés saisies dans l'interface : à protéger comme ce fichier-ci.
     pub catalog_file: Option<PathBuf>,
+    /// La commande `claude` (Claude Code), pour les modèles servis par l'abonnement du compte
+    /// du maître. Par défaut : `claude`, cherché dans `PATH`.
+    pub claude_program: Option<PathBuf>,
+    /// Variables d'environnement du maître transmises à `claude` en plus du strict nécessaire.
+    #[serde(default)]
+    pub claude_env: Vec<String>,
     /// Peut être vide : les modèles s'activent alors depuis l'interface.
     #[serde(default)]
     pub models: BTreeMap<String, ModelConfig>,

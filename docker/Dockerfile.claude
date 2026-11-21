@@ -1,0 +1,40 @@
+# L'agent maître avec la commande officielle `claude` à côté de lui, pour servir des modèles par
+# un abonnement Claude (Pro, Max). L'image ordinaire (Dockerfile) reste vide et suffit pour tout
+# le reste ; celle-ci ajoute ce que `claude` demande : un système minimal et un shell.
+#
+#   docker build -f docker/Dockerfile.claude -t talixio-agent:claude .
+#   claude setup-token                                      # sur votre poste : le jeton de votre abonnement
+#   export CLAUDE_CODE_OAUTH_TOKEN=...                      # ce jeton ; le maître ne le lit ni ne le garde
+#   export TALIXIO_API_TOKEN="$(openssl rand -hex 32)"      # le jeton de l'interface : gardez-le
+#   docker run -d --name talixio -p 127.0.0.1:7700:7700 -v talixio-data:/data \
+#     --cap-drop ALL --security-opt no-new-privileges --pids-limit 512 --memory 3g \
+#     -e CLAUDE_CODE_OAUTH_TOKEN -e TALIXIO_API_TOKEN talixio-agent:claude
+#   puis https://127.0.0.1:7700 : « Fournisseurs », « Claude (abonnement) », « Connecter ».
+#
+# Chaque tour d'un agent servi par `claude` est un process : comptez quelques centaines de Mo
+# par agent actif.
+
+FROM rust:1-alpine AS construction
+RUN apk add --no-cache build-base
+WORKDIR /src
+COPY Cargo.toml Cargo.lock catalog.toml releases.toml ./
+COPY src src
+COPY web/dist web/dist
+RUN cargo build --release --locked && strip target/release/talixio-agent
+
+FROM alpine:3
+# ce que l'installation de `claude` demande sur Alpine, et un compte sans droit
+RUN apk add --no-cache bash curl ca-certificates libgcc libstdc++ ripgrep \
+ && adduser -D -u 65532 -h /home/talixio talixio \
+ && mkdir -p /data/work && chown -R 65532:65532 /data && chmod -R 700 /data
+COPY --from=construction /src/target/release/talixio-agent /talixio-agent
+COPY docker/talixio.toml /config/talixio.toml
+USER 65532:65532
+ENV HOME=/home/talixio PATH=/home/talixio/.local/bin:/usr/local/bin:/usr/bin:/bin
+# l'installation officielle, sous le compte du maître : rien n'est modifié dans ce qu'elle pose
+RUN curl -fsSL https://claude.ai/install.sh | bash && claude --version
+WORKDIR /data
+VOLUME /data
+EXPOSE 7700
+ENTRYPOINT ["/talixio-agent"]
+CMD ["root", "--config", "/config/talixio.toml"]

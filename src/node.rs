@@ -308,6 +308,13 @@ impl ActivityLog {
     }
 }
 
+/// L'origine d'une demande venue d'un enfant : l'enfant reconnu, puis l'empreinte de ce qu'il déclare.
+fn chained(child_id: &str, claimed: &str) -> String {
+    use sha2::Digest;
+    let digest = sha2::Sha256::digest(claimed.as_bytes());
+    format!("{}~{}", crate::clean(child_id, 40, false), &crate::hex(&digest)[..16])
+}
+
 impl Node {
     /// `cfg.state_dir` doit être le chemin réel du dossier d'état (voir `prepare_state_dir`).
     pub fn new_root(cfg: &RootConfig, providers: Providers) -> Result<(Arc<Self>, mpsc::UnboundedReceiver<Input>), String> {
@@ -493,7 +500,7 @@ impl Node {
             (Some(providers), _) => {
                 let estimate = estimate(&request);
                 self.meter.lock().unwrap().reserve(self.caps.max_tokens, estimate, u32::MAX)?;
-                let result = providers.complete(&request).await;
+                let result = providers.complete(origin, &request).await;
                 self.meter.lock().unwrap().settle(estimate, result.as_ref().ok().map(|r| r.usage.total()));
                 // le détail d'une erreur de fournisseur reste chez le maître
                 result.map_err(|e| {
@@ -675,7 +682,11 @@ impl Node {
             }
             child.meter.reserve(child.caps.max_tokens, estimate, MAX_PARALLEL_CALLS)?;
         }
-        let result = self.complete(origin, request).await;
+        // ce qu'un enfant dit de l'origine n'est pas cru : à chaque niveau, elle est liée à l'enfant
+        // reconnu par le lien. Une session de modèle tenue par agent ne peut donc pas être prise
+        // par un autre agent, même de la même branche.
+        let origin = chained(child_id, origin);
+        let result = self.complete(&origin, request).await;
         if let Some(child) = self.children.lock().unwrap().get_mut(child_id) {
             child.meter.settle(estimate, result.as_ref().ok().map(|r| r.usage.total()));
         }
@@ -736,6 +747,9 @@ impl Node {
 
     /// Arrête un enfant direct : ordre d'extinction, puis fin du process après un court délai.
     pub fn stop_child(&self, child_id: &str, reason: &str) {
+        if self.providers.is_some() {
+            crate::model::cli::forget_branch(child_id);
+        }
         let (name, mut process, target) = {
             let mut children = self.children.lock().unwrap();
             let Some(child) = children.get_mut(child_id) else { return };

@@ -57,6 +57,35 @@ demande confirmation) et entrez votre jeton. Dans « Fournisseurs », connectez 
 aucune commande ne leur est permise. Pour d'autres droits, montez votre configuration :
 `-v /chemin/talixio.toml:/config/talixio.toml:ro` (modèle : `docker/talixio.toml`).
 
+### Avec votre abonnement Claude
+
+L'image ci-dessus est vide : elle ne peut pas héberger la commande `claude`. Une seconde image
+l'ajoute, pour servir des modèles avec un abonnement Claude (Pro, Max) plutôt qu'une clé d'API :
+
+```bash
+docker build -f docker/Dockerfile.claude -t talixio-agent:claude .
+```
+
+Sur votre poste, tirez le jeton de votre abonnement avec l'outil officiel (`claude setup-token`),
+puis :
+
+```bash
+export CLAUDE_CODE_OAUTH_TOKEN=...
+```
+
+```bash
+docker run -d --name talixio -p 127.0.0.1:7700:7700 -v talixio-data:/data --cap-drop ALL --security-opt no-new-privileges --pids-limit 512 --memory 3g -e CLAUDE_CODE_OAUTH_TOKEN -e TALIXIO_API_TOKEN talixio-agent:claude
+```
+
+Dans « Fournisseurs », « Claude (abonnement) », « Connecter » ; puis activez Opus, Sonnet ou
+Haiku dans « Modèles ». Le maître lance la commande `claude` telle quelle : il ne lit ni ne
+garde votre jeton, et n'appelle pas l'API d'Anthropic lui-même. Les outils intégrés de `claude`
+sont coupés : il n'a que ceux de l'agent, dont chaque appel repasse par les contrôles de droits.
+L'usage compte dans les limites de votre abonnement, aux conditions d'Anthropic pour un usage
+personnel ; elles ont changé plusieurs fois en 2026, vérifiez-les. Hors Docker, il suffit que
+`claude` soit installé et connecté sous le compte du maître. « Anthropic » (clé d'API) reste
+disponible à côté : les deux peuvent servir en même temps.
+
 ```bash
 docker logs talixio
 ```
