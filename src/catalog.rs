@@ -89,7 +89,39 @@ fn catalog() -> &'static Catalog {
 /// se protège comme la configuration elle-même.
 pub fn install(text: &str) -> Result<(), String> {
     let parsed: Catalog = toml::from_str(text).map_err(|e| format!("catalogue illisible : {e}"))?;
+    check(&parsed)?;
     CATALOG.set(parsed).map_err(|_| "catalogue déjà chargé".to_string())
+}
+
+/// Un catalogue fixe où vont les clés et où la page envoie l'utilisateur : identifiants sans
+/// surprise (ils nomment des fichiers), adresses en HTTPS, ou sur cette machine.
+fn check(catalog: &Catalog) -> Result<(), String> {
+    let address = |text: &str, local_ok: bool| {
+        text.is_empty()
+            || reqwest::Url::parse(text).is_ok_and(|url| {
+                let local = matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"));
+                url.username().is_empty() && url.password().is_none() && (url.scheme() == "https" || (local_ok && local && url.scheme() == "http"))
+            })
+    };
+    for p in &catalog.provider {
+        let id_ok = !p.id.is_empty() && p.id.len() <= 40 && p.id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && !p.id.starts_with('-');
+        if !id_ok {
+            return Err(format!("catalogue : identifiant de fournisseur invalide « {} » (minuscules, chiffres, tirets)", crate::clean(&p.id, 60, false)));
+        }
+        if catalog.provider.iter().filter(|other| other.id == p.id).count() > 1 {
+            return Err(format!("catalogue : fournisseur « {} » déclaré deux fois", p.id));
+        }
+        if !address(&p.endpoint, true) || !address(&p.oauth_exchange, true) {
+            return Err(format!("catalogue : fournisseur « {} » : une adresse où part une clé doit être en https (ou sur cette machine)", p.id));
+        }
+        if !address(&p.keys_url, false) || !address(&p.oauth_authorize, false) {
+            return Err(format!("catalogue : fournisseur « {} » : `keys_url` et `oauth_authorize` doivent être en https", p.id));
+        }
+        if p.oauth_authorize.is_empty() != p.oauth_exchange.is_empty() {
+            return Err(format!("catalogue : fournisseur « {} » : `oauth_authorize` et `oauth_exchange` vont ensemble", p.id));
+        }
+    }
+    Ok(())
 }
 
 pub fn provider(id: &str) -> Option<&'static Provider> {
@@ -315,5 +347,32 @@ mod tests {
         assert_eq!(callable("TimesFM (BigQuery AI.FORECAST)"), false);
         let text = view.to_string();
         assert!(!text.contains("api_key_file") && !text.contains("api_key_env"));
+    }
+
+    #[test]
+    fn un_catalogue_ne_peut_pas_detourner_une_cle() {
+        check(&toml::from_str(SOURCE).unwrap()).unwrap();
+        let with = |id: &str, endpoint: &str, more: &str| {
+            let text = format!(
+                "model = []\n[[provider]]\nid = \"{id}\"\nname = \"Essai\"\ncountry = \"\"\neurope = true\ntrust = \"3\"\nkind = \"\"\nbilling = \"\"\napis = [\"openai\"]\nendpoint = \"{endpoint}\"\nhosts = []\n{more}\n"
+            );
+            check(&toml::from_str::<Catalog>(&text).unwrap())
+        };
+        let good = "https://api.exemple.fr/v1";
+        with("essai", good, "keys_url = \"https://exemple.fr/cles\"").unwrap();
+        with("essai", "http://127.0.0.1:11434/v1", "").unwrap();
+        with("essai", good, "oauth_authorize = \"https://exemple.fr/auth\"\noauth_exchange = \"https://exemple.fr/cles\"").unwrap();
+        for (id, endpoint, more) in [
+            ("../../ailleurs", good, ""),
+            ("Majuscule", good, ""),
+            ("essai", "http://api.exemple.fr/v1", ""),
+            ("essai", "https://u:p@api.exemple.fr/v1", ""),
+            ("essai", good, "keys_url = \"javascript:alert(1)\""),
+            ("essai", good, "keys_url = \"http://127.0.0.1/cles\""),
+            ("essai", good, "oauth_authorize = \"https://exemple.fr/auth\""),
+            ("essai", good, "oauth_authorize = \"https://exemple.fr/auth\"\noauth_exchange = \"http://exemple.fr/cles\""),
+        ] {
+            assert!(with(id, endpoint, more).is_err(), "{id} {endpoint} {more}");
+        }
     }
 }

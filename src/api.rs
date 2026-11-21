@@ -130,7 +130,7 @@ async fn models(State(app): State<App>, headers: HeaderMap) -> Response {
     body["default"] = json!(app.node.model);
     body["models"] = json!(catalog);
     // les alias activés depuis l'interface : eux seuls se désactivent d'ici
-    body["activated"] = json!(crate::connect::load(&app.node.state_dir).models.keys().collect::<Vec<_>>());
+    body["activated"] = json!(crate::connect::activated());
     Json(body).into_response()
 }
 

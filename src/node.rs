@@ -504,8 +504,9 @@ impl Node {
         let live = self.live.read().unwrap();
         let mut rights = self.caps.clone();
         rights.models.extend(live.models.iter().filter(|alias| !self.caps.models.contains(alias)).cloned());
+        // un quota fixé par la configuration ne se change pas à chaud
         for (nature, calls) in &live.max_calls {
-            rights.max_calls.insert(nature.clone(), *calls);
+            rights.max_calls.entry(nature.clone()).or_insert(*calls);
         }
         rights
     }
@@ -535,6 +536,17 @@ impl Node {
     /// Chez le maître : le nombre d'appels permis pour une nature de service.
     pub fn set_calls(&self, nature: &str, calls: u64) {
         self.live.write().unwrap().max_calls.insert(nature.to_string(), calls);
+        self.tree_dirty.notify_one();
+    }
+
+    /// La configuration fixe-t-elle déjà le nombre d'appels de cette nature ?
+    pub fn calls_fixed(&self, nature: &str) -> bool {
+        self.caps.max_calls.contains_key(nature)
+    }
+
+    /// Chez le maître : plus aucun appel accordé à chaud pour cette nature.
+    pub fn clear_calls(&self, nature: &str) {
+        self.live.write().unwrap().max_calls.remove(nature);
         self.tree_dirty.notify_one();
     }
 
@@ -570,6 +582,10 @@ impl Node {
     /// Traite l'appel de service d'un enfant, après avoir vérifié qu'il y a droit.
     pub async fn service_for_child(&self, child_id: &str, origin: &str, request: ServiceRequest) -> Result<ServiceResponse, ServiceFail> {
         let nature = request.input.nature().as_str();
+        // un modèle retiré du parent depuis la création de l'enfant ne lui sert plus
+        if !self.rights().models.contains(&request.model) {
+            return Err("modèle non autorisé pour cet agent".into());
+        }
         {
             let mut children = self.children.lock().unwrap();
             let child = children.get_mut(child_id).ok_or("enfant inconnu")?;
@@ -624,6 +640,9 @@ impl Node {
         request: ModelRequest,
     ) -> Result<ModelResponse, String> {
         let estimate = estimate(&request);
+        if !self.rights().models.contains(&request.model) {
+            return Err("modèle non autorisé pour cet agent".into());
+        }
         {
             let mut children = self.children.lock().unwrap();
             let child = children.get_mut(child_id).ok_or("enfant inconnu")?;

@@ -83,8 +83,11 @@ export function useCluster() {
     const reload = () => api<Cluster['models']>(token, '/api/models').then(setModels).catch(() => {})
     // retour d'une autorisation commencée ici : le code part chez le maître et quitte l'adresse
     const code = new URLSearchParams(location.search).get('code')
-    const pending = sessionStorage.getItem(OAUTH)
-    if (code && pending) {
+    // la marque ne vaut que dix minutes, comme l'autorisation chez le maître
+    const [pending, since] = (sessionStorage.getItem(OAUTH) ?? '').split(' ')
+    const expired = !!pending && Date.now() - Number(since) > 600_000
+    if (expired) sessionStorage.removeItem(OAUTH)
+    if (code && pending && !expired) {
       sessionStorage.removeItem(OAUTH)
       history.replaceState(null, '', `${location.pathname}#fournisseurs`)
       api(token, `/api/providers/${encodeURIComponent(pending)}/oauth/finish`, { code })
@@ -136,7 +139,7 @@ export function useCluster() {
           },
           authorize: async (provider) => {
             const { url } = await api<{ url: string }>(token, `/api/providers/${encodeURIComponent(provider)}/oauth`, { callback: `${location.origin}/` })
-            sessionStorage.setItem(OAUTH, provider)
+            sessionStorage.setItem(OAUTH, `${provider} ${Date.now()}`)
             location.assign(url)
           },
           send: async (text) => {

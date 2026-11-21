@@ -176,7 +176,8 @@ async fn connect_and_activate_from_the_interface() {
         format!(
             "{}{}{}{}{}\
              [[model]]\nname = \"Grand\"\nid = \"grand-1\"\nprovider = \"faux\"\nnature = \"LLM\"\nrank = 7\n\
-             [[model]]\nname = \"Sens\"\nid = \"sens-1\"\nprovider = \"faux\"\nnature = \"Embedding\"\nrank = 5\n",
+             [[model]]\nname = \"Sens\"\nid = \"sens-1\"\nprovider = \"faux\"\nnature = \"Embedding\"\nrank = 5\n\
+             [[model]]\nname = \"Peintre\"\nid = \"peint-1\"\nprovider = \"faux\"\nnature = \"Image\"\nrank = 5\n",
             entry("faux", &format!("http://127.0.0.1:{fp}/v1"), "keys_url = \"https://exemple.fr/cles\""),
             entry("ailleurs", &format!("http://127.0.0.1:{fp}/ailleurs"), ""),
             entry("muet", &format!("http://127.0.0.1:{fp}/muet"), ""),
@@ -199,7 +200,7 @@ async fn connect_and_activate_from_the_interface() {
             "model = \"main\"\nlisten = \"127.0.0.1:{port}\"\nstate_dir = {state:?}\ncatalog_file = {catalog:?}\n\
              [timing]\nheartbeat_secs = 1\nsuspend_after_secs = 2\ndie_after_secs = 4\n\
              [models.main]\nprovider = \"openai\"\nbase_url = \"http://127.0.0.1:{fp}/v1\"\nmodel = \"principal\"\napi_key_env = \"TALIXIO_TEST_CLE_CONNEXION\"\n\
-             [capabilities]\nfs_read = [{tmp:?}]\n[capabilities.spawn]\nmax_children = 2\nmax_depth = 1\n"
+             [capabilities]\nfs_read = [{tmp:?}]\n[capabilities.max_calls]\nimage = 4\n[capabilities.spawn]\nmax_children = 2\nmax_depth = 1\n"
         ),
     )
     .unwrap();
@@ -263,7 +264,7 @@ async fn connect_and_activate_from_the_interface() {
     assert_eq!(done["nature"], "llm");
     assert_eq!(api.ok("/api/models/activate", json!({ "provider": "faux", "model": "grand-1" })).await["alias"], "grand-1-2");
     assert_eq!(api.ok("/api/models/grand-1-2/deactivate", json!({})).await["deactivated"], "grand-1-2");
-    assert!(api.refused("/api/models/main/deactivate", json!({})).await.contains("configuration du maître"));
+    assert!(api.refused("/api/models/main/deactivate", json!({})).await.contains("pas été activé depuis l'interface"));
     assert!(api.refused("/api/providers/compte/disconnect", json!({})).await.contains("pas été connecté depuis l'interface"));
 
     // un modèle de service s'active avec son nombre d'appels, borné
@@ -271,10 +272,25 @@ async fn connect_and_activate_from_the_interface() {
     let done = api.ok("/api/models/activate", json!({ "provider": "faux", "model": "sens-1", "alias": "sens", "calls": 3 })).await;
     assert_eq!(done, json!({ "alias": "sens", "nature": "embedding", "max_calls": 3 }));
 
+    // un nombre d'appels fixé par la configuration ne se change pas d'ici, ni en plus ni en moins
+    let done = api.ok("/api/models/activate", json!({ "provider": "faux", "model": "peint-1", "alias": "peintre", "calls": 1000 })).await;
+    assert_eq!(done, json!({ "alias": "peintre", "nature": "image", "max_calls": 4 }));
+    api.ok("/api/models/peintre/deactivate", json!({})).await;
+    api.ok("/api/models/activate", json!({ "provider": "faux", "model": "peint-1", "alias": "peintre", "calls": 0 })).await;
+    api.ok("/api/models/peintre/deactivate", json!({})).await;
+    // des appels donnés d'ici partent avec le dernier modèle de leur nature
+    api.ok("/api/models/activate", json!({ "provider": "faux", "model": "sens-1", "alias": "sens-2", "calls": 9 })).await;
+    assert_eq!(api.get("/api/tree").await["capabilities"]["max_calls"], json!({ "embedding": 9, "image": 4 }));
+    api.ok("/api/models/sens/deactivate", json!({})).await;
+    assert_eq!(api.get("/api/tree").await["capabilities"]["max_calls"], json!({ "embedding": 9, "image": 4 }));
+    api.ok("/api/models/sens-2/deactivate", json!({})).await;
+    assert_eq!(api.get("/api/tree").await["capabilities"]["max_calls"], json!({ "image": 4 }));
+    api.ok("/api/models/activate", json!({ "provider": "faux", "model": "sens-1", "alias": "sens", "calls": 3 })).await;
+
     // sans redémarrage : le maître détient ces modèles, et peut les accorder
     let tree = api.get("/api/tree").await;
     assert_eq!(tree["capabilities"]["models"], json!(["main", "grand-1", "sens"]));
-    assert_eq!(tree["capabilities"]["max_calls"], json!({ "embedding": 3 }));
+    assert_eq!(tree["capabilities"]["max_calls"], json!({ "embedding": 3, "image": 4 }));
     let models = api.get("/api/models").await;
     assert_eq!(models["activated"], json!(["grand-1", "sens"]));
     let grand = models["catalog"].as_array().unwrap().iter().find(|m| m["id"] == "grand-1").unwrap();
@@ -318,10 +334,22 @@ async fn connect_and_activate_from_the_interface() {
     let (mut root, api) = start_root(&config, &state, port).await;
     let tree = api.get("/api/tree").await;
     assert_eq!(tree["capabilities"]["models"], json!(["main", "grand-1", "sens"]));
-    assert_eq!(tree["capabilities"]["max_calls"], json!({ "embedding": 3 }));
+    assert_eq!(tree["capabilities"]["max_calls"], json!({ "embedding": 3, "image": 4 }));
     let models = api.get("/api/models").await;
     assert_eq!(provider(&models, "faux")["linked"], true);
     assert_eq!(models["activated"], json!(["grand-1", "sens"]));
+
+    // la configuration reprend un alias activé d'ici : elle gagne, et l'interface ne peut plus le retirer
+    root.kill().await.unwrap();
+    let mut text = std::fs::read_to_string(&config).unwrap();
+    text.push_str(&format!("[models.grand-1]\nprovider = \"openai\"\nbase_url = \"http://127.0.0.1:{fp}/v1\"\nmodel = \"grand-1\"\napi_key_env = \"TALIXIO_TEST_CLE_CONNEXION\"\n"));
+    std::fs::write(&config, text).unwrap();
+    let (mut root, api) = start_root(&config, &state, port).await;
+    let models = api.get("/api/models").await;
+    assert_eq!(models["activated"], json!(["sens"]));
+    assert!(models["models"].as_array().unwrap().iter().any(|m| m["alias"] == "grand-1"));
+    assert!(api.refused("/api/models/grand-1/deactivate", json!({})).await.contains("pas été activé depuis l'interface"));
+    assert_eq!(api.get("/api/tree").await["capabilities"]["models"], json!(["grand-1", "main", "sens"]));
 
     // l'autorisation dans le navigateur : le retour ne vise que cette page, le code ne sert qu'une fois
     let back = format!("https://127.0.0.1:{port}/");
@@ -351,9 +379,12 @@ async fn connect_and_activate_from_the_interface() {
 
     // déconnecter : les modèles activés d'ici sont retirés, la clé est effacée
     let done = api.ok("/api/providers/faux/disconnect", json!({})).await;
-    assert_eq!(done["models"], json!(["grand-1", "sens"]));
+    assert_eq!(done["models"], json!(["sens"]));
     assert!(!key_file.exists());
-    assert_eq!(api.get("/api/tree").await["capabilities"]["models"], json!(["main"]));
+    let tree = api.get("/api/tree").await;
+    assert_eq!(tree["capabilities"]["models"], json!(["grand-1", "main"]));
+    assert_eq!(tree["capabilities"]["max_calls"], json!({ "image": 4 }));
+    assert!(api.get("/api/models").await["models"].as_array().unwrap().iter().any(|m| m["alias"] == "grand-1"), "le modèle de la configuration reste");
     let models = api.get("/api/models").await;
     assert_eq!(provider(&models, "faux")["linked"], false);
     assert_eq!(models["activated"], json!([]));

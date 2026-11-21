@@ -42,6 +42,8 @@ pub struct SavedModel {
 /// Un changement à la fois.
 static CHANGES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 /// L'autorisation OAuth en cours : fournisseur, secret de vérification, heure de départ.
+/// Les alias réellement activés d'ici dans ce maître : eux seuls se retirent d'ici.
+static ACTIVE: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 static PENDING: Mutex<Option<(String, String, Instant)>> = Mutex::new(None);
 
 fn file(state_dir: &Path) -> PathBuf {
@@ -73,9 +75,35 @@ fn write_private(path: &Path, content: &[u8]) -> Result<(), String> {
     std::fs::rename(&tmp, path).map_err(|e| format!("{} : {e}", path.display()))
 }
 
+/// Ce que l'API dit d'un échec sur le disque : ni chemin, ni détail (ils vont à la sortie d'erreur du maître).
+fn hidden(detail: String) -> String {
+    eprintln!("connexion depuis l'interface : {detail}");
+    "le maître n'a pas pu écrire ou relire son dossier d'état (détail dans sa sortie d'erreur)".to_string()
+}
+
 fn save(state_dir: &Path, saved: &Saved) -> Result<(), String> {
     let text = serde_json::to_vec_pretty(saved).map_err(|e| e.to_string())?;
-    write_private(&file(state_dir), &text)
+    write_private(&file(state_dir), &text).map_err(hidden)
+}
+
+/// Les alias activés depuis l'interface, tels que ce maître les tient.
+pub fn activated() -> Vec<String> {
+    ACTIVE.lock().unwrap().iter().cloned().collect()
+}
+
+fn id_name(text: &str) -> bool {
+    alias_name(text)
+}
+
+/// Les natures de service encore servies par un modèle activé d'ici gardent leurs appels ; les autres les perdent.
+fn prune_calls(node: &Node, saved: &mut Saved) {
+    let natures = node.natures();
+    let used: BTreeSet<&String> = saved.models.keys().filter_map(|alias| natures.get(alias)).collect();
+    let gone: Vec<String> = saved.max_calls.keys().filter(|nature| !used.contains(nature)).cloned().collect();
+    for nature in gone {
+        saved.max_calls.remove(&nature);
+        node.clear_calls(&nature);
+    }
 }
 
 fn known(id: &str) -> Result<&'static Provider, String> {
@@ -138,33 +166,49 @@ fn declare(state_dir: &Path, provider: &Provider, model: &str) -> Result<(ModelC
 
 /// Au démarrage, avant de créer le maître : les modèles activés depuis l'interface rejoignent
 /// ceux de la configuration. Rend ceux qui ont été repris (alias, nature), à accorder au maître
-/// par [`restore`], et ce qu'il faut signaler. Un modèle dont l'alias est pris par la
-/// configuration, ou dont le fournisseur a quitté le catalogue, est laissé de côté.
+/// par [`restore`], et ce qu'il faut signaler. La configuration gagne : un alias qu'elle prend
+/// est rayé de ce que l'interface a activé. Un modèle dont le fournisseur a quitté le catalogue,
+/// ou dont la clé n'est plus lisible, est laissé de côté sans bloquer le démarrage.
 pub fn merge(cfg: &mut RootConfig) -> (Vec<(String, &'static str)>, Vec<String>) {
-    let saved = load(&cfg.state_dir);
+    let mut saved = load(&cfg.state_dir);
     let (mut restored, mut notes) = (Vec::new(), Vec::new());
+    let before = saved.models.len();
+    saved.models.retain(|alias, _| {
+        let free = alias_name(alias) && !cfg.models.contains_key(alias);
+        if !free {
+            notes.push(format!("modèle « {} » : alias pris par la configuration ou illisible, activation oubliée", crate::clean(alias, 40, false)));
+        }
+        free
+    });
+    if saved.models.len() != before {
+        let _ = save(&cfg.state_dir, &saved);
+    }
     for (alias, model) in &saved.models {
-        let declared = known(&model.provider).and_then(|provider| declare(&cfg.state_dir, provider, &model.model));
+        let declared = known(&model.provider)
+            .and_then(|provider| if saved.providers.contains(&model.provider) { declare(&cfg.state_dir, provider, &model.model) } else { Err("fournisseur déconnecté".into()) })
+            .and_then(|(declared, nature)| declared.api_key().map(|_| (declared, nature)).map_err(|e| format!("clé illisible ({e:#})")));
         match declared {
-            _ if !alias_name(alias) || !saved.providers.contains(&model.provider) => notes.push(format!("modèle « {} » : activation illisible, ignorée", crate::clean(alias, 40, false))),
-            Ok(_) if cfg.models.contains_key(alias) => notes.push(format!("modèle « {alias} » : alias déjà pris par la configuration, activation ignorée")),
             Ok((declared, nature)) => {
                 cfg.models.insert(alias.clone(), declared);
                 restored.push((alias.clone(), nature));
             }
-            Err(e) => notes.push(format!("modèle « {alias} » : {e}")),
+            Err(e) => notes.push(format!("modèle « {alias} » laissé de côté : {e}")),
         }
     }
     (restored, notes)
 }
 
 /// Le maître créé : il retrouve les droits donnés depuis l'interface, que l'interface peut reprendre.
+/// Les appels ne reviennent que pour les natures d'un modèle repris ; la configuration, si elle fixe
+/// une nature, garde le dernier mot.
 pub fn restore(node: &Node, restored: &[(String, &'static str)]) {
+    let mut active = ACTIVE.lock().unwrap();
     for (alias, nature) in restored {
         node.grant_model(alias, nature);
+        active.insert(alias.clone());
     }
     for (nature, calls) in &load(&node.state_dir).max_calls {
-        if crate::policy::counted_nature(nature) {
+        if crate::policy::counted_nature(nature) && restored.iter().any(|(_, n)| n == nature) {
             node.set_calls(nature, (*calls).min(MAX_CALLS));
         }
     }
@@ -201,14 +245,24 @@ async fn verify(provider: &Provider, key: &str) -> Result<bool, String> {
 
 fn store_key(node: &Node, provider: &Provider, key: &str) -> Result<(), String> {
     let dir = node.state_dir.join("keys");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{} : {e}", dir.display()))?;
-    crate::os::make_private(&dir)?;
+    std::fs::create_dir_all(&dir).map_err(|e| hidden(format!("{} : {e}", dir.display())))?;
+    crate::os::make_private(&dir).map_err(hidden)?;
     if !key.is_empty() {
-        write_private(&key_file(&node.state_dir, &provider.id), key.as_bytes())?;
+        write_private(&key_file(&node.state_dir, &provider.id), key.as_bytes()).map_err(hidden)?;
     }
     let mut saved = load(&node.state_dir);
     saved.providers.insert(provider.id.clone());
-    save(&node.state_dir, &saved)
+    save(&node.state_dir, &saved)?;
+    // une clé remplacée vaut tout de suite pour les modèles déjà activés : l'ancienne ne sert plus
+    let Some(providers) = &node.providers else { return Ok(()) };
+    let active = ACTIVE.lock().unwrap().clone();
+    for (alias, model) in saved.models.iter().filter(|(alias, m)| m.provider == provider.id && active.contains(*alias)) {
+        let (declared, _) = declare(&node.state_dir, provider, &model.model)?;
+        let key = declared.api_key().map_err(|e| hidden(format!("{e:#}")))?;
+        providers.remove(alias);
+        providers.add(alias, &declared, key).map_err(|e| hidden(format!("{e:#}")))?;
+    }
+    Ok(())
 }
 
 /// Connecte un fournisseur avec la clé donnée. Une machine locale se connecte sans clé.
@@ -250,29 +304,41 @@ fn drop_model(node: &Node, alias: &str) {
 }
 
 /// Déconnecte un fournisseur connecté depuis l'interface : ses modèles activés d'ici sont
-/// retirés, sa clé est effacée. Ce que la configuration déclare n'est pas touché.
+/// retirés, sa clé est effacée. Ce que la configuration déclare n'est pas touché. Vaut aussi
+/// pour un fournisseur qui a quitté le catalogue depuis.
 pub async fn disconnect(node: &Node, id: &str) -> Result<Value, String> {
-    let provider = catalog::provider(id).ok_or("fournisseur inconnu du catalogue")?;
+    if !id_name(id) {
+        return Err("fournisseur inconnu du catalogue".into());
+    }
+    let name = catalog::provider(id).map(|p| p.name.clone()).unwrap_or_else(|| id.to_string());
     let _guard = CHANGES.lock().await;
     let mut saved = load(&node.state_dir);
     if !saved.providers.contains(id) {
-        return Err(format!("{} n'a pas été connecté depuis l'interface : sa connexion est dans la configuration du maître", provider.name));
+        return Err(match catalog::provider(id) {
+            Some(_) => format!("{name} n'a pas été connecté depuis l'interface : sa connexion est dans la configuration du maître"),
+            None => "fournisseur inconnu du catalogue".to_string(),
+        });
     }
+    let active = ACTIVE.lock().unwrap().clone();
     let aliases: Vec<String> = saved.models.iter().filter(|(_, m)| m.provider == id).map(|(alias, _)| alias.clone()).collect();
-    for alias in &aliases {
+    for alias in aliases.iter().filter(|alias| active.contains(*alias)) {
         check_free(node, alias)?;
     }
     for alias in &aliases {
-        drop_model(node, alias);
+        // seulement ce qui a été activé d'ici : jamais un modèle de la configuration
+        if ACTIVE.lock().unwrap().remove(alias) {
+            drop_model(node, alias);
+        }
         saved.models.remove(alias);
     }
     saved.providers.remove(id);
+    prune_calls(node, &mut saved);
     save(&node.state_dir, &saved)?;
     let key = key_file(&node.state_dir, id);
     if key.symlink_metadata().is_ok() {
-        std::fs::remove_file(&key).map_err(|e| format!("clé non effacée : {e}"))?;
+        std::fs::remove_file(&key).map_err(|e| hidden(format!("clé non effacée : {e}")))?;
     }
-    node.emit("status", format!("fournisseur déconnecté depuis l'interface : {}", provider.name));
+    node.emit("status", format!("fournisseur déconnecté depuis l'interface : {name}"));
     Ok(json!({ "disconnected": id, "models": aliases }))
 }
 
@@ -305,18 +371,24 @@ pub async fn activate(node: &Node, id: &str, model: &str, alias: Option<&str>, c
         }
     };
     let (declared, nature) = declare(&node.state_dir, provider, model)?;
-    let key = declared.api_key().map_err(|e| format!("{e:#}"))?;
-    providers.add(&alias, &declared, key).map_err(|e| format!("{e:#}"))?;
-    node.grant_model(&alias, nature);
+    let key = declared.api_key().map_err(|e| hidden(format!("{e:#}")))?;
     saved.models.insert(alias.clone(), SavedModel { provider: id.to_string(), model: model.to_string() });
-    let service = crate::policy::counted_nature(nature);
-    if let (true, Some(calls)) = (service, calls) {
-        node.set_calls(nature, calls);
+    // les appels d'une nature que la configuration fixe déjà ne se changent pas d'ici
+    let calls = calls.filter(|_| crate::policy::counted_nature(nature) && !node.calls_fixed(nature));
+    if let Some(calls) = calls {
         saved.max_calls.insert(nature.to_string(), calls);
     }
-    if let Err(e) = save(&node.state_dir, &saved) {
-        drop_model(node, &alias);
-        return Err(e);
+    save(&node.state_dir, &saved)?;
+    if let Err(e) = providers.add(&alias, &declared, key) {
+        saved.models.remove(&alias);
+        prune_calls(node, &mut saved);
+        let _ = save(&node.state_dir, &saved);
+        return Err(format!("{e:#}"));
+    }
+    node.grant_model(&alias, nature);
+    ACTIVE.lock().unwrap().insert(alias.clone());
+    if let Some(calls) = calls {
+        node.set_calls(nature, calls);
     }
     node.emit("status", format!("modèle activé depuis l'interface : « {alias} » ({}, {nature})", provider.name));
     Ok(json!({ "alias": alias, "nature": nature, "max_calls": node.rights().max_calls.get(nature) }))
@@ -326,12 +398,14 @@ pub async fn activate(node: &Node, id: &str, model: &str, alias: Option<&str>, c
 pub async fn deactivate(node: &Node, alias: &str) -> Result<Value, String> {
     let _guard = CHANGES.lock().await;
     let mut saved = load(&node.state_dir);
-    if !saved.models.contains_key(alias) {
-        return Err("ce modèle est déclaré dans la configuration du maître : c'est là qu'il se retire".into());
+    if !ACTIVE.lock().unwrap().contains(alias) {
+        return Err("ce modèle n'a pas été activé depuis l'interface : s'il est dans la configuration du maître, c'est là qu'il se retire".into());
     }
     check_free(node, alias)?;
+    ACTIVE.lock().unwrap().remove(alias);
     drop_model(node, alias);
     saved.models.remove(alias);
+    prune_calls(node, &mut saved);
     save(&node.state_dir, &saved)?;
     node.emit("status", format!("modèle désactivé depuis l'interface : « {} »", crate::clean(alias, 40, false)));
     Ok(json!({ "deactivated": alias }))

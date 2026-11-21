@@ -26,7 +26,7 @@ text = "Écran « Modèles » : « Activer » rend un modèle utilisable aussit�
 
 [[release.changes]]
 kind = "sécurité"
-text = "Une clé saisie ne part qu'à l'adresse du catalogue, reste dans un fichier fermé au compte du maître, et n'est plus jamais rendue : ni par l'API, ni au journal, ni à un agent. Revue de sécurité indépendante des nouvelles routes."
+text = "Une clé saisie ne part qu'à l'adresse du catalogue, reste dans un fichier fermé au compte du maître, et n'est plus jamais rendue : ni par l'API, ni au journal, ni à un agent. Revue de sécurité indépendante : deux constats moyens et quatre bas, traités ; un reste noté (OAuth sans « state »)."
 
 [[release.changes]]
 kind = "nouveau"

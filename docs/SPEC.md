@@ -476,6 +476,10 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
     (`<state_dir>/keys/`, fermées à son seul compte), comme un `api_key_file`. Pas de coffre
     (D6, Q6). Une commande accordée au maître lui-même (`exec`) tourne sous son compte : sans
     cloisonnement par l'OS, elle pourrait les lire. Limite 1, inchangée.
+16. **OAuth sans `state`** (H3) : l'autorisation dans le navigateur repose sur PKCE seul. Ne pas
+    ouvrir de lien vers la page du maître pendant une autorisation en cours.
+17. **Le fournisseur « local » est un port de la machine du maître** : ne le connecter que si un
+    serveur de modèles y tourne bien, sous un compte de confiance.
 13. **Le quota de service compte des appels, pas de l'argent** : un appel d'image coûte plus
     qu'un appel de plongements. Régler `max_calls` nature par nature, au plus juste (B4 à venir).
 10. Un agent déployé qui ne répond plus (machine éteinte, réseau coupé) s'éteint seul, mais sa
@@ -585,6 +589,21 @@ constat critique ; deux défauts réels, reproduits par exécution, puis rejoué
 
 ### Cinquième passe (2026-11-21) : connexion aux fournisseurs depuis l'interface
 
-Revue indépendante des six routes de connexion et d'activation, du rangement des clés, de
-l'OAuth et des droits du maître modifiés à chaud : **en cours**, constats à inscrire ici. Aucune
-version n'est étiquetée ni publiée avant son traitement.
+Revue indépendante, à la lecture, des six routes de connexion et d'activation, du rangement des
+clés, de l'OAuth et des droits du maître modifiés à chaud. Aucun constat critique ni haut : ni
+fuite de clé, ni clé envoyée ailleurs qu'à l'adresse du catalogue, ni traversée de chemin, ni
+droit en plus pour un enfant. Deux défauts moyens, traités et rejoués dans `tests/connect.rs`.
+
+| N° | Gravité | Constat | Traitement |
+|---|---|---|---|
+| H1 | Moyenne | Le nombre d'appels donné à l'activation remplaçait celui de la configuration, pour toute la nature, et restait après la désactivation : avec le seul jeton, on portait à un million les appels d'un modèle branché sur la clé de l'administrateur, ou on les coupait. | ✅ Un nombre fixé par la configuration ne se change pas d'ici. Les appels donnés d'ici partent avec le dernier modèle de leur nature activé d'ici, et ne reviennent au démarrage que pour un modèle repris. Test. |
+| H2 | Moyenne | Un alias activé d'ici puis repris dans la configuration restait proposé à « Désactiver », qui retirait alors le modèle de la configuration jusqu'au redémarrage (le modèle du maître compris). | ✅ Le maître tient la liste de ce qu'il a réellement activé d'ici : elle seule se retire. La configuration gagne et l'activation en double est oubliée. Test. |
+| H3 | Basse | OAuth : le retour `?code=` n'est lié à la demande que par PKCE, sans `state`. Un lien forgé ouvert pendant une autorisation en cours la fait échouer ; il ne connecterait le maître au compte d'un autre que si le fournisseur acceptait un code sans vérifier le défi. | 🟡 La marque de la page expire maintenant en dix minutes, comme chez le maître. Pas de `state` : le comportement d'OpenRouter sur une adresse de retour portant déjà une requête n'a pas pu être essayé. Limite 16. |
+| H4 | Basse | Course de quelques microsecondes entre la création d'un enfant et une désactivation : l'enfant pouvait naître avec un alias retiré, puis s'en servir si l'alias était réactivé vers un autre modèle. | ✅ À chaque appel d'un enfant, le parent revérifie qu'il détient encore le modèle. |
+| H5 | Basse | Une clé remplacée ne valait qu'au redémarrage pour les modèles déjà activés ; un fournisseur sorti du catalogue ne se déconnectait plus. | ✅ Les connecteurs sont refaits avec la nouvelle clé ; la déconnexion vaut pour tout fournisseur connecté d'ici. |
+| H6 | Basse | `catalog_file` n'était pas contrôlé : identifiant servant de nom de fichier, adresses en clair, liens quelconques. | ✅ Identifiants en minuscules, chiffres et tirets ; adresses où part une clé en HTTPS ou sur la machine ; liens en HTTPS. Test, y compris sur le catalogue embarqué. |
+| H7 | Information | Des erreurs de disque rendues par l'API citaient des chemins du dossier d'état ; une clé devenue illisible bloquait le démarrage ; un échec d'écriture laissait des appels accordés. | ✅ Message générique, détail sur la sortie d'erreur du maître ; modèle laissé de côté avec une note ; rien n'est accordé avant l'écriture. |
+| H8 | Information | Quatre routes lisent le corps (2 Mo au plus) avant de vérifier le jeton, comme `/api/messages`. Le fournisseur « local » pointe sur un port de la machine : un process local qui l'occupe se ferait passer pour le serveur de modèles. | Accepté, noté : limite 17. |
+
+Non vérifié par la revue : exécution sous Windows, comportement réel d'OpenRouter, effet d'un
+proxy du système sur les appels du maître.
