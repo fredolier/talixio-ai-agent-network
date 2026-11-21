@@ -3,7 +3,7 @@ import { Empty, PageHeader } from '@/components/bits'
 import { Input } from '@/components/ui/input'
 import { hour, KIND } from '@/lib/format'
 import type { Cluster } from '@/lib/store'
-import { cn } from '@/lib/utils'
+import { cn, pick } from '@/lib/utils'
 
 const TONE: Record<string, string> = {
   tool_error: 'text-st-off',
@@ -20,7 +20,7 @@ export function JournalView({ cluster }: { cluster: Cluster }) {
   const rows = useMemo(() => {
     const wanted = filter.trim().toLowerCase()
     const matching = wanted
-      ? cluster.events.filter((e) => `${e.agent_name} ${KIND[e.kind] ?? e.kind} ${e.text}`.toLowerCase().includes(wanted))
+      ? cluster.events.filter((e) => `${e.agent_name} ${pick(KIND, e.kind) ?? e.kind} ${e.text}`.toLowerCase().includes(wanted))
       : cluster.events
     return matching.slice(-SHOWN).reverse()
   }, [cluster.events, filter])
@@ -48,7 +48,7 @@ export function JournalView({ cluster }: { cluster: Cluster }) {
             >
               <time className="num text-xs text-muted-foreground">{hour(event.ts_ms)}</time>
               <span className="truncate text-[13px] font-medium">{event.agent_name}</span>
-              <span className={cn('eyebrow', TONE[event.kind])}>{KIND[event.kind] ?? event.kind}</span>
+              <span className={cn('eyebrow', pick(TONE, event.kind))}>{pick(KIND, event.kind) ?? event.kind}</span>
               <span className="col-start-2 whitespace-pre-wrap [overflow-wrap:anywhere] md:col-start-4">{event.text}</span>
             </li>
           ))}

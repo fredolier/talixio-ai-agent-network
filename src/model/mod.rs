@@ -225,8 +225,9 @@ pub(crate) async fn post_json(
                 }
                 (error, retry_after)
             }
-            Err(e) if e.is_connect() || e.is_timeout() => (anyhow!("modèle injoignable : {e}"), None),
-            Err(e) => return Err(anyhow!("appel du modèle : {e}")),
+            // sans l'adresse appelée : elle peut porter un secret en paramètre
+            Err(e) if e.is_connect() || e.is_timeout() => (anyhow!("modèle injoignable : {}", e.without_url()), None),
+            Err(e) => return Err(anyhow!("appel du modèle : {}", e.without_url())),
         };
         if attempt >= ATTEMPTS {
             return Err(error);

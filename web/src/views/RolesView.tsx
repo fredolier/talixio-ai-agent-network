@@ -50,6 +50,7 @@ export function RolesView({ cluster }: { cluster: Cluster }) {
                   <li key={entry.agent_id} className="border-t px-5 py-4">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                       <span className="font-medium">{entry.name}</span>
+                      {entry.unverified && <span className="text-xs text-st-off" title="Ce que cet agent déclare dépasse ce que son parent peut accorder.">déclaration incohérente</span>}
                       {live ? <StatusMark status={live.status} /> : <span className="text-xs text-muted-foreground">n'est plus dans la grappe</span>}
                       <span className="num ml-auto text-xs text-muted-foreground">{moment(entry.first_seen_ms)}</span>
                     </div>

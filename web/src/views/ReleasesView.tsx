@@ -3,7 +3,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { day } from '@/lib/format'
 import type { Cluster } from '@/lib/store'
-import { cn } from '@/lib/utils'
+import { cn, pick } from '@/lib/utils'
 
 const TONE: Record<string, string> = {
   sécurité: 'text-st-working',
@@ -39,7 +39,7 @@ export function ReleasesView({ cluster }: { cluster: Cluster }) {
                   <ul className="mt-4 flex flex-col gap-2.5">
                     {release.changes.map((change, i) => (
                       <li key={i} className={cn('grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3', change.kind === 'attention' && '-mx-2 rounded-md bg-st-wait/10 px-2 py-2')}>
-                        <span className={cn('eyebrow pt-1', TONE[change.kind])}>{change.kind === 'attention' ? 'à savoir' : change.kind}</span>
+                        <span className={cn('eyebrow pt-1', pick(TONE, change.kind))}>{change.kind === 'attention' ? 'à savoir' : change.kind}</span>
                         <span><Rich text={change.text} /></span>
                       </li>
                     ))}

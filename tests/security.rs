@@ -233,6 +233,49 @@ async fn the_link_trusts_nothing_a_child_says() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 
+    // un genre d'événement inventé (ici, un nom qui existe sur tout objet JavaScript) est ramené
+    // à « autre » avant d'atteindre le journal et l'interface
+    send(&mut ws, json!({ "type": "activity", "event": { "agent_id": "a-enfant", "agent_name": "x", "ts_ms": 0, "kind": "constructor", "text": "genre inventé" } })).await;
+    let start = Instant::now();
+    loop {
+        if let Some(event) = log.after(0, 1000).iter().find(|e| e.text == "genre inventé") {
+            assert_eq!(event.kind, "autre");
+            break;
+        }
+        assert!(start.elapsed() < Duration::from_secs(5), "événement jamais reçu");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // un descendant qui déclare des droits démesurés : l'arbre entier est refusé
+    let mut huge = info("a-gros", vec![]);
+    huge["capabilities"] = json!({ "fs_read": (0..400).map(|i| format!("/{}/{i}", "d".repeat(60))).collect::<Vec<_>>() });
+    send(&mut ws, json!({ "type": "tree", "node": info("a-enfant", vec![huge]) })).await;
+    // un descendant qui prend le nom du maître ou d'un voisin, glisse des marques invisibles
+    // dans son rôle, et déclare plus de droits que son parent n'en a : pris, mais signalé
+    let mut liar = info("a-menteur", vec![]);
+    liar["name"] = json!(node.name);
+    liar["role"] = json!("relecteur\u{202e}\u{200b}");
+    liar["capabilities"] = json!({ "fs_read": ["/etc"], "models": ["main"] });
+    let mut twin = info("a-jumeau", vec![]);
+    twin["name"] = json!("voisin");
+    send(&mut ws, json!({ "type": "tree", "node": info("a-enfant", vec![liar, twin]) })).await;
+    let start = Instant::now();
+    let child = loop {
+        let seen = node.snapshot();
+        let child = seen.children.into_iter().find(|c| c.id == "a-enfant").unwrap();
+        assert!(child.find("a-gros").is_none(), "des droits déclarés sans borne ont été acceptés");
+        if child.find("a-menteur").is_some() {
+            break child;
+        }
+        assert!(start.elapsed() < Duration::from_secs(5), "arbre jamais reçu");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    let liar = child.find("a-menteur").unwrap();
+    assert!(!child.unverified && liar.unverified, "des droits au-delà de ceux du parent ne sont pas signalés");
+    assert_eq!(liar.name, format!("{} (a-ment)", node.name), "un descendant porte le nom du maître");
+    assert_eq!(liar.role, "relecteur", "marques invisibles gardées");
+    assert_eq!(child.find("a-jumeau").unwrap().name, "voisin (a-jume)");
+
     // un appel de modèle hors de ses droits est refusé, sans détail sur le fournisseur
     send(&mut ws, json!({ "type": "model_request", "request_id": "r1", "origin": "a-enfant",
         "request": { "model": "main", "system": "", "messages": [], "tools": [] } })).await;

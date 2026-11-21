@@ -31,6 +31,8 @@ const MAX_SMALL_FRAME: usize = 1024 * 1024;
 /// Un arbre déclaré par un enfant : nombre d'agents et profondeur au plus.
 const MAX_TREE_NODES: usize = 2000;
 const MAX_TREE_DEPTH: usize = 32;
+/// Taille maximale des droits qu'un descendant peut déclarer ; au-delà, l'arbre est refusé.
+const MAX_DECLARED_CAPS: usize = 16 * 1024;
 /// Longueur maximale d'un compte rendu d'enfant, en caractères.
 const MAX_REPORT_CHARS: usize = 20_000;
 
@@ -361,7 +363,9 @@ const MAX_EARLY_EVENTS: usize = 64;
 /// Inscrit au journal l'événement d'un descendant, sous le nom que ce nœud lui connaît.
 fn record_child_event(node: &Arc<Node>, name: String, mut event: crate::protocol::ActivityEvent) {
     event.agent_name = name;
-    event.kind = crate::clean(&event.kind, 32, false);
+    if !crate::protocol::EVENT_KINDS.contains(&event.kind.as_str()) {
+        event.kind = "autre".into();
+    }
     event.text = crate::clean(&event.text, 4000, true);
     node.record(event);
 }
@@ -525,7 +529,7 @@ pub async fn serve_child(node: Arc<Node>, socket: WebSocket, permit: tokio::sync
 /// borné, et un enfant ne peut pas y revendiquer un agent qui existe ailleurs dans la grappe
 /// (il détournerait les ordres d'arrêt et signerait le journal à sa place).
 fn accept_tree(node: &Node, child_id: &str, mut info: NodeInfo) -> bool {
-    if !info.within(MAX_TREE_NODES, MAX_TREE_DEPTH) {
+    if !info.within(MAX_TREE_NODES, MAX_TREE_DEPTH) || !info.declared_within(MAX_DECLARED_CAPS) {
         return false;
     }
     let mut children = node.children.lock().unwrap();
@@ -552,8 +556,27 @@ fn accept_tree(node: &Node, child_id: &str, mut info: NodeInfo) -> bool {
     info.model = child.subtree.model.clone();
     info.target = child.subtree.target.clone();
     info.capabilities = child.caps.clone();
+    info.unverified = false;
     info.tidy();
-    child.subtree = info;
+    info.mark_unverified();
+    // un descendant ne porte pas le nom de ce nœud ni celui d'un de ses enfants directs :
+    // au journal, on le prendrait pour eux
+    let child_id = child_id.to_string();
+    let mut taken: std::collections::HashSet<String> = children.values().map(|c| c.name.clone()).collect();
+    taken.insert(node.name.clone());
+    fn rename(info: &mut NodeInfo, taken: &std::collections::HashSet<String>) {
+        for child in &mut info.children {
+            if taken.contains(&child.name) {
+                let short: String = child.id.chars().take(6).collect();
+                child.name = format!("{} ({short})", child.name);
+            }
+            rename(child, taken);
+        }
+    }
+    rename(&mut info, &taken);
+    if let Some(child) = children.get_mut(&child_id) {
+        child.subtree = info;
+    }
     true
 }
 
@@ -592,14 +615,13 @@ fn parent_receive(node: &Arc<Node>, child_id: &str, frame: Frame) -> Vec<Frame> 
             if accept_tree(node, child_id, *info) {
                 node.tree_dirty.notify_one();
                 // le maître tient le répertoire des rôles de toute la grappe
-                if node.providers.is_some() {
+                // (écrit à part de la tâche du réseau, et pas plus d'une fois toutes les deux
+                // secondes par branche : un enfant bavard ne ralentit pas les autres)
+                if node.providers.is_some() && node.store.roles_due(child_id) {
                     let subtree = node.children.lock().unwrap().get(child_id).map(|c| c.subtree.clone());
                     if let Some(subtree) = subtree {
-                        let mut all = vec![&subtree];
-                        while let Some(info) = all.pop() {
-                            node.store.role_seen(info);
-                            all.extend(info.children.iter());
-                        }
+                        let store = node.store.clone();
+                        tokio::task::spawn_blocking(move || store.roles_seen(&subtree));
                     }
                 }
             }

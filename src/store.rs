@@ -4,8 +4,11 @@
 //! chez le maître, le journal de la grappe. Les outils de fichiers et de commandes n'y ont
 //! pas accès : le dossier d'état leur est interdit.
 
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use rusqlite::{params, Connection};
 
@@ -17,11 +20,20 @@ pub const MAX_NOTES: usize = 200;
 pub const MAX_NOTE_CHARS: usize = 20_000;
 /// Événements du journal gardés sur disque.
 const JOURNAL_KEPT: i64 = 200_000;
-/// Agents gardés dans le répertoire des rôles.
-const ROLES_KEPT: i64 = 5_000;
+/// Agents gardés dans le répertoire des rôles, en tout.
+const ROLES_KEPT: i64 = 4_000;
+/// Agents gardés par branche (un enfant direct du maître et sa descendance) : une branche
+/// qui déclare beaucoup d'agents n'efface que les siens.
+const ROLES_KEPT_PER_BRANCH: i64 = 2_000;
+/// Agents rendus par une lecture du répertoire.
+const ROLES_LISTED: i64 = 500;
+/// Délai minimal entre deux écritures du répertoire pour une même branche.
+const ROLES_EVERY: Duration = Duration::from_secs(2);
 
 pub struct Store {
     db: Mutex<Connection>,
+    /// Par branche : dernière écriture du répertoire des rôles, et empreinte de ce qui fut écrit.
+    roles_state: Mutex<HashMap<String, (Instant, u64)>>,
 }
 
 fn err(e: rusqlite::Error) -> String {
@@ -51,8 +63,16 @@ impl Store {
              );",
         )
         .map_err(err)?;
+        // bases créées avant la colonne : l'erreur « colonne déjà là » est attendue ensuite
+        let _ = db.execute("ALTER TABLE roles ADD COLUMN owner TEXT NOT NULL DEFAULT ''", []);
+        let _ = db.execute("ALTER TABLE roles ADD COLUMN unverified INTEGER NOT NULL DEFAULT 0", []);
+        db.execute_batch(
+            "CREATE INDEX IF NOT EXISTS roles_seen ON roles (last_seen_ms);
+             CREATE INDEX IF NOT EXISTS roles_owner ON roles (owner, last_seen_ms);",
+        )
+        .map_err(err)?;
         let _ = crate::os::make_private(path);
-        Ok(Self { db: Mutex::new(db) })
+        Ok(Self { db: Mutex::new(db), roles_state: Mutex::new(HashMap::new()) })
     }
 
     /// Écrit une note, ou l'efface si le contenu est vide.
@@ -91,49 +111,108 @@ impl Store {
         rows.collect::<Result<_, _>>().map_err(err)
     }
 
-    /// Répertoire des rôles : note un agent vu dans l'arbre (créé ici ou plus bas), ou met à
-    /// jour ce qu'on sait de lui. Ce qu'on lui a demandé (`role_brief`) n'est pas touché.
-    pub fn role_seen(&self, info: &NodeInfo) {
-        let db = self.db.lock().unwrap();
-        let status = serde_json::to_value(info.status).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
-        let caps = serde_json::to_string(&info.capabilities).unwrap_or_else(|_| "{}".into());
-        let now = crate::now_ms() as i64;
-        let _ = db.execute(
-            "INSERT INTO roles (agent_id, name, role, model, parent_id, depth, target, host, capabilities, status, first_seen_ms, last_seen_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)
-             ON CONFLICT(agent_id) DO UPDATE SET name = ?2, role = ?3, model = ?4, parent_id = ?5, depth = ?6,
-                 target = ?7, host = ?8, capabilities = ?9, status = ?10, last_seen_ms = ?11",
-            params![info.id, info.name, info.role, info.model, info.parent_id, info.depth, info.target, info.host, caps, status, now],
-        );
-        let _ = db.execute(
-            "DELETE FROM roles WHERE agent_id NOT IN (SELECT agent_id FROM roles ORDER BY last_seen_ms DESC LIMIT ?1)",
-            params![ROLES_KEPT],
-        );
+    /// Est-il temps de réécrire le répertoire des rôles pour cette branche ?
+    pub fn roles_due(&self, owner: &str) -> bool {
+        let mut state = self.roles_state.lock().unwrap();
+        if state.len() > 4096 {
+            state.clear();
+        }
+        match state.get_mut(owner) {
+            Some((last, _)) if last.elapsed() < ROLES_EVERY => false,
+            Some((last, _)) => {
+                *last = Instant::now();
+                true
+            }
+            None => {
+                state.insert(owner.to_string(), (Instant::now(), 0));
+                true
+            }
+        }
     }
 
-    /// Ce que ce nœud a demandé à l'enfant qu'il vient de créer.
+    /// Répertoire des rôles : note les agents d'une branche (l'enfant direct `branch` et sa
+    /// descendance), ou met à jour ce qu'on sait d'eux. Ce qu'on leur a demandé (`role_brief`)
+    /// n'est pas touché. Rien n'est écrit si rien n'a changé ; une branche ne réécrit jamais la
+    /// fiche d'un agent d'une autre branche, et la purge ne lui prend que ses propres fiches.
+    pub fn roles_seen(&self, branch: &NodeInfo) {
+        let mut rows = Vec::new();
+        let mut all = vec![branch];
+        while let Some(info) = all.pop() {
+            let status = serde_json::to_value(info.status).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
+            let caps = serde_json::to_string(&info.capabilities).unwrap_or_else(|_| "{}".into());
+            rows.push((&info.id, &info.name, &info.role, &info.model, &info.parent_id, info.depth, &info.target, &info.host, caps, status, info.unverified));
+            all.extend(info.children.iter());
+        }
+        let print = {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            rows.hash(&mut hasher);
+            hasher.finish()
+        };
+        {
+            let mut state = self.roles_state.lock().unwrap();
+            let entry = state.entry(branch.id.clone()).or_insert((Instant::now(), 0));
+            if entry.1 == print {
+                return;
+            }
+            entry.1 = print;
+        }
+        let mut db = self.db.lock().unwrap();
+        let Ok(tx) = db.transaction() else { return };
+        let now = crate::now_ms() as i64;
+        for (id, name, role, model, parent_id, depth, target, host, caps, status, unverified) in &rows {
+            let _ = tx.execute(
+                "INSERT INTO roles (agent_id, name, role, model, parent_id, depth, target, host, capabilities, status, owner, first_seen_ms, last_seen_ms, unverified)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13)
+                 ON CONFLICT(agent_id) DO UPDATE SET name = ?2, role = ?3, model = ?4, parent_id = ?5, depth = ?6,
+                     target = ?7, host = ?8, capabilities = ?9, status = ?10, owner = ?11, last_seen_ms = ?12, unverified = ?13
+                 WHERE roles.owner = ?11 OR roles.owner = ''",
+                params![id, name, role, model, parent_id, depth, target, host, caps, status, branch.id, now, unverified],
+            );
+        }
+        // les fiches qui portent des consignes (écrites par le maître lui-même) partent en dernier
+        let _ = tx.execute(
+            "DELETE FROM roles WHERE owner = ?1 AND agent_id NOT IN (
+                 SELECT agent_id FROM roles WHERE owner = ?1
+                 ORDER BY (instructions IS NOT NULL) DESC, last_seen_ms DESC LIMIT ?2)",
+            params![branch.id, ROLES_KEPT_PER_BRANCH],
+        );
+        let _ = tx.execute(
+            "DELETE FROM roles WHERE agent_id NOT IN (
+                 SELECT agent_id FROM roles ORDER BY (instructions IS NOT NULL) DESC, last_seen_ms DESC LIMIT ?1)",
+            params![ROLES_KEPT],
+        );
+        let _ = tx.commit();
+    }
+
+    /// Ce que le maître a demandé à l'enfant qu'il vient de créer.
     pub fn role_brief(&self, agent_id: &str, name: &str, role: &str, instructions: &str, objective: &str, criteria: &str) {
+        let instructions = crate::clean(instructions, 20_000, true);
+        let objective = crate::clean(objective, 8_000, true);
+        let criteria = crate::clean(criteria, 4_000, true);
         let db = self.db.lock().unwrap();
         let now = crate::now_ms() as i64;
         let _ = db.execute(
-            "INSERT INTO roles (agent_id, name, role, instructions, objective, criteria, first_seen_ms, last_seen_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
-             ON CONFLICT(agent_id) DO UPDATE SET instructions = ?4, objective = ?5, criteria = ?6",
+            "INSERT INTO roles (agent_id, name, role, instructions, objective, criteria, owner, first_seen_ms, last_seen_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?1, ?7, ?7)
+             ON CONFLICT(agent_id) DO UPDATE SET instructions = ?4, objective = ?5, criteria = ?6
+             WHERE roles.owner = ?1 OR roles.owner = ''",
             params![agent_id, name, role, instructions, objective, criteria, now],
         );
     }
 
-    /// Le répertoire des rôles, du plus récent au plus ancien.
+    /// Le répertoire des rôles, du plus récent au plus ancien : au plus `ROLES_LISTED` fiches,
+    /// celles qui portent des consignes d'abord (une branche bavarde ne les chasse pas de la liste).
     pub fn roles(&self) -> Vec<serde_json::Value> {
         let db = self.db.lock().unwrap();
         let Ok(mut query) = db.prepare(
             "SELECT agent_id, name, role, model, parent_id, depth, target, host, capabilities, status,
-                    instructions, objective, criteria, first_seen_ms, last_seen_ms
-             FROM roles ORDER BY first_seen_ms DESC, agent_id",
+                    instructions, objective, criteria, first_seen_ms, last_seen_ms, unverified
+             FROM (SELECT * FROM roles ORDER BY (instructions IS NOT NULL) DESC, first_seen_ms DESC LIMIT ?1)
+             ORDER BY first_seen_ms DESC, agent_id",
         ) else {
             return Vec::new();
         };
-        let rows = query.query_map([], |r| {
+        let rows = query.query_map([ROLES_LISTED], |r| {
             let caps: String = r.get(8)?;
             Ok(serde_json::json!({
                 "agent_id": r.get::<_, String>(0)?, "name": r.get::<_, String>(1)?, "role": r.get::<_, String>(2)?,
@@ -144,6 +223,7 @@ impl Store {
                 "instructions": r.get::<_, Option<String>>(10)?, "objective": r.get::<_, Option<String>>(11)?,
                 "criteria": r.get::<_, Option<String>>(12)?,
                 "first_seen_ms": r.get::<_, i64>(13)?, "last_seen_ms": r.get::<_, i64>(14)?,
+                "unverified": r.get::<_, bool>(15)?,
             }))
         });
         rows.map(|rows| rows.filter_map(Result::ok).collect()).unwrap_or_default()
@@ -209,6 +289,47 @@ mod tests {
         assert_eq!(store.notes().unwrap(), vec![("serveur".to_string(), "nginx sur le port 8080".to_string())]);
         let events = store.recent(2);
         assert_eq!(events.iter().map(|e| e.id).collect::<Vec<_>>(), vec![2, 3]);
+    }
+
+    #[test]
+    fn a_branch_only_writes_its_own_roles() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("agent.db")).unwrap();
+        let info = |id: &str, role: &str, children: Vec<serde_json::Value>| {
+            serde_json::json!({
+                "id": id, "name": id, "role": role, "parent_id": null, "depth": 1, "status": "idle", "model": "main",
+                "target": "local", "host": "h", "os": "o", "ips": [], "pid": 1, "started_at_ms": 0, "last_seen_ms": 0,
+                "tokens_used": 0, "capabilities": {}, "children": children
+            })
+        };
+        let tree = |v: serde_json::Value| serde_json::from_value::<NodeInfo>(v).unwrap();
+        let role_of = |id: &str| store.roles().into_iter().find(|r| r["agent_id"] == id).map(|r| r["role"].as_str().unwrap().to_string());
+
+        store.role_brief("a", "a", "chef", "consignes\u{202e}", "objectif", "critère");
+        store.roles_seen(&tree(info("a", "chef", vec![info("a1", "lecteur", vec![])])));
+        // une autre branche déclare un agent du même identifiant : la fiche ne bouge pas
+        store.roles_seen(&tree(info("b", "autre", vec![info("a1", "usurpé", vec![]), info("a", "usurpé", vec![])])));
+        assert_eq!(role_of("a1").as_deref(), Some("lecteur"));
+        assert_eq!(role_of("a").as_deref(), Some("chef"));
+        let brief = store.roles().into_iter().find(|r| r["agent_id"] == "a").unwrap();
+        assert_eq!(brief["instructions"], "consignes", "consignes non nettoyées");
+
+        // une branche qui déclare des milliers d'agents n'efface que les siens, et la lecture est bornée
+        for round in 0..3 {
+            let many = (0..1500).map(|i| info(&format!("b-{round}-{i}"), "foule", vec![])).collect();
+            store.roles_seen(&tree(info("b", "autre", many)));
+        }
+        assert_eq!(role_of("a").as_deref(), Some("chef"), "la fiche du maître a été purgée");
+        let db = store.db.lock().unwrap();
+        let count = |sql: &str| db.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap();
+        assert_eq!(count("SELECT count(*) FROM roles WHERE owner = 'a'"), 2, "la branche voisine a été purgée");
+        assert!(count("SELECT count(*) FROM roles WHERE owner = 'b'") <= ROLES_KEPT_PER_BRANCH);
+        drop(db);
+        assert!(store.roles().len() as i64 <= ROLES_LISTED);
+
+        // rien n'est réécrit si rien n'a changé, et pas deux fois de suite pour une même branche
+        assert!(store.roles_due("c"));
+        assert!(!store.roles_due("c"));
     }
 
     #[test]

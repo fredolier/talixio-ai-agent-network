@@ -5,6 +5,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Guard } from '@/components/bits'
 import { flat } from '@/lib/format'
 import { useCluster, type Cluster } from '@/lib/store'
 import { cn } from '@/lib/utils'
@@ -187,6 +188,7 @@ function Shell({ cluster, logout, theme }: { cluster: Cluster; logout: () => voi
         {cluster.offline && (
           <p role="status" className="mb-5 rounded-md border border-st-wait/50 bg-st-wait/10 px-3 py-2">Maître injoignable. Nouvel essai en cours…</p>
         )}
+        <Guard key={view}>
         {view === 'grappe' && <TreeView cluster={cluster} />}
         {view === 'dialogue' && <ChatView cluster={cluster} />}
         {view === 'journal' && <JournalView cluster={cluster} />}
@@ -194,6 +196,7 @@ function Shell({ cluster, logout, theme }: { cluster: Cluster; logout: () => voi
         {view === 'modeles' && <ModelsView cluster={cluster} />}
         {view === 'roles' && <RolesView cluster={cluster} />}
         {view === 'nouveautes' && <ReleasesView cluster={cluster} />}
+        </Guard>
       </main>
     </div>
   )

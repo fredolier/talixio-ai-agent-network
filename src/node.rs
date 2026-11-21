@@ -347,6 +347,7 @@ impl Node {
             last_seen_ms: now_ms(),
             tokens_used: self.tokens_used.load(Ordering::Relaxed),
             capabilities: self.caps.clone(),
+            unverified: false,
             children,
         }
     }

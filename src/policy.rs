@@ -108,6 +108,51 @@ impl Capabilities {
         Ok(())
     }
 
+    /// Taille des droits une fois écrits, pour borner ce qu'un descendant peut déclarer.
+    pub fn declared_size(&self) -> usize {
+        let paths = |list: &[PathBuf]| list.iter().map(|p| p.as_os_str().len() + 4).sum::<usize>();
+        let exec: usize = self
+            .exec
+            .iter()
+            .map(|r| {
+                32 + r.program.as_os_str().len()
+                    + r.cwd.as_ref().map_or(0, |c| c.as_os_str().len())
+                    + r.args.as_ref().map_or(0, |a| a.iter().map(|s| s.len() + 4).sum())
+            })
+            .sum();
+        let spawn = self.spawn.as_ref().map_or(0, |s| 32 + s.targets.iter().map(|t| t.len() + 4).sum::<usize>());
+        paths(&self.fs_read) + paths(&self.fs_write) + exec + spawn + self.models.iter().map(|m| m.len() + 4).sum::<usize>()
+    }
+
+    /// Droits déclarés par un descendant, qu'on ne fait qu'afficher : textes rendus inoffensifs.
+    pub fn tidy_declared(&mut self) {
+        let path = |p: &mut PathBuf| {
+            let text = p.to_string_lossy();
+            let cleaned = crate::clean(&text, 1024, false);
+            if cleaned != text {
+                *p = PathBuf::from(cleaned);
+            }
+        };
+        self.fs_read.iter_mut().chain(&mut self.fs_write).for_each(path);
+        for rule in &mut self.exec {
+            path(&mut rule.program);
+            if let Some(cwd) = &mut rule.cwd {
+                path(cwd);
+            }
+            for arg in rule.args.iter_mut().flatten() {
+                *arg = crate::clean(arg, 1024, false);
+            }
+        }
+        for model in &mut self.models {
+            *model = crate::clean(model, 80, false);
+        }
+        if let Some(spawn) = &mut self.spawn {
+            for target in &mut spawn.targets {
+                *target = crate::clean(target, 80, false);
+            }
+        }
+    }
+
     /// Vérifié par l'enfant, sur la machine où il arrive : ses dossiers, une fois résolus sur
     /// cette machine, tiennent-ils dans le plafond de la cible ? Le parent n'a pu comparer que
     /// des noms ; un lien symbolique de la machine d'arrivée ne doit pas élargir le droit.

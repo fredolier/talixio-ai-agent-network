@@ -2,6 +2,7 @@ import { KeyRound } from 'lucide-react'
 import { Empty, PageHeader } from '@/components/bits'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
+import { pick } from '@/lib/utils'
 import { count, flat, plural } from '@/lib/format'
 import type { Cluster } from '@/lib/store'
 import type { ModelInfo } from '@/lib/types'
@@ -34,7 +35,7 @@ export function ModelsView({ cluster }: { cluster: Cluster }) {
           return (
             <section key={key} className="flex flex-col gap-3">
               <div className="flex flex-wrap items-baseline gap-x-3">
-                <h2 className="text-base font-semibold">{PROVIDER[provider] ?? provider}</h2>
+                <h2 className="text-base font-semibold">{pick(PROVIDER, provider) ?? provider}</h2>
                 <span className="num text-xs text-muted-foreground">{host}</span>
                 <span className="text-xs text-muted-foreground">· {plural(models.length, 'modèle')}</span>
               </div>

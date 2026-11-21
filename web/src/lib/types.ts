@@ -34,6 +34,8 @@ export interface Agent {
   last_seen_ms: number
   tokens_used: number
   capabilities: Capabilities
+  /** Ce que l'agent déclare dépasse ce que son parent déclare pouvoir accorder. */
+  unverified?: boolean
   children: Agent[]
 }
 
@@ -72,6 +74,7 @@ export interface RoleEntry {
   criteria: string | null
   first_seen_ms: number
   last_seen_ms: number
+  unverified?: boolean
 }
 
 export interface Release {

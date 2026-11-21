@@ -424,4 +424,27 @@ trouver : injection vers `ssh`, `docker` ou le shell distant ; chemins de la dé
 plafond d'une cible ; secret du lien ; TLS (1.3 seul, signature vérifiée, empreinte comparée en
 temps constant) ; moniteur ; API.
 
-L'interface web (v0.5.0) n'a pas encore eu de revue indépendante.
+### Troisième passe (2026-11-21) : interface web, `/api/models`, `/api/roles`
+
+Revue indépendante, à la lecture, de l'interface (v0.7.0), des deux routes et du répertoire des
+rôles. Aucun constat critique. Dix constats, tous traités en v0.7.1.
+
+| N° | Gravité | Constat | Traitement |
+|---|---|---|---|
+| E1 | Haute | Le répertoire des rôles était réécrit agent par agent, dans la tâche du réseau, à chaque arbre reçu : un enfant qui renvoie sans cesse un gros arbre bloquait le maître et remplissait sa base (droits déclarés sans borne de taille). | ✅ Droits déclarés bornés (16 Kio par agent, sinon l'arbre est refusé) ; écriture à part du réseau, au plus toutes les 2 s par branche, en une transaction, et seulement si quelque chose a changé. Rejoué dans `tests/security.rs` et `store::tests`. |
+| M1 | Moyenne | Une branche pouvait réécrire la fiche d'un agent d'une autre branche, et chasser par le nombre les fiches des autres. | ✅ Chaque fiche appartient à la branche qui l'a créée ; purge par branche d'abord, et les fiches portant des consignes partent en dernier. |
+| M2 | Moyenne | Les droits et le modèle affichés pour un petit-enfant sont ceux que sa branche déclare : l'interface les montrait comme des faits. | ✅ Chaque parent compare ce qu'un descendant déclare à ce que son propre parent déclare pouvoir accorder ; l'écart est marqué (`unverified`) et affiché « déclaration incohérente ». Un descendant ne peut plus porter le nom du maître ni d'un de ses enfants directs. Reste déclaré, sans preuve : tokens, état et hôte des niveaux ≥ 2 (limite 5). |
+| M3 | Moyenne | Un genre d'événement inventé par un enfant (`constructor`, `__proto__`) faisait tomber l'écran Journal. | ✅ Genres hors liste ramenés à `autre` par le maître ; côté page, tables lues sans propriétés héritées, et un écran qui échoue ne vide plus la page. |
+| F1 | Basse | `/api/roles` rendait tout le répertoire à chaque lecture. | ✅ 500 fiches au plus. |
+| F2 | Basse | Tout agent écrivait un répertoire des rôles dans sa propre base, que personne ne lit. | ✅ Réservé au maître ; consignes nettoyées et bornées. |
+| F3 | Basse | Les marques invisibles et de retournement du sens de lecture passaient le nettoyage : un nom pouvait en imiter un autre. | ✅ Retirées par `clean`, appliqué aussi aux droits déclarés. |
+| F4 | Basse | Outils de construction rangés parmi les dépendances de la page ; scripts d'installation exécutés en intégration continue. | ✅ `devDependencies` ; `npm ci --ignore-scripts`. |
+| F5 | Basse | Réponses de l'API sans consigne de cache. | ✅ `Cache-Control: no-store` et `nosniff` sur toute réponse. |
+| — | Basse | Hors périmètre : une erreur de connexion à un fournisseur citait l'adresse appelée, donc une clé si elle y figurait en paramètre. | ✅ Adresse retirée des messages d'erreur. |
+
+Examiné sans rien trouver : injection de HTML ou de script dans la page (tout passe par React,
+aucun `dangerouslySetInnerHTML`, CSP sans `unsafe-inline`) ; fuite de clés par `/api/models` ;
+accès sans jeton ; rangement du jeton dans le navigateur.
+
+Limite assumée du signalement M2 : un parent sous Windows ne sait pas juger des chemins POSIX
+(et inversement) ; la descendance d'une autre famille de système est alors marquée, à tort.

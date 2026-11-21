@@ -7,6 +7,32 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.7.1"
+date = "2026-11-21"
+title = "Revue de sécurité de l'interface"
+summary = "Une revue indépendante de l'interface et du répertoire des rôles a rendu dix constats, aucun critique. Tous sont corrigés."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Un enfant qui renvoie sans cesse un arbre énorme ne peut plus ralentir le maître ni remplir sa base : droits déclarés bornés, répertoire des rôles écrit à part, au plus toutes les deux secondes par branche."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Une branche ne peut plus réécrire ni chasser les fiches de rôles d'une autre, ni donner à un de ses agents le nom du maître."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Ce qu'un agent des niveaux profonds déclare au-delà de ce que son parent peut accorder est signalé « déclaration incohérente » dans la grappe et dans les rôles."
+
+[[release.changes]]
+kind = "correction"
+text = "Un genre d'événement inattendu ne fait plus tomber l'écran Journal ; un écran qui échoue ne vide plus la page."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Réponses de l'API jamais gardées en cache ; marques invisibles retirées des noms ; adresse du fournisseur retirée des messages d'erreur."
+
+[[release]]
 version = "0.7.0"
 date = "2026-11-21"
 title = "Maîtriser : commandes, modèles, rôles"

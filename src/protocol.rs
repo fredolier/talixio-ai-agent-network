@@ -107,6 +107,10 @@ pub struct NodeInfo {
     pub last_seen_ms: u64,
     pub tokens_used: u64,
     pub capabilities: Capabilities,
+    /// Posé par celui qui reçoit l'arbre, jamais cru de celui qui l'envoie : ce que cet agent
+    /// déclare (droits, modèle) dépasse ce que son parent déclare pouvoir accorder.
+    #[serde(default)]
+    pub unverified: bool,
     pub children: Vec<NodeInfo>,
 }
 
@@ -160,7 +164,26 @@ impl NodeInfo {
         for child in &mut self.children {
             child.parent_id = Some(self.id.clone());
             child.depth = self.depth.saturating_add(1);
+            child.capabilities.tidy_declared();
             child.tidy();
+        }
+    }
+
+    /// Les droits déclarés par la descendance tiennent-ils dans une taille raisonnable ?
+    /// (Ceux de l'agent lui-même sont connus de son parent, qui les a accordés.)
+    pub fn declared_within(&self, max_bytes: usize) -> bool {
+        self.children.iter().all(|c| c.capabilities.declared_size() <= max_bytes && c.declared_within(max_bytes))
+    }
+
+    /// Compare, dans toute la descendance, ce que chaque agent déclare à ce que son parent
+    /// déclare pouvoir accorder. Ce n'est pas une preuve (tout est déclaré par la branche),
+    /// mais une incohérence est signalée, et suit la descendance.
+    pub fn mark_unverified(&mut self) {
+        for child in &mut self.children {
+            let coherent = self.capabilities.check_grant(&child.capabilities).is_ok()
+                && self.capabilities.models.contains(&child.model);
+            child.unverified = self.unverified || !coherent;
+            child.mark_unverified();
         }
     }
 
@@ -173,6 +196,9 @@ impl NodeInfo {
     }
 }
 
+/// Les genres d'événements du journal.
+pub const EVENT_KINDS: [&str; 9] = ["status", "input", "tool", "tool_error", "spawn", "report", "message", "error", "link"];
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ActivityEvent {
     /// Numéro d'ordre, attribué par le maître.
@@ -181,7 +207,7 @@ pub struct ActivityEvent {
     pub agent_id: String,
     pub agent_name: String,
     pub ts_ms: u64,
-    /// `status`, `input`, `tool`, `tool_error`, `spawn`, `report`, `message`, `error`, `link`.
+    /// Un des `EVENT_KINDS` ; tout autre genre, venu d'un enfant, devient `autre`.
     pub kind: String,
     pub text: String,
 }

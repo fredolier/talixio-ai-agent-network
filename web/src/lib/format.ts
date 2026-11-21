@@ -19,6 +19,7 @@ export const KIND: Record<string, string> = {
   message: 'message',
   error: 'erreur',
   link: 'lien',
+  autre: 'autre',
 }
 
 export const flat = (node: Agent, out: Agent[] = []): Agent[] => {

@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import { cn } from '@/lib/utils'
+import { Component, type ReactNode } from 'react'
+import { cn, pick } from '@/lib/utils'
 import { STATUS } from '@/lib/format'
 import type { ExecRule, Status } from '@/lib/types'
 
@@ -16,8 +16,8 @@ const DOT: Record<string, string> = {
 export function StatusMark({ status, className }: { status: Status | string; className?: string }) {
   return (
     <span className={cn('inline-flex items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground', className)}>
-      <span className={cn('size-2 rounded-full', DOT[status] ?? 'bg-st-idle')} aria-hidden />
-      {STATUS[status as Status] ?? status}
+      <span className={cn('size-2 rounded-full', pick(DOT, status) ?? 'bg-st-idle')} aria-hidden />
+      {pick(STATUS, status) ?? String(status)}
     </span>
   )
 }
@@ -72,15 +72,16 @@ export function RuleLine({ rule, className }: { rule: ExecRule; className?: stri
       ) : rule.args.length === 0 ? (
         <span className="text-muted-foreground">(sans argument)</span>
       ) : (
-        rule.args.map((arg, index) =>
-          TOKEN[arg] ? (
-            <span key={index} title={TOKEN[arg].label} className={cn('rounded border px-1.5 py-px', TOKEN[arg].className)}>
+        rule.args.map((arg, index) => {
+          const token = pick(TOKEN, arg)
+          return token ? (
+            <span key={index} title={token.label} className={cn('rounded border px-1.5 py-px', token.className)}>
               {arg}
             </span>
           ) : (
-            <span key={index}>{arg}</span>
-          ),
-        )
+            <span key={index}>{String(arg)}</span>
+          )
+        })
       )}
     </span>
   )
@@ -89,4 +90,24 @@ export function RuleLine({ rule, className }: { rule: ExecRule; className?: stri
 /** `code` entre accents graves, sans jamais passer par du HTML. */
 export function Rich({ text }: { text: string }) {
   return <>{text.split('`').map((part, index) => (index % 2 ? <code key={index}>{part}</code> : part))}</>
+}
+
+/** Un écran qui échoue (donnée inattendue) ne vide pas toute la page : on le dit, et le reste tient. */
+export class Guard extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+  render() {
+    if (!this.state.failed) return this.props.children
+    return (
+      <div role="alert" className="rounded-md border border-st-off/50 px-4 py-3">
+        <p className="font-medium">Cet écran n'a pas pu s'afficher.</p>
+        <p className="mt-1 text-muted-foreground">Une donnée reçue n'avait pas la forme attendue. Les autres écrans restent utilisables.</p>
+        <button type="button" className="mt-2 underline underline-offset-4" onClick={() => this.setState({ failed: false })}>
+          Réessayer
+        </button>
+      </div>
+    )
+  }
 }

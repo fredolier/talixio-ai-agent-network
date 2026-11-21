@@ -493,6 +493,7 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
         last_seen_ms: now_ms(),
         tokens_used: 0,
         capabilities: caps.clone(),
+        unverified: false,
         children: Vec::new(),
     };
     // inscrit avant le lancement : la place est prise, et l'enfant sera reconnu dès sa connexion
@@ -562,7 +563,10 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
         }
     }
     let mission = format!("Mission : {objective}\n\nCritère de réussite mesurable : {criteria}");
-    node.store.role_brief(&boot.agent_id, &name, &boot.role, &boot.instructions, objective, criteria);
+    if node.providers.is_some() {
+        // le répertoire des rôles est tenu par le maître seul
+        node.store.role_brief(&boot.agent_id, &name, &boot.role, &boot.instructions, objective, criteria);
+    }
     node.send_child(&boot.agent_id, Msg::Instruction { text: mission }, true)?;
     node.emit("spawn", format!("agent {name} ({}) créé — rôle : {}", boot.agent_id, boot.role));
     node.tree_dirty.notify_one();

@@ -16,7 +16,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { count, flat, moment, plural, STATUS, targetLabel } from '@/lib/format'
 import type { Cluster } from '@/lib/store'
 import type { Agent, Status } from '@/lib/types'
-import { cn } from '@/lib/utils'
+import { cn, pick } from '@/lib/utils'
 
 export function TreeView({ cluster }: { cluster: Cluster }) {
   const all = flat(cluster.tree)
@@ -107,6 +107,11 @@ function AgentRow({ agent, selected, onSelect }: { agent: Agent; selected: boole
           <span className="font-semibold">{agent.name}</span>
           <StatusMark status={agent.status} />
           {agent.depth === 0 && <Badge>maître</Badge>}
+          {agent.unverified && (
+            <Badge variant="outline" className="border-st-off/50 text-st-off" title="Ce que cet agent déclare dépasse ce que son parent peut accorder. Ses droits réels restent ceux que son parent lui applique.">
+              déclaration incohérente
+            </Badge>
+          )}
           <span className="num ml-auto text-xs text-muted-foreground">{agent.model}</span>
         </span>
         <span className="truncate text-[13px] text-muted-foreground">
@@ -196,7 +201,7 @@ function AgentDetail({ agent, cluster }: { agent: Agent; cluster: Cluster }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Arrêter « {agent.name} » ?</AlertDialogTitle>
             <AlertDialogDescription>
-              L'agent et toute sa descendance s'arrêtent. Ce qui a été déployé sur une autre machine en est retiré. État actuel : {STATUS[agent.status]}.
+              L'agent et toute sa descendance s'arrêtent. Ce qui a été déployé sur une autre machine en est retiré. État actuel : {pick(STATUS, agent.status) ?? agent.status}.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

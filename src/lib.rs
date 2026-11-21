@@ -56,9 +56,11 @@ pub fn proof(secret: &str, side: &str, parts: [&str; 4]) -> String {
 }
 
 /// Texte venu d'ailleurs, rendu inoffensif à l'affichage : sans caractères de contrôle
-/// (sauts de ligne gardés si `multiline`), et coupé à `max` caractères.
+/// (sauts de ligne gardés si `multiline`), sans caractères invisibles ni marques qui retournent
+/// le sens de lecture (un nom ne doit pas pouvoir en imiter un autre), et coupé à `max` caractères.
 pub fn clean(text: &str, max: usize, multiline: bool) -> String {
-    let keep = |c: &char| !c.is_control() || (multiline && (*c == '\n' || *c == '\t'));
+    let hidden = |c: char| matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}');
+    let keep = |c: &char| !hidden(*c) && (!c.is_control() || (multiline && (*c == '\n' || *c == '\t')));
     let mut out: String = text.chars().filter(keep).take(max).collect();
     if text.chars().filter(keep).nth(max).is_some() {
         out.push_str("… [tronqué]");

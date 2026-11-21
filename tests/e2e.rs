@@ -248,8 +248,13 @@ max_depth = 1
     assert_eq!(entry["role"], "lecteur");
     assert!(entry["objective"].as_str().unwrap().contains("secret.txt"));
     assert!(entry["capabilities"]["fs_read"][0].is_string());
+    assert_eq!(entry["unverified"], false);
     for path in ["/api/models", "/api/roles"] {
-        assert_eq!(api.http.get(format!("{}{path}", api.base)).send().await.unwrap().status(), 401, "{path}");
+        let refused = api.http.get(format!("{}{path}", api.base)).send().await.unwrap();
+        assert_eq!(refused.status(), 401, "{path}");
+        // rien de ce que rend l'API n'est gardé par un cache
+        assert_eq!(refused.headers()["cache-control"], "no-store", "{path}");
+        assert_eq!(refused.headers()["x-content-type-options"], "nosniff", "{path}");
     }
     assert_eq!(api.get("/api/tree").await["children"].as_array().unwrap().len(), 1);
 

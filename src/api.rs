@@ -65,6 +65,7 @@ pub async fn start_listener(
             .route("/api/messages", post(message))
             .route("/api/agents/{id}/stop", post(stop));
     }
+    let router = router.layer(axum::middleware::map_response(harden));
     let app = router.with_state(App {
         node: node.clone(),
         api_token: api_token.map(Arc::new),
@@ -100,6 +101,15 @@ fn asset(content_type: &'static str, body: &'static [u8]) -> Response {
         body,
     )
         .into_response()
+}
+
+/// Posé sur toute réponse qui ne le dit pas déjà : rien de ce que rend l'API (arbre, journal,
+/// consignes des agents) n'est gardé par un cache, ni réinterprété par le navigateur.
+async fn harden(mut response: Response) -> Response {
+    let headers = response.headers_mut();
+    headers.entry(header::CACHE_CONTROL).or_insert(header::HeaderValue::from_static("no-store"));
+    headers.entry(header::X_CONTENT_TYPE_OPTIONS).or_insert(header::HeaderValue::from_static("nosniff"));
+    response
 }
 
 /// Les modèles que le maître peut appeler, par fournisseur. Jamais de clé, ni où elle est rangée.
