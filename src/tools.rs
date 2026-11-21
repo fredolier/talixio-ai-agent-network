@@ -434,6 +434,10 @@ pub async fn execute(node: &Arc<Node>, name: &str, input: &Value) -> Result<Stri
             let filename = safe_filename(&asked);
             let reader = node.clone();
             let bytes = blocking(move || read_bytes_checked(&reader.caps, &reader.deny, &asked, service::MAX_BLOB as u64)).await?;
+            // un fichier qui n'est pas un son ne part pas chez le fournisseur
+            if !service::is_audio(&bytes) {
+                return Err("ce fichier n'est pas un son reconnu (WAV, MP3, Ogg, FLAC, M4A, WebM)".into());
+            }
             let language = input["language"].as_str().map(str::to_string);
             let input = ServiceInput::Transcription { audio: service::encode(&bytes), filename, language };
             match call_service(node, model, input).await? {
@@ -534,7 +538,7 @@ pub async fn execute(node: &Arc<Node>, name: &str, input: &Value) -> Result<Stri
 /// chaque parent jusqu'au maître.
 async fn call_service(node: &Arc<Node>, model: String, input: ServiceInput) -> Result<ServiceOutput, String> {
     input.validate()?;
-    node.service(&node.id, ServiceRequest { model, input }).await.map(|response| response.output)
+    node.service(&node.id, ServiceRequest { model, input }).await.map(|response| response.output).map_err(|fail| fail.reason)
 }
 
 /// Le nom d'un fichier, réduit à ce qui peut partir chez un fournisseur : lettres, chiffres, point, tirets.
@@ -703,7 +707,13 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
     }
     // son modèle de conversation, plus les modèles de service qu'on lui confie nommément
     let mut models = vec![model.clone()];
-    models.extend(std::mem::take(&mut caps.models).into_iter().filter(|alias| *alias != model));
+    for alias in std::mem::take(&mut caps.models).into_iter().filter(|alias| *alias != model) {
+        // un seul modèle de conversation par agent : celui que son parent lui choisit
+        if node.natures.get(&alias).is_none_or(|nature| nature == "llm") {
+            return Err(format!("capabilities.models : « {} » n'est pas un modèle de service que vous détenez", crate::clean(&alias, 80, false)));
+        }
+        models.push(alias);
+    }
     caps.models = models;
     let target_name = input["target"].as_str().unwrap_or("local").to_string();
     if !policy.targets.contains(&target_name) {

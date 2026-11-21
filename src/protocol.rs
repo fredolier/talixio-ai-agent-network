@@ -59,6 +59,9 @@ pub enum Msg {
         request_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         response: Option<Box<ServiceResponse>>,
+        /// Sans réponse : la demande est-elle quand même partie chez le fournisseur ?
+        #[serde(default)]
+        spent: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },

@@ -116,7 +116,7 @@ Demandé le 2026-11-20, sur le modèle de Talixio AI Assistant. Rien n'est codé
 | F1 | Le maître tient un catalogue de fournisseurs ; chaque fournisseur offre des modèles de plusieurs natures : texte (LLM), image, voix, et d'autres. | 🟡 Catalogue embarqué (`catalog.toml`, repris de l'assistant : 13 fournisseurs, 61 modèles, prévision et décision comprises, avec pays, Europe ou non, niveau de confiance, nature, qualité de 1 à 10, prix indicatifs), servi par `GET /api/models`. Écran « Fournisseurs » : une table, connecté ou non. Écran « Modèles » : par fournisseur, activé (alias du maître, qui l'utilise, à qui il est accordé) ou non. Un modèle configuré est rattaché à son fournisseur par la machine qui le sert ; jamais la clé. Chaque modèle du catalogue dit s'il est appelable (le maître a un connecteur pour sa nature chez ce fournisseur) et comment le déclarer (`provider`, `nature`). Reste : se connecter et activer depuis la page (aujourd'hui dans la configuration, voir Q10), mise à jour du catalogue depuis les fournisseurs. |
 | F2 | Un agent reçoit le droit d'utiliser tel modèle de tel fournisseur, nature par nature. Ses enfants n'en reçoivent jamais plus. | ✅ `capabilities.models` (les alias, toutes natures) et `capabilities.max_calls` (nombre d'appels par nature de service : une nature absente vaut zéro). Un enfant reçoit son modèle de conversation, plus les seuls modèles de service que son parent lui confie nommément, et jamais plus d'appels que lui (tests). |
 | F3 | À la création d'un enfant, le parent choisit son modèle, son niveau d'effort, la taille de son contexte, ses instructions, et ses capacités (texte, image, voix), en plus de ses droits sur les dossiers et les commandes. | 🟡 modèle, instructions, droits, et capacités de service (`models`, `max_calls` dans `spawn_agent`) ; l'effort et le contexte sont fixés par l'alias, pas par enfant |
-| F4 | Les appels d'image et de voix passent par le maître, comme ceux de texte : les clés ne descendent jamais, et chaque appel est compté dans le budget. | 🟡 Fait pour sept natures : transcription, synthèse vocale, image, plongements (recherche par le sens dans la mémoire), prévision, décision, et lecture d'image par un modèle de texte (`vision`). Les appels remontent par le lien jusqu'au maître (décision 25), comptés en appels par nature à chaque niveau. Testé avec de faux fournisseurs, de bout en bout par un vrai enfant ; **aucun essai encore chez un vrai fournisseur** (pas de clé dans l'environnement de développement). Reste : compter en argent (B4), une image rendue par adresse (refusée aujourd'hui), le son en flux. |
+| F4 | Les appels d'image et de voix passent par le maître, comme ceux de texte : les clés ne descendent jamais, et chaque appel est compté dans le budget. | 🟡 Fait pour sept natures : transcription, synthèse vocale, image, plongements (recherche par le sens dans la mémoire), prévision, décision, et lecture d'image par un modèle de texte (`vision`). Les appels remontent par le lien jusqu'au maître (décision 25), comptés en appels par nature à chaque niveau. Revue de sécurité indépendante faite (§7, quatrième passe). Testé avec de faux fournisseurs, de bout en bout par un vrai enfant ; **aucun essai encore chez un vrai fournisseur** (pas de clé dans l'environnement de développement). Reste : compter en argent (B4), une image rendue par adresse (refusée aujourd'hui), le son en flux. |
 
 ### Répertoire des rôles et apprentissage
 
@@ -258,21 +258,29 @@ Demandé le 2026-11-20. Rien n'est codé.
     - **Le quota se compte en appels, par nature** (`capabilities.max_calls`), descendance
       comprise. Une nature absente : aucun appel, même si le modèle est accordé. On avait d'abord
       pensé compter des minutes et des images : la durée d'un son ne se mesure pas de façon sûre
-      avant l'appel, alors que chaque appel est borné en taille. Un appel compté est un appel
-      abouti ; un appel de service n'est jamais retenté (ni par le maître, ni après une coupure
-      du lien : il a peut-être abouti).
+      avant l'appel, alors que chaque appel est borné en taille. Un appel parti chez le
+      fournisseur est compté, abouti ou non (le fournisseur l'a peut-être facturé) ; seul un
+      refus avant tout envoi est gratuit. Un appel de service n'est jamais retenté, ni par le
+      maître, ni après une coupure du lien ; l'attente d'une réponse est bornée à 11 minutes.
     - **Bornes** : son ou image de 8 Mio au plus ; image à lire de 4 Mio ; texte à dire ou à
       dessiner de 4 000 caractères ; 64 textes de 8 000 caractères par appel de plongements,
       vecteurs de 4 096 dimensions au plus ; série de 3 à 5 000 valeurs, horizon de 256 pas ;
       état de 60 000 caractères et 20 questions pour une décision ; quatre appels de service
       simultanés par enfant.
-    - **Rien ne sort de l'adresse configurée.** Voix, langue, taille et nom de fichier sont
+    - **Rien ne sort de l'adresse configurée.** Le maître ne suit aucune redirection d'un
+      fournisseur, pour le texte comme pour les services. Voix, langue, taille et nom de fichier sont
       réduits à des mots simples avant de former une adresse ou un formulaire. Une image que le
       fournisseur rend par adresse n'est pas suivie. La réponse est lue sous une borne, et
-      vérifiée : une image doit en être une (PNG, JPEG, WebP), une décision ne garde que les
+      vérifiée : une image doit en être une (PNG, JPEG, WebP), un son aussi (premiers octets),
+      une décision ne garde que les
       questions posées, les options proposées et des nombres bornés.
     - **Ce que rend un service est une donnée** : texte transcrit nettoyé, et dit comme tel à
       l'agent. Le détail d'une panne de fournisseur reste au journal du maître.
+    - **Seul un son part en transcription** (premiers octets reconnus), pas n'importe quel
+      fichier lisible. Les images jointes à une demande de texte sont revérifiées à chaque
+      niveau : huit au plus, 4 Mio chacune, format connu, modèle `vision` exigé.
+    - **Un enfant n'a qu'un modèle de conversation** ; `spawn_agent` ne lui confie en plus que
+      des modèles de service (ou `vision`).
     - **Les fichiers passent par les droits de l'agent** : le son ou l'image à lire dans ses
       dossiers lisibles, le son ou l'image produits dans ses dossiers inscriptibles, vérifiés
       avant de dépenser un appel.
@@ -503,3 +511,21 @@ faire revoir avant de coder.
 
 Limite assumée du signalement M2 : un parent sous Windows ne sait pas juger des chemins POSIX
 (et inversement) ; la descendance d'une autre famille de système est alors marquée, à tort.
+
+### Quatrième passe (2026-11-21) : modèles de service et lecture d'images
+
+Revue indépendante du message `service_request`, des sept outils et des connecteurs. Aucun
+constat critique ; deux défauts réels, reproduits par exécution, puis rejoués en test
+(`tests/services.rs`).
+
+| N° | Gravité | Constat | Traitement |
+|---|---|---|---|
+| G1 | Haute | Un appel qui échouait après être parti chez le fournisseur (réponse trop grosse, image rendue par adresse, délai) n'était pas compté : un enfant au quota de 1 pouvait faire dépenser sans borne. | ✅ Tout appel parti est compté, abouti ou non ; seul un refus avant envoi est gratuit. L'information (`spent`) suit la réponse sur le lien, à chaque niveau. |
+| G2 | Moyenne | Le maître suivait les redirections d'un fournisseur : requête rejouée vers une adresse interne, dont la réponse finissait dans un fichier de l'agent ; la clé `xi-api-key` suivait. | ✅ Aucune redirection suivie, pour tous les modèles (texte compris) ; un 3xx est une erreur. |
+| G3 | Basse | `speak_text` écrivait n'importe quelle réponse comme un son. | ✅ Type annoncé et premiers octets vérifiés. |
+| G4 | Basse | `transcribe_audio` envoyait n'importe quel fichier lisible (8 Mio) au fournisseur. | ✅ Seul un son reconnu part, vérifié chez l'agent et chez le maître. |
+| G5 | Basse | Images jointes par un enfant à une demande de texte : ni nombre, ni taille, ni format, ni modèle `vision` exigés. | ✅ Revérifié à chaque niveau. |
+| G6 | Basse | Un appel de service pouvait attendre sans fin si le lien tombait au mauvais moment. | ✅ Inscription puis vérification du lien ; attente bornée ; compté, car il a pu aboutir. |
+| G7 | Basse | Comptes divergents entre niveaux si le lien tombait pendant un appel. | ✅ Réglé par G1 et G6. |
+| G8 | Basse | `spawn_agent` acceptait de confier d'autres modèles de conversation « en plus ». | ✅ Refusé : seuls des modèles de service ou `vision`. |
+| G9 | Information | Une réponse de plongements de 8 Mio est analysée d'un bloc (mémoire) ; le texte rendu par un fournisseur entre dans le résultat d'outil sans balise, comme pour `read_file` ; somme de tokens sans saturation. | 🟡 Somme saturée. Le reste est noté : borné par le nombre d'appels simultanés, et couvert par la limite 3 (injection par le sens). |

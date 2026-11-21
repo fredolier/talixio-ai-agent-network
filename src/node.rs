@@ -11,7 +11,7 @@ use tokio::sync::{broadcast, mpsc, Notify};
 
 use crate::config::{Bootstrap, RootConfig, Target, Timing};
 use crate::link::Uplink;
-use crate::model::{ModelRequest, ModelResponse, Providers, ServiceError, ServiceRequest, ServiceResponse};
+use crate::model::{Block, ModelRequest, ModelResponse, Providers, ServiceError, ServiceFail, ServiceRequest, ServiceResponse};
 use crate::policy::Capabilities;
 use crate::protocol::{ActivityEvent, Frame, Msg, NodeInfo, Outbox, ReportKind, Status};
 use crate::store::Store;
@@ -141,7 +141,7 @@ impl Meter {
         Ok(())
     }
 
-    /// Un appel compté est un appel abouti.
+    /// Un appel compté est un appel parti chez le fournisseur, abouti ou non.
     fn settle_call(&mut self, nature: &str, done: bool) {
         if let Some(flying) = self.calls_in_flight.get_mut(nature) {
             *flying = flying.saturating_sub(1);
@@ -163,6 +163,10 @@ const MAX_PARALLEL_CALLS: u32 = 16;
 /// Comptes rendus au plus entre deux consignes du parent.
 pub const MAX_REPORTS: u32 = 20;
 
+/// Images jointes à une demande, au plus ; taille de chacune, une fois en base64 (4 Mio).
+const MAX_IMAGES: usize = 8;
+const MAX_IMAGE_B64: usize = (4 * 1024 * 1024usize).div_ceil(3) * 4;
+
 /// Appels de service simultanés au plus pour un enfant et sa descendance.
 const MAX_PARALLEL_SERVICES: u64 = 4;
 
@@ -172,7 +176,7 @@ fn estimate(request: &ModelRequest) -> u64 {
     let mut images = 0u64;
     let mut image_bytes = 0u64;
     for block in request.messages.iter().flat_map(|m| &m.content) {
-        if let crate::model::Block::Image { data, .. } = block {
+        if let Block::Image { data, .. } = block {
             images += 1;
             image_bytes += data.len() as u64;
         }
@@ -464,6 +468,7 @@ impl Node {
 
     /// Appelle un modèle : directement chez le maître, en remontant par le parent sinon.
     pub async fn complete(&self, origin: &str, request: ModelRequest) -> Result<ModelResponse, String> {
+        self.check_images(&request)?;
         match (&self.providers, &self.uplink) {
             (Some(providers), _) => {
                 let estimate = estimate(&request);
@@ -483,8 +488,8 @@ impl Node {
 
     /// Appelle un modèle de service : directement chez le maître, en remontant par le parent
     /// sinon. Le droit, la taille et le quota de cet agent (descendance comprise) sont vérifiés
-    /// ici, à chaque niveau.
-    pub async fn service(&self, origin: &str, request: ServiceRequest) -> Result<ServiceResponse, String> {
+    /// ici, à chaque niveau. Un appel parti chez le fournisseur est compté, abouti ou non.
+    pub async fn service(&self, origin: &str, request: ServiceRequest) -> Result<ServiceResponse, ServiceFail> {
         if !self.caps.models.contains(&request.model) {
             return Err("modèle non autorisé pour cet agent".into());
         }
@@ -493,23 +498,24 @@ impl Node {
         self.meter.lock().unwrap().reserve_call(&self.caps.max_calls, nature, u64::MAX)?;
         let result = match (&self.providers, &self.uplink) {
             (Some(providers), _) => providers.service(&request).await.map_err(|e| match e {
-                ServiceError::Refused(reason) => reason,
+                ServiceError::Refused(reason) => ServiceFail::refused(reason),
                 // le détail d'une erreur de fournisseur reste chez le maître
                 ServiceError::Provider(e) => {
                     self.emit("error", format!("appel du modèle « {} » pour {} : {e:#}", crate::clean(&request.model, 80, false), crate::clean(origin, 64, false)));
-                    "le modèle n'a pas pu répondre (détail dans le journal du maître)".to_string()
+                    ServiceFail { reason: "le modèle n'a pas pu répondre (détail dans le journal du maître) ; l'appel est compté".to_string(), spent: true }
                 }
             }),
             (None, Some(uplink)) => uplink.service_request(origin, request).await,
             (None, None) => Err("aucun accès aux modèles".into()),
         };
-        self.meter.lock().unwrap().settle_call(nature, result.is_ok());
+        let spent = result.as_ref().map_or_else(|fail| fail.spent, |_| true);
+        self.meter.lock().unwrap().settle_call(nature, spent);
         self.tree_dirty.notify_one();
         result
     }
 
     /// Traite l'appel de service d'un enfant, après avoir vérifié qu'il y a droit.
-    pub async fn service_for_child(&self, child_id: &str, origin: &str, request: ServiceRequest) -> Result<ServiceResponse, String> {
+    pub async fn service_for_child(&self, child_id: &str, origin: &str, request: ServiceRequest) -> Result<ServiceResponse, ServiceFail> {
         let nature = request.input.nature().as_str();
         {
             let mut children = self.children.lock().unwrap();
@@ -524,11 +530,37 @@ impl Node {
             child.meter.reserve_call(&child.caps.max_calls, nature, MAX_PARALLEL_SERVICES)?;
         }
         let result = self.service(origin, request).await;
+        let spent = result.as_ref().map_or_else(|fail| fail.spent, |_| true);
         if let Some(child) = self.children.lock().unwrap().get_mut(child_id) {
-            child.meter.settle_call(nature, result.is_ok());
+            child.meter.settle_call(nature, spent);
         }
         self.tree_dirty.notify_one();
         result
+    }
+
+    /// Les images jointes à une demande : peu nombreuses, de taille bornée, d'un format connu,
+    /// et pour un modèle qui lit les images. Revérifié à chaque niveau : un enfant peut forger
+    /// sa demande.
+    fn check_images(&self, request: &ModelRequest) -> Result<(), String> {
+        let mut images = 0;
+        for block in request.messages.iter().flat_map(|m| &m.content) {
+            let Block::Image { media_type, data } = block else { continue };
+            images += 1;
+            if images > MAX_IMAGES {
+                return Err(format!("trop d'images jointes (maximum {MAX_IMAGES})"));
+            }
+            if !matches!(media_type.as_str(), "image/png" | "image/jpeg" | "image/webp" | "image/gif") {
+                return Err("image jointe d'un format non reconnu".into());
+            }
+            let plain = data.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='));
+            if data.is_empty() || data.len() > MAX_IMAGE_B64 || !plain {
+                return Err("image jointe illisible ou trop grosse (maximum 4 Mo)".into());
+            }
+        }
+        if images > 0 && self.natures.get(&request.model).is_none_or(|nature| nature != "vision") {
+            return Err("ce modèle ne lit pas les images".into());
+        }
+        Ok(())
     }
 
     /// Traite l'appel de modèle d'un enfant, après avoir vérifié qu'il y a droit.

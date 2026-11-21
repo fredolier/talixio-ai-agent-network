@@ -115,6 +115,47 @@ pub enum ServiceError {
     Provider(anyhow::Error),
 }
 
+/// Un appel de service qui n'a rien rendu. `spent` : la demande est partie chez le fournisseur
+/// (ou a pu partir) ; elle compte alors dans le quota, qu'elle ait abouti ou non.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ServiceFail {
+    pub reason: String,
+    pub spent: bool,
+}
+
+impl ServiceFail {
+    /// Refusé avant tout envoi : rien n'est compté.
+    pub fn refused(reason: impl Into<String>) -> Self {
+        Self { reason: reason.into(), spent: false }
+    }
+}
+
+impl From<String> for ServiceFail {
+    fn from(reason: String) -> Self {
+        Self::refused(reason)
+    }
+}
+
+impl From<&str> for ServiceFail {
+    fn from(reason: &str) -> Self {
+        Self::refused(reason)
+    }
+}
+
+/// Un son reconnu à ses premiers octets : WAV, MP3, Ogg, FLAC, MP4/M4A, WebM.
+pub fn is_audio(bytes: &[u8]) -> bool {
+    matches!(
+        bytes,
+        [b'R', b'I', b'F', b'F', ..]
+            | [b'I', b'D', b'3', ..]
+            | [0xFF, 0xE0..=0xFF, ..]
+            | [b'O', b'g', b'g', b'S', ..]
+            | [b'f', b'L', b'a', b'C', ..]
+            | [_, _, _, _, b'f', b't', b'y', b'p', ..]
+            | [0x1A, 0x45, 0xDF, 0xA3, ..]
+    )
+}
+
 fn word(text: &str, max: usize) -> bool {
     !text.is_empty() && text.len() <= max && text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
 }
@@ -340,6 +381,9 @@ impl Service {
 
     async fn transcribe(&self, audio: &str, filename: &str, language: Option<&str>) -> Result<ServiceOutput> {
         let bytes = decode(audio)?;
+        if !is_audio(&bytes) {
+            return Err(Refusal("ce fichier n'est pas un son reconnu (WAV, MP3, Ogg, FLAC, M4A, WebM)".into()).into());
+        }
         // un formulaire en plusieurs parties, écrit à la main : le nom du fichier a été vérifié
         let boundary = format!("talixio-{}", crate::random_hex(1));
         let mut body = Vec::with_capacity(bytes.len() + 512);
@@ -374,6 +418,10 @@ impl Service {
         let (bytes, media_type) = self.send(&url, serde_json::to_vec(&body)?, "application/json", MAX_BLOB).await?;
         if bytes.is_empty() {
             bail!("son vide");
+        }
+        // ni une page, ni un message d'erreur : seulement ce qui se présente comme un son et en a les premiers octets
+        if !(media_type.starts_with("audio/") || media_type == "application/octet-stream") || !is_audio(&bytes) {
+            bail!("le fournisseur n'a pas rendu un son");
         }
         let media_type = if media_type.starts_with("audio/") { media_type } else { "audio/mpeg".to_string() };
         Ok(ServiceOutput::Blob { data: encode(&bytes), media_type })
@@ -473,6 +521,9 @@ impl Service {
                 break;
             }
             bytes.extend_from_slice(&chunk);
+        }
+        if status.is_redirection() {
+            bail!("le fournisseur renvoie vers une autre adresse (HTTP {}) : non suivi", status.as_u16());
         }
         if !status.is_success() {
             let detail: String = String::from_utf8_lossy(&bytes).chars().take(300).collect();

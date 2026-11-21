@@ -7,6 +7,24 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.9.1"
+date = "2026-11-21"
+title = "Revue de sécurité des modèles de service"
+summary = "La revue indépendante de la version 0.9.0 a rendu huit constats, dont un haut et un moyen. Tous sont corrigés et rejoués en test."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Un appel de service parti chez le fournisseur est compté, qu'il aboutisse ou non : des demandes dont la réponse est écartée ne contournent plus le quota."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Le maître ne suit plus aucune redirection d'un fournisseur, pour tous les modèles : ni requête rejouée vers une adresse interne, ni clé qui voyage."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Seul un son reconnu part en transcription ou s'écrit comme un son. Les images jointes à une demande sont revérifiées à chaque niveau. Un enfant n'a qu'un modèle de conversation. L'attente d'un appel de service est bornée."
+
+[[release]]
 version = "0.9.0"
 date = "2026-11-21"
 title = "Voix, image, prévision, décision"
@@ -26,7 +44,7 @@ text = "Quota en appels par nature (capabilities.max_calls), descendance compris
 
 [[release.changes]]
 kind = "sécurité"
-text = "Tout est refusé par défaut : sans ligne dans max_calls, aucun appel. Chaque niveau revérifie l'alias, les bornes et le quota ; seul le maître appelle le fournisseur. Une image rendue par adresse n'est pas suivie, une réponse est lue sous une borne, rien du fournisseur n'atteint un agent. Revue de sécurité indépendante en cours : ses constats seront traités dans la version suivante."
+text = "Tout est refusé par défaut : sans ligne dans max_calls, aucun appel. Chaque niveau revérifie l'alias, les bornes et le quota ; seul le maître appelle le fournisseur. Une image rendue par adresse n'est pas suivie, une réponse est lue sous une borne, rien du fournisseur n'atteint un agent. Revue de sécurité indépendante : constats traités en 0.9.1."
 
 [[release.changes]]
 kind = "attention"

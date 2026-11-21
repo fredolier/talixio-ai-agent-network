@@ -14,7 +14,7 @@ use crate::config::ModelConfig;
 
 pub use anthropic::Anthropic;
 pub use openai::OpenAi;
-pub use service::{Nature, Service, ServiceError, ServiceRequest, ServiceResponse};
+pub use service::{Nature, Service, ServiceError, ServiceFail, ServiceRequest, ServiceResponse};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ModelRequest {
@@ -76,7 +76,7 @@ pub struct Usage {
 
 impl Usage {
     pub fn total(&self) -> u64 {
-        self.input + self.output + self.cache_read + self.cache_write
+        self.input.saturating_add(self.output).saturating_add(self.cache_read).saturating_add(self.cache_write)
     }
 }
 
@@ -154,6 +154,8 @@ impl Providers {
         let http = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(15))
             .timeout(std::time::Duration::from_secs(600))
+            // jamais d'autre adresse que celle de la configuration : ni requête rejouée ailleurs, ni clé qui suit
+            .redirect(reqwest::redirect::Policy::none())
             .build()?;
         let mut by_alias = BTreeMap::new();
         let mut services = BTreeMap::new();

@@ -15,7 +15,7 @@ use futures_util::{Sink, SinkExt, StreamExt};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_tungstenite::tungstenite::Message as TMessage;
 
-use crate::model::{ModelRequest, ModelResponse, ServiceRequest, ServiceResponse};
+use crate::model::{ModelRequest, ModelResponse, ServiceFail, ServiceRequest, ServiceResponse};
 use crate::node::{Input, Node, MAX_REPORTS};
 use crate::protocol::{Frame, Msg, NodeInfo, Outbox, ReportKind, Status};
 use crate::{now_ms, random_hex, secret_eq};
@@ -54,7 +54,11 @@ fn plain(msg: Msg) -> Frame {
 // ---------------------------------------------------------------------------------------
 
 type ModelReply = Result<ModelResponse, String>;
-type ServiceReply = Result<ServiceResponse, String>;
+type ServiceReply = Result<ServiceResponse, ServiceFail>;
+
+/// Attente maximale de la réponse à un appel de service : un peu plus que le délai du maître chez le fournisseur.
+const SERVICE_TIMEOUT: Duration = Duration::from_secs(660);
+const LINK_CUT: &str = "le lien avec le parent a été coupé pendant l'appel : il a pu aboutir, il est compté";
 
 /// Le lien d'un enfant vers son parent.
 pub struct Uplink {
@@ -133,22 +137,28 @@ impl Uplink {
     /// Appel d'un modèle de service par le parent. Si le lien tombe, l'appel n'est pas
     /// refait : il a peut-être abouti, et un appel compté ne se fait qu'une fois.
     pub async fn service_request(&self, origin: &str, request: ServiceRequest) -> ServiceReply {
-        if !self.is_connected() {
-            return Err("parent injoignable : réessaie plus tard".into());
-        }
         let request_id = random_hex(1);
         let (tx, rx) = oneshot::channel();
         self.pending_services.lock().unwrap().insert(request_id.clone(), tx);
-        self.send(Msg::ServiceRequest { request_id, origin: origin.to_string(), request: Box::new(request) });
-        match rx.await {
-            Ok(reply) => reply,
-            Err(_) => Err("le lien avec le parent a été coupé pendant l'appel".into()),
+        // inscrit d'abord, vérifié ensuite : une coupure entre les deux ne laisse pas l'appel sans fin
+        if !self.is_connected() {
+            self.pending_services.lock().unwrap().remove(&request_id);
+            return Err("parent injoignable : réessaie plus tard".into());
+        }
+        self.send(Msg::ServiceRequest { request_id: request_id.clone(), origin: origin.to_string(), request: Box::new(request) });
+        match tokio::time::timeout(SERVICE_TIMEOUT, rx).await {
+            Ok(Ok(reply)) => reply,
+            Ok(Err(_)) => Err(ServiceFail { reason: LINK_CUT.into(), spent: true }),
+            Err(_) => {
+                self.pending_services.lock().unwrap().remove(&request_id);
+                Err(ServiceFail { reason: "le parent n'a pas répondu à temps : l'appel a pu aboutir, il est compté".into(), spent: true })
+            }
         }
     }
 
     fn fail_pending(&self) {
         for (_, tx) in self.pending_services.lock().unwrap().drain() {
-            let _ = tx.send(Err("le lien avec le parent a été coupé pendant l'appel".into()));
+            let _ = tx.send(Err(ServiceFail { reason: LINK_CUT.into(), spent: true }));
         }
         for (_, tx) in self.pending.lock().unwrap().drain() {
             let _ = tx.send(Err(LINK_LOST.to_string()));
@@ -368,11 +378,11 @@ fn child_receive(node: &Arc<Node>, uplink: &Arc<Uplink>, frame: Frame, ended: &m
                 let _ = tx.send(reply);
             }
         }
-        Msg::ServiceResponse { request_id, response, error } => {
+        Msg::ServiceResponse { request_id, response, error, spent } => {
             if let Some(tx) = uplink.pending_services.lock().unwrap().remove(&request_id) {
                 let reply = match (response, error) {
                     (Some(response), _) => Ok(*response),
-                    (None, error) => Err(crate::clean(&error.unwrap_or_else(|| "réponse vide".into()), 500, false)),
+                    (None, error) => Err(ServiceFail { reason: crate::clean(&error.unwrap_or_else(|| "réponse vide".into()), 500, false), spent }),
                 };
                 let _ = tx.send(reply);
             }
@@ -728,8 +738,8 @@ fn parent_receive(node: &Arc<Node>, child_id: &str, frame: Frame) -> Vec<Frame> 
             let child_id = child_id.to_string();
             tokio::spawn(async move {
                 let msg = match node.service_for_child(&child_id, &origin, *request).await {
-                    Ok(response) => Msg::ServiceResponse { request_id, response: Some(Box::new(response)), error: None },
-                    Err(error) => Msg::ServiceResponse { request_id, response: None, error: Some(error) },
+                    Ok(response) => Msg::ServiceResponse { request_id, response: Some(Box::new(response)), error: None, spent: true },
+                    Err(fail) => Msg::ServiceResponse { request_id, response: None, error: Some(fail.reason), spent: fail.spent },
                 };
                 let _ = node.send_child(&child_id, msg, false);
             });

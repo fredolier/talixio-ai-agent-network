@@ -46,7 +46,17 @@ async fn fake_provider(State(log): State<Log>, uri: Uri, headers: HeaderMap, bod
         return axum::Json(json!({ "text": "  Bonjour à tous.\u{202e} Fin du message.  " })).into_response();
     }
     if path.ends_with("/audio/speech") {
-        return sound(b"ID3-faux-son");
+        let port = header("host");
+        return match asked["input"].as_str().unwrap_or("") {
+            // un fournisseur qui renvoie ailleurs, ou qui rend une page à la place d'un son
+            "ailleurs" => (StatusCode::TEMPORARY_REDIRECT, [("location", format!("http://{port}/piege"))]).into_response(),
+            "page" => ([("content-type", "text/html")], "<html>SECRET-DU-RESEAU-INTERNE</html>").into_response(),
+            "déguisé" => ([("content-type", "audio/mpeg")], "<html>SECRET-DU-RESEAU-INTERNE</html>").into_response(),
+            _ => sound(b"ID3-faux-son"),
+        };
+    }
+    if path.ends_with("/piege") {
+        return sound(b"ID3-SECRET-DU-RESEAU-INTERNE");
     }
     if path.contains("/text-to-speech/") {
         return sound(b"ID3-autre-voix");
@@ -167,6 +177,7 @@ async fn lab(max_calls: &str) -> Lab {
     let text = format!(
         "model = \"main\"\nstate_dir = {state:?}\n\
          [models.main]\nprovider = \"openai\"\nbase_url = \"http://127.0.0.1:{port}/v1\"\nmodel = \"faux\"\nvision = true\n\
+         [models.second]\nprovider = \"openai\"\nbase_url = \"http://127.0.0.1:{port}/v1\"\nmodel = \"faux-2\"\n\
          {}{}{}{}{}{}{}\
          [capabilities]\nfs_read = [{work:?}]\nfs_write = [{work:?}]\n[capabilities.max_calls]\n{max_calls}\n[capabilities.spawn]\nmax_children = 4\nmax_depth = 1\n",
         service("oreille", "openai", "transcription", "/v1", ""),
@@ -301,7 +312,7 @@ async fn without_a_quota_there_is_no_call() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn quotas_bound_the_calls_and_failures_reveal_nothing() {
-    let lab = lab("forecast = 2\nimage = 2").await;
+    let lab = lab("forecast = 2\nimage = 6\nspeech = 4").await;
     let call = || lab.run("forecast", json!({ "series": [1, 2, 3], "horizon": 1 }));
     call().await.unwrap();
     call().await.unwrap();
@@ -309,24 +320,78 @@ async fn quotas_bound_the_calls_and_failures_reveal_nothing() {
     assert!(refused.contains("quota d'appels « forecast » épuisé (2)"), "{refused}");
     assert_eq!(lab.seen("/ts/forecast").len(), 2);
 
-    // une panne du fournisseur : rien de ce qu'il dit ne va à l'agent, et l'appel n'est pas compté
-    for _ in 0..3 {
-        let failed = lab.run("generate_image", json!({ "prompt": "panne", "path": lab.file("x.png") })).await.unwrap_err();
-        assert_eq!(failed, "le modèle n'a pas pu répondre (détail dans le journal du maître)");
-    }
-    assert_eq!(lab.calls("image"), 0);
-    // pas de nouvelle tentative : une demande, un appel
-    assert_eq!(lab.seen("/v1/images/generations").len(), 3);
+    // une panne du fournisseur : rien de ce qu'il dit ne va à l'agent
+    let failed = lab.run("generate_image", json!({ "prompt": "panne", "path": lab.file("x.png") })).await.unwrap_err();
+    assert_eq!(failed, "le modèle n'a pas pu répondre (détail dans le journal du maître) ; l'appel est compté");
+    // pas de nouvelle tentative : une demande, un appel ; et un appel parti est compté, abouti ou non
+    assert_eq!(lab.seen("/v1/images/generations").len(), 1);
+    assert_eq!(lab.calls("image"), 1);
     // une image rendue par adresse n'est pas suivie ; un contenu qui n'est pas une image n'est pas écrit
     for prompt in ["adresse", "texte", "montagne"] {
         let failed = lab.run("generate_image", json!({ "prompt": prompt, "path": lab.file("x.png") })).await.unwrap_err();
         assert!(failed.contains("n'a pas pu répondre"), "{prompt} : {failed}");
     }
-    assert!(lab.seen("/piege").is_empty());
     assert!(!lab.work.join("x.png").exists());
-    assert_eq!(lab.calls("image"), 0);
+    assert_eq!(lab.calls("image"), 4);
     lab.run("generate_image", json!({ "prompt": "un phare", "path": lab.file("x.png") })).await.unwrap();
-    assert_eq!(lab.calls("image"), 1);
+    lab.run("generate_image", json!({ "prompt": "un phare", "path": lab.file("x.png") })).await.unwrap();
+    // des demandes que le fournisseur exécute mais dont la réponse est écartée ne contournent pas le quota
+    let refused = lab.run("generate_image", json!({ "prompt": "montagne", "path": lab.file("x.png") })).await.unwrap_err();
+    assert!(refused.contains("quota d'appels « image » épuisé (6)"), "{refused}");
+    assert_eq!(lab.seen("/v1/images/generations").len(), 6);
+
+    // un fournisseur qui renvoie vers une autre adresse n'est pas suivi : ni requête rejouée, ni clé qui voyage ;
+    // et ce qui n'est pas un son n'est jamais écrit comme tel
+    for text in ["ailleurs", "page", "déguisé"] {
+        let failed = lab.run("speak_text", json!({ "text": text, "path": lab.file("x.mp3"), "model": "voix" })).await.unwrap_err();
+        assert!(failed.contains("n'a pas pu répondre"), "{text} : {failed}");
+    }
+    assert!(lab.seen("/piege").is_empty());
+    assert!(!lab.work.join("x.mp3").exists());
+    assert_eq!(lab.calls("speech"), 3);
+}
+
+/// Un enfant peut forger sa demande : les images jointes sont revérifiées par le parent.
+#[tokio::test(flavor = "multi_thread")]
+async fn forged_images_are_refused() {
+    use talixio_agent::model::{Block, Message, ModelRequest};
+    let lab = lab("").await;
+    enroll(&lab.node, "a-faussaire", child_caps(&["main", "second"], &[]));
+    let image = |media_type: &str, data: &str| Block::Image { media_type: media_type.into(), data: data.into() };
+    let ask = |model: &str, blocks: Vec<Block>| {
+        let request = ModelRequest { model: model.into(), system: String::new(), messages: vec![Message::user(blocks)], tools: vec![] };
+        lab.node.complete_for_child("a-faussaire", "a-faussaire", request)
+    };
+    let png = encode(PNG);
+    let refused = ask("second", vec![image("image/png", &png)]).await.unwrap_err();
+    assert_eq!(refused, "ce modèle ne lit pas les images");
+    for (media_type, data) in [("text/html", png.as_str()), ("image/png\r\nx: y", png.as_str()), ("image/png", "pas du base64 !"), ("image/png", "")] {
+        let refused = ask("main", vec![image(media_type, data)]).await.unwrap_err();
+        assert!(refused.contains("image jointe"), "{media_type} : {refused}");
+    }
+    let big = "A".repeat(6 * 1024 * 1024);
+    assert!(ask("main", vec![image("image/png", &big)]).await.unwrap_err().contains("trop grosse"));
+    let many = (0..9).map(|_| image("image/png", &png)).collect();
+    assert!(ask("main", many).await.unwrap_err().contains("trop d'images"));
+    assert_eq!(lab.requests(), 0);
+    ask("main", vec![Block::Text { text: "Que vois-tu ?".into() }, image("image/png", &png)]).await.unwrap();
+}
+
+/// Un enfant n'a qu'un modèle de conversation : on ne lui confie en plus que des modèles de service.
+#[tokio::test(flavor = "multi_thread")]
+async fn only_service_models_are_entrusted_in_addition() {
+    let lab = lab(ALL).await;
+    let spawn = |models: Value| {
+        lab.run("spawn_agent", json!({
+            "name": "aide", "role": "aide", "instructions": "Aide.", "objective": "Aider.", "success_criteria": "Aidé.",
+            "capabilities": { "models": models }
+        }))
+    };
+    let refused = spawn(json!(["second"])).await.unwrap_err();
+    assert!(refused.contains("« second » n'est pas un modèle de service"), "{refused}");
+    let refused = spawn(json!(["inconnu"])).await.unwrap_err();
+    assert!(refused.contains("n'est pas un modèle de service"), "{refused}");
+    assert!(lab.node.children.lock().unwrap().is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -334,7 +399,8 @@ async fn oversized_or_misplaced_requests_never_leave() {
     let lab = lab(ALL).await;
     let questions = |count: usize| -> Value { (0..count).map(|i| (format!("q{i}"), json!({ "type": "noul" }))).collect::<Map<_, _>>().into() };
     std::fs::write(lab.work.join("long.wav"), vec![0u8; 8 * 1024 * 1024 + 1]).unwrap();
-    std::fs::write(lab.work.join("court.wav"), b"son").unwrap();
+    std::fs::write(lab.work.join("court.wav"), b"RIFF-son").unwrap();
+    std::fs::write(lab.work.join("id_rsa.pem"), b"-----BEGIN PRIVATE KEY-----").unwrap();
     std::fs::write(lab.state.join("api-token"), "jeton").unwrap();
     let outside = lab.work.parent().unwrap().join("ailleurs.png");
     let cases = [
@@ -355,6 +421,8 @@ async fn oversized_or_misplaced_requests_never_leave() {
         ("generate_image", json!({ "prompt": "p", "path": outside.to_str().unwrap() }), "hors"),
         ("speak_text", json!({ "text": "a", "path": lab.state.join("a.mp3").to_str().unwrap() }), ""),
         ("transcribe_audio", json!({ "path": lab.file("long.wav") }), "trop gros"),
+        // seul un son part chez le fournisseur de transcription, pas n'importe quel fichier lisible
+        ("transcribe_audio", json!({ "path": lab.file("id_rsa.pem") }), "n'est pas un son"),
         ("transcribe_audio", json!({ "path": lab.state.join("api-token").to_str().unwrap() }), ""),
         ("transcribe_audio", json!({ "path": lab.file("court.wav"), "language": "fr\r\nX-Injecte: 1" }), "langue invalide"),
         ("describe_image", json!({ "path": lab.state.join("api-token").to_str().unwrap(), "question": "?" }), ""),
@@ -371,7 +439,10 @@ async fn oversized_or_misplaced_requests_never_leave() {
     assert!(lab.node.snapshot().calls_used.values().all(|count| *count == 0));
 
     // même en parlant directement au nœud : la nature demandée doit être celle du modèle
-    let direct = |model: &str, input: ServiceInput| lab.node.service("moi", ServiceRequest { model: model.into(), input });
+    let direct = |model: &str, input: ServiceInput| {
+        let request = ServiceRequest { model: model.into(), input };
+        async { lab.node.service("moi", request).await.map_err(|fail| fail.reason) }
+    };
     let wrong = direct("pinceau", ServiceInput::Forecast { series: vec![1.0, 2.0, 3.0], horizon: 1 }).await.unwrap_err();
     assert!(wrong.contains("nature « image »"), "{wrong}");
     let wrong = direct("main", ServiceInput::Image { prompt: "p".into(), size: None }).await.unwrap_err();
@@ -428,7 +499,13 @@ async fn a_child_only_gets_what_it_was_granted() {
     let lab = lab("forecast = 50\nimage = 5").await;
     let node = &lab.node;
     let forecast = |first: f64| ServiceRequest { model: "oracle".into(), input: ServiceInput::Forecast { series: vec![first, 2.0, 3.0], horizon: 1 } };
-    let ask = |child: &'static str, request: ServiceRequest| node.service_for_child(child, child, request);
+    let ask = |child: &'static str, request: ServiceRequest| async move {
+        // un refus avant tout envoi n'est jamais compté
+        node.service_for_child(child, child, request).await.map_err(|fail| {
+            assert!(!fail.spent, "{fail:?}");
+            fail.reason
+        })
+    };
 
     // sans l'alias : refusé, même si le maître, lui, y a droit
     enroll(node, "a-sans-alias", child_caps(&["main"], &[("forecast", 5)]));
