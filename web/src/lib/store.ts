@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, forgetToken, keepToken, savedToken, Unauthorized } from './api'
-import type { ActivityEvent, Agent, ModelInfo, Release, RoleEntry } from './types'
+import type { ActivityEvent, Agent, ModelsData, Release, RoleEntry } from './types'
 
 const KEPT = 5000
 
@@ -9,7 +9,7 @@ export interface Cluster {
   tree: Agent
   events: ActivityEvent[]
   offline: boolean
-  models: { default: string; models: ModelInfo[] } | null
+  models: ModelsData | null
   roles: RoleEntry[] | null
   releases: { version: string; releases: Release[] } | null
   refresh: () => void

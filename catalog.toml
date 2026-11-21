@@ -1,0 +1,655 @@
+# Catalogue des fournisseurs et des modèles que le maître connaît.
+#
+# Embarqué dans l'exécutable et servi par `GET /api/models`, d'où l'interface le lit. Il ne donne
+# aucun droit : un modèle n'est utilisable que s'il est déclaré dans la configuration du maître
+# (`[models.<alias>]`, avec sa clé) et accordé à l'agent.
+#
+# Repris du catalogue de l'assistant Talixio (relevé d'octobre 2026). Les prix sont indicatifs
+# (`estimated` : chiffre non confirmé, ou facturé dans une autre monnaie) : vérifier chez le
+# fournisseur. `rank` : qualité relative, de 1 (élémentaire) à 10 (le meilleur).
+#
+# Confiance (`trust`) : 1 grand public · 2 gratuit ou public · 3 professionnel ·
+# 4 professionnel sans conservation · 5 souverain (RGPD) · L local (votre propre machine).
+# `europe` : hébergé et régi en Europe (niveau 5). `api` : comment le maître sait l'appeler
+# (`anthropic`, `openai` pour toute API compatible, vide : pas encore appelable).
+# `hosts` : machines qui servent ce fournisseur (un nom qui commence par un point vaut pour ses
+# sous-domaines) ; c'est ainsi qu'un modèle configuré est rattaché à son fournisseur.
+
+[[provider]]
+id = "mistral"
+name = "Mistral AI"
+country = "France"
+europe = true
+trust = "5"
+kind = "Souverain (RGPD)"
+billing = "usage"
+api = "openai"
+endpoint = "https://api.mistral.ai/v1"
+hosts = ["api.mistral.ai"]
+
+[[provider]]
+id = "anthropic"
+name = "Anthropic"
+country = "États-Unis"
+europe = false
+trust = "4"
+kind = "Professionnel, sans conservation"
+billing = "usage"
+api = "anthropic"
+endpoint = "https://api.anthropic.com"
+hosts = ["api.anthropic.com"]
+
+[[provider]]
+id = "openai"
+name = "OpenAI"
+country = "États-Unis"
+europe = false
+trust = "3"
+kind = "Professionnel"
+billing = "usage"
+api = "openai"
+endpoint = "https://api.openai.com/v1"
+hosts = ["api.openai.com"]
+
+[[provider]]
+id = "google"
+name = "Google"
+country = "États-Unis"
+europe = false
+trust = "3"
+kind = "Professionnel"
+billing = "usage"
+api = "openai"
+endpoint = "https://generativelanguage.googleapis.com/v1beta/openai"
+hosts = ["generativelanguage.googleapis.com"]
+
+[[provider]]
+id = "scaleway"
+name = "Scaleway"
+country = "France"
+europe = true
+trust = "5"
+kind = "Souverain (RGPD)"
+billing = "usage"
+api = "openai"
+endpoint = "https://api.scaleway.ai/v1"
+hosts = ["api.scaleway.ai"]
+
+[[provider]]
+id = "ovhcloud"
+name = "OVHcloud AI"
+country = "France"
+europe = true
+trust = "5"
+kind = "Souverain (RGPD)"
+billing = "usage"
+api = "openai"
+endpoint = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"
+hosts = [".endpoints.kepler.ai.cloud.ovh.net"]
+
+[[provider]]
+id = "infomaniak"
+name = "Infomaniak"
+country = "Suisse"
+europe = true
+trust = "5"
+kind = "Souverain (RGPD)"
+billing = "usage"
+api = "openai"
+endpoint = ""
+hosts = ["api.infomaniak.com"]
+
+[[provider]]
+id = "aki"
+name = "AKI.IO"
+country = "Allemagne"
+europe = true
+trust = "5"
+kind = "Souverain, sans conservation"
+billing = "usage"
+api = "openai"
+endpoint = "https://aki.io/openai/v1"
+hosts = ["aki.io"]
+
+[[provider]]
+id = "elevenlabs"
+name = "ElevenLabs"
+country = "États-Unis"
+europe = false
+trust = "3"
+kind = "Professionnel"
+billing = "usage"
+api = ""
+endpoint = ""
+hosts = ["api.elevenlabs.io"]
+
+[[provider]]
+id = "deepseek"
+name = "DeepSeek"
+country = "Chine"
+europe = false
+trust = "1"
+kind = "Grand public"
+billing = "usage"
+api = "openai"
+endpoint = "https://api.deepseek.com"
+hosts = ["api.deepseek.com"]
+
+[[provider]]
+id = "local"
+name = "Machine locale"
+country = "Cet ordinateur"
+europe = false
+trust = "L"
+kind = "Local"
+billing = "gratuit"
+api = "openai"
+endpoint = "http://127.0.0.1:11434/v1"
+hosts = ["localhost", "127.0.0.1", "::1"]
+
+[[model]]
+name = "Haiku 5.5"
+id = "claude-haiku-5-5"
+provider = "anthropic"
+nature = "LLM"
+rank = 6
+price_in = 0.1
+price_out = 0.5
+
+[[model]]
+name = "Sonnet 5.5"
+id = "claude-sonnet-5-5"
+provider = "anthropic"
+nature = "LLM"
+rank = 8
+price_in = 2.0
+price_out = 10.0
+
+[[model]]
+name = "Opus 5.5"
+id = "claude-opus-5-5"
+provider = "anthropic"
+nature = "LLM"
+rank = 10
+price_in = 4.0
+price_out = 20.0
+
+[[model]]
+name = "Fable 5.1"
+id = "claude-fable-5-1"
+provider = "anthropic"
+nature = "LLM"
+rank = 9
+price_in = 10.0
+price_out = 50.0
+
+[[model]]
+name = "gpt-5.1"
+id = "gpt-5.1"
+provider = "openai"
+nature = "LLM"
+rank = 9
+price_in = 1.25
+price_out = 10.0
+estimated = true
+
+[[model]]
+name = "gpt-5.1-mini"
+id = "gpt-5.1-mini"
+provider = "openai"
+nature = "LLM"
+rank = 6
+price_in = 0.25
+price_out = 2.0
+estimated = true
+
+[[model]]
+name = "gemini-2.5-pro"
+id = "gemini-2.5-pro"
+provider = "google"
+nature = "LLM"
+rank = 9
+price_in = 1.25
+price_out = 10.0
+estimated = true
+
+[[model]]
+name = "gemini-2.5-flash"
+id = "gemini-2.5-flash"
+provider = "google"
+nature = "LLM"
+rank = 7
+price_in = 0.3
+price_out = 2.5
+estimated = true
+
+[[model]]
+name = "mistral-small-latest"
+id = "mistral-small-latest"
+provider = "mistral"
+nature = "LLM"
+rank = 5
+price_in = 0.15
+price_out = 0.6
+estimated = true
+
+[[model]]
+name = "mistral-medium-latest"
+id = "mistral-medium-latest"
+provider = "mistral"
+nature = "LLM"
+rank = 7
+price_in = 1.5
+price_out = 7.5
+estimated = true
+
+[[model]]
+name = "mistral-large-latest"
+id = "mistral-large-latest"
+provider = "mistral"
+nature = "LLM"
+rank = 8
+price_in = 0.5
+price_out = 1.5
+estimated = true
+
+[[model]]
+name = "pixtral-large"
+id = "pixtral-large"
+provider = "mistral"
+nature = "Vision"
+rank = 7
+price_in = 2.0
+price_out = 6.0
+estimated = true
+deprecated = true
+
+[[model]]
+name = "Voxtral"
+id = "voxtral-mini-latest"
+provider = "mistral"
+nature = "Voice"
+rank = 5
+unit_price = 0.003
+unit = "min"
+currency = "$"
+estimated = true
+
+[[model]]
+name = "Llama 3.3 70B"
+id = "Llama 3.3 70B"
+provider = "scaleway"
+nature = "LLM"
+rank = 7
+price_in = 0.9
+price_out = 0.9
+estimated = true
+
+[[model]]
+name = "FLUX.1 [pro]"
+id = "FLUX.1 [pro]"
+provider = "scaleway"
+nature = "Image"
+rank = 7
+unit_price = 0.05
+unit = "img"
+currency = "$"
+estimated = true
+
+[[model]]
+name = "Qwen2.5 72B"
+id = "Qwen2.5 72B"
+provider = "ovhcloud"
+nature = "LLM"
+rank = 7
+price_in = 0.9
+price_out = 0.9
+estimated = true
+
+[[model]]
+name = "gpt-oss-120b"
+id = "gpt-oss-120b"
+provider = "ovhcloud"
+nature = "LLM"
+rank = 7
+price_in = 0.09
+price_out = 0.47
+estimated = true
+
+[[model]]
+name = "Apertus 70B"
+id = "Apertus 70B"
+provider = "infomaniak"
+nature = "LLM"
+rank = 6
+price_in = 0.87
+price_out = 3.1
+estimated = true
+
+[[model]]
+name = "Ministral 3 14B"
+id = "Ministral 3 14B"
+provider = "infomaniak"
+nature = "LLM"
+rank = 5
+price_in = 0.33
+price_out = 0.44
+estimated = true
+
+[[model]]
+name = "GPT-OSS 120B"
+id = "gpt-oss-120b"
+provider = "aki"
+nature = "LLM"
+rank = 7
+price_in = 0.15
+price_out = 0.55
+estimated = true
+
+[[model]]
+name = "Deepseek V4.1 Flash"
+id = "deepseek-v4.1-flash-1017-tl5"
+provider = "aki"
+nature = "LLM"
+rank = 8
+price_in = 0.28
+price_out = 0.42
+estimated = true
+
+[[model]]
+name = "GLM 5.3 754B"
+id = "glm5.3-754b"
+provider = "aki"
+nature = "LLM"
+rank = 9
+price_in = 0.4
+price_out = 1.6
+estimated = true
+
+[[model]]
+name = "Mistral 4 119B"
+id = "mistral4-119b"
+provider = "aki"
+nature = "LLM"
+rank = 8
+price_in = 0.25
+price_out = 1.0
+estimated = true
+
+[[model]]
+name = "Gemma 4 26B"
+id = "gemma4-26b"
+provider = "aki"
+nature = "LLM"
+rank = 6
+price_in = 0.1
+price_out = 0.3
+estimated = true
+
+[[model]]
+name = "Qwen 3.8 27B"
+id = "qwen3.8-27b"
+provider = "aki"
+nature = "LLM"
+rank = 6
+price_in = 0.12
+price_out = 0.36
+estimated = true
+
+[[model]]
+name = "Kolibri 1 TL5"
+id = "kolibri-1-tl5"
+provider = "aki"
+nature = "LLM"
+rank = 5
+price_in = 0.08
+price_out = 0.24
+estimated = true
+
+[[model]]
+name = "Qwen 3.6 35B A3B (EOL 31.10.26)"
+id = "qwen3.6-35b"
+provider = "aki"
+nature = "LLM"
+rank = 6
+price_in = 0.12
+price_out = 0.36
+estimated = true
+deprecated = true
+
+[[model]]
+name = "Apertus 70B (EOL 31.10.26)"
+id = "apertus-chat-70b"
+provider = "aki"
+nature = "LLM"
+rank = 6
+price_in = 0.8
+price_out = 3.0
+estimated = true
+deprecated = true
+
+[[model]]
+name = "Flux.2 [klein]"
+id = "flux2-klein"
+provider = "aki"
+nature = "Image"
+rank = 5
+unit_price = 0.015
+unit = "img"
+currency = "€"
+estimated = true
+
+[[model]]
+name = "Qwen Image"
+id = "qwen-image"
+provider = "aki"
+nature = "Image"
+rank = 6
+unit_price = 0.02
+unit = "img"
+currency = "€"
+estimated = true
+
+[[model]]
+name = "Qwen Image Edit"
+id = "qwen-image-edit"
+provider = "aki"
+nature = "Image"
+rank = 6
+unit_price = 0.02
+unit = "img"
+currency = "€"
+estimated = true
+
+[[model]]
+name = "Z-Image Turbo"
+id = "z-image-turbo"
+provider = "aki"
+nature = "Image"
+rank = 5
+unit_price = 0.01
+unit = "img"
+currency = "€"
+estimated = true
+
+[[model]]
+name = "deepseek-chat"
+id = "deepseek-chat"
+provider = "deepseek"
+nature = "LLM"
+rank = 8
+price_in = 0.28
+price_out = 0.42
+estimated = true
+
+[[model]]
+name = "ElevenLabs v3"
+id = "ElevenLabs v3"
+provider = "elevenlabs"
+nature = "Voice"
+rank = 7
+unit_price = 0.1
+unit = "min"
+currency = "$"
+estimated = true
+
+[[model]]
+name = "Llama 3.1 8B (local)"
+id = "Llama 3.1 8B (local)"
+provider = "local"
+nature = "LLM"
+rank = 3
+price_in = 0.0
+price_out = 0.0
+
+[[model]]
+name = "Qwen2.5 7B (local)"
+id = "Qwen2.5 7B (local)"
+provider = "local"
+nature = "LLM"
+rank = 4
+price_in = 0.0
+price_out = 0.0
+
+[[model]]
+name = "Whisper (local)"
+id = "whisper.cpp"
+provider = "local"
+nature = "Voice"
+rank = 3
+unit_price = 0.0
+unit = "min"
+currency = "$"
+
+[[model]]
+name = "Whisper large v3"
+id = "whisper-large-v3"
+provider = "ovhcloud"
+nature = "Voice"
+rank = 6
+estimated = true
+
+[[model]]
+name = "Whisper large v3"
+id = "whisper-large-v3"
+provider = "scaleway"
+nature = "Voice"
+rank = 6
+estimated = true
+
+[[model]]
+name = "Whisper"
+id = "whisper"
+provider = "infomaniak"
+nature = "Voice"
+rank = 6
+estimated = true
+
+[[model]]
+name = "text-embedding-3-small"
+id = "text-embedding-3-small"
+provider = "openai"
+nature = "Embedding"
+rank = 6
+unit_price = 0.02
+unit = "Mtok"
+currency = "$"
+estimated = true
+
+[[model]]
+name = "gemini-embedding-001"
+id = "gemini-embedding-001"
+provider = "google"
+nature = "Embedding"
+rank = 7
+unit_price = 0.15
+unit = "Mtok"
+currency = "$"
+estimated = true
+
+[[model]]
+name = "BGE-M3"
+id = "bge-m3"
+provider = "aki"
+nature = "Embedding"
+rank = 6
+unit_price = 0.01
+unit = "Mtok"
+currency = "€"
+estimated = true
+
+[[model]]
+name = "Qwen 3 VL Embedding 8B"
+id = "qwen3-vl-embedding-8b"
+provider = "aki"
+nature = "Embedding"
+rank = 7
+unit_price = 0.05
+unit = "Mtok"
+currency = "€"
+estimated = true
+
+[[model]]
+name = "Qwen3-Embedding 0.6B (local)"
+id = "qwen3-embedding:0.6b"
+provider = "local"
+nature = "Embedding"
+rank = 5
+unit_price = 0.0
+unit = "Mtok"
+currency = "$"
+
+[[model]]
+name = "multilingual-e5-small (local)"
+id = "hf.co/TwinSunsLLC/multilingual-e5-small-gguf:Q8_0"
+provider = "local"
+nature = "Embedding"
+rank = 3
+unit_price = 0.0
+unit = "Mtok"
+currency = "$"
+
+[[model]]
+name = "mistral-embed"
+id = "mistral-embed"
+provider = "mistral"
+nature = "Embedding"
+rank = 6
+unit_price = 0.1
+unit = "Mtok"
+currency = "$"
+estimated = true
+
+[[model]]
+name = "Qwen3-Embedding 8B"
+id = "qwen3-embedding-8b"
+provider = "scaleway"
+nature = "Embedding"
+rank = 7
+estimated = true
+
+[[model]]
+name = "BGE-M3"
+id = "bge-m3"
+provider = "ovhcloud"
+nature = "Embedding"
+rank = 6
+estimated = true
+
+[[model]]
+name = "BGE Multilingual Gemma2"
+id = "bge_multilingual_gemma2"
+provider = "infomaniak"
+nature = "Embedding"
+rank = 6
+estimated = true
+
+[[model]]
+name = "EmbeddingGemma (local)"
+id = "embeddinggemma"
+provider = "local"
+nature = "Embedding"
+rank = 4
+unit_price = 0.0
+unit = "Mtok"
+currency = "$"

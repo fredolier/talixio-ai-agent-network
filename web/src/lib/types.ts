@@ -84,3 +84,52 @@ export interface Release {
   summary: string
   changes: { kind: string; text: string }[]
 }
+
+/** Un fournisseur du catalogue du maître, et ce que sa configuration en dit. */
+export interface CatalogProvider {
+  id: string
+  name: string
+  country: string
+  /** Hébergé et régi en Europe ; `null` si le catalogue ne le connaît pas. */
+  europe: boolean | null
+  /** `1` à `5`, `L` (local), ou vide hors catalogue. */
+  trust: string
+  kind: string
+  billing: string
+  /** Comment le maître sait l'appeler ; vide : pas encore appelable. */
+  api: string
+  endpoint: string
+  hosts: string[]
+  /** Un de ses modèles est déclaré chez le maître, avec sa clé. */
+  connected: boolean
+  configured: number
+  listed: boolean
+}
+
+export interface CatalogModel {
+  name: string
+  id: string
+  provider: string
+  nature: string
+  /** Qualité relative, de 1 à 10 ; `null` hors catalogue. */
+  rank: number | null
+  price_in: number | null
+  price_out: number | null
+  unit_price: number | null
+  unit: string | null
+  currency: string | null
+  estimated: boolean
+  deprecated: boolean
+  /** Les alias sous lesquels le maître l'a activé. */
+  aliases: string[]
+  /** Un agent peut l'appeler (texte et vision ; pas encore l'image ni la voix). */
+  callable: boolean
+  listed: boolean
+}
+
+export interface ModelsData {
+  default: string
+  models: ModelInfo[]
+  providers: CatalogProvider[]
+  catalog: CatalogModel[]
+}

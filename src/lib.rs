@@ -5,6 +5,7 @@
 
 pub mod agent;
 pub mod api;
+pub mod catalog;
 pub mod config;
 pub mod link;
 pub mod model;

@@ -112,13 +112,18 @@ async fn harden(mut response: Response) -> Response {
     response
 }
 
-/// Les modèles que le maître peut appeler, par fournisseur. Jamais de clé, ni où elle est rangée.
+/// Les modèles que le maître peut appeler (`models`), et le catalogue : tous les fournisseurs
+/// connus, connectés ou non (`providers`), et leurs modèles, activés ou non (`catalog`).
+/// Jamais de clé, ni où elle est rangée.
 async fn models(State(app): State<App>, headers: HeaderMap) -> Response {
     if let Err(response) = authorize(&app, &headers) {
         return response;
     }
     let catalog = app.node.providers.as_ref().map(|p| p.catalog().to_vec()).unwrap_or_default();
-    Json(json!({ "default": app.node.model, "models": catalog })).into_response()
+    let mut body = crate::catalog::view(&catalog);
+    body["default"] = json!(app.node.model);
+    body["models"] = json!(catalog);
+    Json(body).into_response()
 }
 
 /// Le répertoire des rôles : chaque agent créé dans la grappe, avec ce qu'on lui a accordé.

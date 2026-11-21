@@ -113,7 +113,7 @@ Demandé le 2026-11-20, sur le modèle de Talixio AI Assistant. Rien n'est codé
 
 | N° | Exigence | État |
 |---|---|---|
-| F1 | Le maître tient un catalogue de fournisseurs ; chaque fournisseur offre des modèles de plusieurs natures : texte (LLM), image, voix, et d'autres. | 🟡 `GET /api/models` et l'écran « Modèles » montrent les modèles du maître regroupés par fournisseur et par machine (alias, modèle, effort, clé en place ou non, agents qui l'utilisent, à qui il est accordé) ; jamais la clé. Reste : la nature des modèles (image, voix) et un vrai catalogue par fournisseur |
+| F1 | Le maître tient un catalogue de fournisseurs ; chaque fournisseur offre des modèles de plusieurs natures : texte (LLM), image, voix, et d'autres. | 🟡 Catalogue embarqué (`catalog.toml`, repris de l'assistant : 11 fournisseurs, 51 modèles, avec pays, Europe ou non, niveau de confiance, nature, qualité de 1 à 10, prix indicatifs), servi par `GET /api/models`. Écran « Fournisseurs » : une table, connecté ou non. Écran « Modèles » : par fournisseur, activé (alias du maître, qui l'utilise, à qui il est accordé) ou non. Un modèle configuré est rattaché à son fournisseur par la machine qui le sert ; jamais la clé. Reste : se connecter et activer depuis la page (aujourd'hui dans la configuration, voir Q10), appeler l'image et la voix (F4), mise à jour du catalogue depuis les fournisseurs. |
 | F2 | Un agent reçoit le droit d'utiliser tel modèle de tel fournisseur, nature par nature. Ses enfants n'en reçoivent jamais plus. | 🟡 fait pour les modèles de texte (`capabilities.models`) |
 | F3 | À la création d'un enfant, le parent choisit son modèle, son niveau d'effort, la taille de son contexte, ses instructions, et ses capacités (texte, image, voix), en plus de ses droits sur les dossiers et les commandes. | 🟡 modèle, instructions et droits ; l'effort et le contexte sont fixés par l'alias, pas par enfant |
 | F4 | Les appels d'image et de voix passent par le maître, comme ceux de texte : les clés ne descendent jamais, et chaque appel est compté dans le budget. | ⬜ voir Q10 |
@@ -309,7 +309,7 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 
 | Méthode | Chemin | Rôle |
 |---|---|---|
-| GET | `/`, `/app.js`, `/app.css`, `/icon.svg`, `/manifest.webmanifest` | L'interface web (sans jeton). |
+| GET | `/`, `/app.js`, `/app.css`, `/sans.woff2`, `/mono.woff2`, `/icon.svg`, `/manifest.webmanifest` | L'interface web (sans jeton). |
 | GET | `/api/health` | Vie du maître (sans jeton). |
 | GET | `/api/tree` | La grappe : chaque agent avec nom, rôle, état, machine, OS, IP, droits, tokens, enfants. |
 | GET | `/api/activity?after=N&limit=M` | Le journal après l'événement N. |
@@ -317,6 +317,8 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 | POST | `/api/messages` `{ "text": … }` | Un message au maître. |
 | POST | `/api/agents/{id}/stop` | Arrête un agent et sa descendance. |
 | GET | `/api/releases` | La version qui tourne et les notes de version. |
+| GET | `/api/models` | Les modèles du maître (`models`, `default`) et le catalogue : fournisseurs connus, connectés ou non (`providers`), modèles, activés ou non (`catalog`). Jamais de clé. |
+| GET | `/api/roles` | Le répertoire des rôles (500 fiches au plus). |
 
 ## 6. Questions ouvertes
 
@@ -445,6 +447,14 @@ rôles. Aucun constat critique. Dix constats, tous traités en v0.7.1.
 Examiné sans rien trouver : injection de HTML ou de script dans la page (tout passe par React,
 aucun `dangerouslySetInnerHTML`, CSP sans `unsafe-inline`) ; fuite de clés par `/api/models` ;
 accès sans jeton ; rangement du jeton dans le navigateur.
+
+Catalogue des fournisseurs (v0.8.0) : pas de nouvelle route ni d'écriture ; des données fixes,
+embarquées, ajoutées à `/api/models` (sous jeton). Relu par l'auteur, sans revue indépendante :
+le rattachement d'un modèle à un fournisseur compare le nom de machine entier (ou un sous-domaine
+exact), testé contre les noms qui n'en ont que la fin ; le filtre passé dans l'adresse de la page
+(`#modeles?f=…`) n'est que comparé à des identifiants. Se connecter et activer depuis la page
+ouvrirait une vraie surface (saisie d'une clé, changement des droits du maître) : à décider et à
+faire revoir avant de coder.
 
 Limite assumée du signalement M2 : un parent sous Windows ne sait pas juger des chemins POSIX
 (et inversement) ; la descendance d'une autre famille de système est alors marquée, à tort.

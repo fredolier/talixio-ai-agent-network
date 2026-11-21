@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { BookUser, Boxes, History, LogOut, Menu, MessageSquare, Moon, Network, ScrollText, Sun, Terminal } from 'lucide-react'
+import { BookUser, Boxes, Building2, History, LogOut, Menu, MessageSquare, Moon, Network, ScrollText, Sun, Terminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -13,6 +13,7 @@ import { ChatView } from '@/views/ChatView'
 import { CommandsView } from '@/views/CommandsView'
 import { JournalView } from '@/views/JournalView'
 import { ModelsView } from '@/views/ModelsView'
+import { ProvidersView } from '@/views/ProvidersView'
 import { ReleasesView } from '@/views/ReleasesView'
 import { RolesView } from '@/views/RolesView'
 import { TreeView } from '@/views/TreeView'
@@ -22,13 +23,14 @@ const VIEWS = [
   { id: 'dialogue', label: 'Dialogue', icon: MessageSquare, group: 'Suivre' },
   { id: 'journal', label: 'Journal', icon: ScrollText, group: 'Suivre' },
   { id: 'commandes', label: 'Commandes', icon: Terminal, group: 'Maîtriser' },
+  { id: 'fournisseurs', label: 'Fournisseurs', icon: Building2, group: 'Maîtriser' },
   { id: 'modeles', label: 'Modèles', icon: Boxes, group: 'Maîtriser' },
   { id: 'roles', label: 'Rôles', icon: BookUser, group: 'Maîtriser' },
   { id: 'nouveautes', label: 'Nouveautés', icon: History, group: 'Version' },
 ] as const
 type ViewId = (typeof VIEWS)[number]['id']
 
-const viewFromHash = (): ViewId => VIEWS.find((v) => `#${v.id}` === location.hash)?.id ?? 'grappe'
+const viewFromHash = (): ViewId => VIEWS.find((v) => v.id === location.hash.slice(1).split('?')[0])?.id ?? 'grappe'
 
 function Logo({ className }: { className?: string }) {
   return (
@@ -193,6 +195,7 @@ function Shell({ cluster, logout, theme }: { cluster: Cluster; logout: () => voi
         {view === 'dialogue' && <ChatView cluster={cluster} />}
         {view === 'journal' && <JournalView cluster={cluster} />}
         {view === 'commandes' && <CommandsView cluster={cluster} />}
+        {view === 'fournisseurs' && <ProvidersView cluster={cluster} />}
         {view === 'modeles' && <ModelsView cluster={cluster} />}
         {view === 'roles' && <RolesView cluster={cluster} />}
         {view === 'nouveautes' && <ReleasesView cluster={cluster} />}

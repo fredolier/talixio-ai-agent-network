@@ -249,6 +249,12 @@ max_depth = 1
     assert!(entry["objective"].as_str().unwrap().contains("secret.txt"));
     assert!(entry["capabilities"]["fs_read"][0].is_string());
     assert_eq!(entry["unverified"], false);
+    // le catalogue : tous les fournisseurs connus, et celui du faux modèle (une machine locale) connecté
+    let models = api.get("/api/models").await;
+    let providers = models["providers"].as_array().unwrap();
+    assert!(providers.iter().any(|p| p["id"] == "mistral" && p["europe"] == true && p["connected"] == false));
+    assert!(providers.iter().any(|p| p["id"] == "local" && p["connected"] == true), "{providers:#?}");
+    assert!(models["catalog"].as_array().unwrap().iter().any(|m| m["aliases"] == json!(["main"]) && m["provider"] == "local"));
     for path in ["/api/models", "/api/roles"] {
         let refused = api.http.get(format!("{}{path}", api.base)).send().await.unwrap();
         assert_eq!(refused.status(), 401, "{path}");

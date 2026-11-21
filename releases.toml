@@ -7,6 +7,24 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.8.0"
+date = "2026-11-21"
+title = "Fournisseurs et modèles"
+summary = "Le maître embarque un catalogue de fournisseurs et de modèles, repris de l'assistant Talixio. Deux écrans le montrent : qui est européen, qui est connecté, quels modèles sont activés, avec leur qualité et leur prix indicatif."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Écran « Fournisseurs » : une table de tous les fournisseurs connus, avec pays, origine (Europe ou non), niveau de confiance et état de connexion. Un fournisseur choisi montre les lignes de configuration pour s'y connecter."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Écran « Modèles » : tous les modèles, fournisseur par fournisseur, avec nature, qualité de 1 à 10 et prix indicatif. Les modèles activés montrent leur alias, qui les utilise et à qui ils sont accordés."
+
+[[release.changes]]
+kind = "attention"
+text = "Se connecter à un fournisseur et activer un modèle se font encore dans la configuration du maître, pas depuis la page. L'image, la voix et les plongements sont listés pour comparer : aucun agent ne peut encore les appeler."
+
+[[release]]
 version = "0.7.1"
 date = "2026-11-21"
 title = "Revue de sécurité de l'interface"

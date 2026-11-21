@@ -55,9 +55,15 @@ Ouvrir l'adresse du maître (`https://127.0.0.1:7700/` par défaut) et saisir le
 ![La grappe](docs/images/interface-grappe.png)
 
 L'écran « Commandes » montre ce que le maître a le droit d'exécuter et à qui il l'a confié ;
-« Modèles » et « Rôles » montrent les fournisseurs et les agents créés.
+« Rôles » montre les agents créés.
 
 ![Les commandes](docs/images/interface-commandes.png)
+
+« Fournisseurs » liste tous les fournisseurs du catalogue embarqué (`catalog.toml`) : pays,
+Europe ou non, niveau de confiance, connecté ou non. « Modèles » liste leurs modèles avec leur
+qualité et leur prix indicatif, et dit lesquels sont activés chez le maître.
+
+![Les fournisseurs](docs/images/interface-fournisseurs.png)
 
 L'interface (`web/`) est faite avec React et shadcn/ui. Son résultat construit, `web/dist/`, est
 au dépôt : `cargo build` suffit. Pour la modifier :
