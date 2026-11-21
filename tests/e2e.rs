@@ -171,7 +171,7 @@ max_depth = 1
     assert!(csp.contains("default-src 'none'") && csp.contains("frame-ancestors 'none'") && !csp.contains("unsafe"));
     let html = page.text().await.unwrap();
     assert!(html.contains("/app.js") && !html.contains(TOKEN));
-    for path in ["/app.js", "/app.css", "/icon.svg", "/manifest.webmanifest"] {
+    for path in ["/app.js", "/app.css", "/sans.woff2", "/mono.woff2", "/icon.svg", "/manifest.webmanifest"] {
         assert_eq!(api.http.get(format!("{}{path}", api.base)).send().await.unwrap().status(), 200, "{path}");
     }
 
@@ -226,6 +226,31 @@ max_depth = 1
         e["kind"] == "tool_error" && e["text"].as_str().unwrap().contains("hors de vos propres droits")
     })
     .await;
+
+    // les modèles du maître : ce qu'on peut en montrer, jamais la clé ni où elle est rangée
+    let models = api.get("/api/models").await;
+    assert_eq!(models["default"], "main");
+    assert_eq!(models["models"][0]["alias"], "main");
+    assert!(models["models"][0]["host"].as_str().unwrap().starts_with("127.0.0.1:"));
+    assert!(!models.to_string().contains("api_key") && !models.to_string().contains("base_url"));
+
+    // le répertoire des rôles : l'enfant créé y est, avec ce qu'on lui a demandé et accordé
+    let start = Instant::now();
+    let entry = loop {
+        let roles = api.get("/api/roles").await;
+        let found = roles["roles"].as_array().unwrap().iter().find(|r| r["name"] == "lecteur" && r["model"] == "main").cloned();
+        if let Some(entry) = found {
+            break entry;
+        }
+        assert!(start.elapsed() < Duration::from_secs(20), "le lecteur manque au répertoire : {roles:#}");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    };
+    assert_eq!(entry["role"], "lecteur");
+    assert!(entry["objective"].as_str().unwrap().contains("secret.txt"));
+    assert!(entry["capabilities"]["fs_read"][0].is_string());
+    for path in ["/api/models", "/api/roles"] {
+        assert_eq!(api.http.get(format!("{}{path}", api.base)).send().await.unwrap().status(), 401, "{path}");
+    }
     assert_eq!(api.get("/api/tree").await["children"].as_array().unwrap().len(), 1);
 
     // le maître disparaît brutalement : l'enfant, sans parent, finit par s'éteindre

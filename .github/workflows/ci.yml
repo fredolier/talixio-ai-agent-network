@@ -45,3 +45,21 @@ jobs:
       - run: cargo build --release --target x86_64-unknown-linux-musl
       - name: Aucune dépendance au système
         run: file target/x86_64-unknown-linux-musl/release/talixio-agent | grep -q "static"
+
+  interface:
+    name: interface web construite et à jour
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+      - name: web/dist correspond aux sources
+        run: git diff --exit-code -- web/dist

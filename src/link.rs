@@ -591,6 +591,17 @@ fn parent_receive(node: &Arc<Node>, child_id: &str, frame: Frame) -> Vec<Frame> 
         Msg::Tree { node: info } => {
             if accept_tree(node, child_id, *info) {
                 node.tree_dirty.notify_one();
+                // le maître tient le répertoire des rôles de toute la grappe
+                if node.providers.is_some() {
+                    let subtree = node.children.lock().unwrap().get(child_id).map(|c| c.subtree.clone());
+                    if let Some(subtree) = subtree {
+                        let mut all = vec![&subtree];
+                        while let Some(info) = all.pop() {
+                            node.store.role_seen(info);
+                            all.extend(info.children.iter());
+                        }
+                    }
+                }
             }
             // les événements arrivés avant l'arbre qui annonce leur auteur ; les autres sont jetés
             let known: Vec<_> = {

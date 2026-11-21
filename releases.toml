@@ -7,6 +7,32 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.7.0"
+date = "2026-11-21"
+title = "Maîtriser : commandes, modèles, rôles"
+summary = "L'interface est refaite avec shadcn/ui, à l'identité de Talixio, et montre désormais ce que la grappe a le droit de faire : les commandes et à qui elles sont confiées, les modèles par fournisseur, les rôles créés."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Écran « Commandes » : chaque commande que détient le maître, telle qu'elle est vérifiée, et les agents à qui elle est confiée, telle quelle ou restreinte. Les règles à arguments libres sont signalées."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Écran « Modèles » : les modèles du maître regroupés par fournisseur, qui les utilise, à qui ils sont accordés. Les clés ne sont jamais montrées (`GET /api/models`)."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Écran « Rôles » : le maître inscrit chaque agent créé dans la grappe, à tout niveau, avec son rôle et ses droits. Le répertoire survit aux redémarrages (`GET /api/roles`)."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Interface refaite avec la bibliothèque shadcn/ui : thème clair et sombre, menu sur téléphone, fiche d'agent plus lisible. Elle reste embarquée dans l'exécutable, sans rien charger d'ailleurs."
+
+[[release.changes]]
+kind = "attention"
+text = "Les consignes et la mission d'un agent ne figurent au répertoire des rôles que pour les enfants directs du maître : celles des niveaux plus bas ne remontent pas encore."
+
+[[release]]
 version = "0.6.2"
 date = "2026-11-21"
 title = "Journal complet des petits-enfants"

@@ -121,6 +121,22 @@ impl Provider {
 /// Les modèles du maître, par alias. C'est ici, et seulement ici, que vivent les clés.
 pub struct Providers {
     by_alias: BTreeMap<String, Provider>,
+    /// Ce qu'on peut montrer de chaque modèle : jamais la clé, ni où elle est rangée.
+    catalog: Vec<ModelInfo>,
+}
+
+/// Un modèle du maître tel que l'API le montre.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ModelInfo {
+    pub alias: String,
+    pub provider: String,
+    pub model: String,
+    /// Machine qui sert le modèle (sans chemin ni identifiants éventuels de l'adresse).
+    pub host: String,
+    pub effort: Option<String>,
+    pub max_tokens: Option<u64>,
+    /// Une clé est configurée (fichier ou variable d'environnement).
+    pub has_key: bool,
 }
 
 impl Providers {
@@ -130,8 +146,23 @@ impl Providers {
             .timeout(std::time::Duration::from_secs(600))
             .build()?;
         let mut by_alias = BTreeMap::new();
+        let mut catalog = Vec::new();
         for (alias, cfg) in models {
             let key = cfg.api_key()?;
+            let default_url = if cfg.provider == "anthropic" { "https://api.anthropic.com" } else { "https://api.openai.com" };
+            let host = reqwest::Url::parse(cfg.base_url.as_deref().unwrap_or(default_url))
+                .ok()
+                .and_then(|u| u.host_str().map(|h| match u.port() { Some(p) => format!("{h}:{p}"), None => h.to_string() }))
+                .unwrap_or_default();
+            catalog.push(ModelInfo {
+                alias: alias.clone(),
+                provider: cfg.provider.clone(),
+                model: cfg.model.clone(),
+                host,
+                effort: cfg.effort.clone(),
+                max_tokens: cfg.max_tokens,
+                has_key: !key.is_empty(),
+            });
             let provider = match cfg.provider.as_str() {
                 "anthropic" => Provider::Anthropic(Anthropic::new(http.clone(), cfg, key)?),
                 // OpenAI, Gemini, Mistral, Ollama, vLLM, OpenRouter… : la même API, une autre adresse
@@ -140,7 +171,11 @@ impl Providers {
             };
             by_alias.insert(alias.clone(), provider);
         }
-        Ok(Self { by_alias })
+        Ok(Self { by_alias, catalog })
+    }
+
+    pub fn catalog(&self) -> &[ModelInfo] {
+        &self.catalog
     }
 
     pub fn aliases(&self) -> Vec<String> {

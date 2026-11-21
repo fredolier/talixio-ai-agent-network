@@ -1,7 +1,8 @@
 # Exigences et critères d'acceptation
 
-Liste exhaustive de ce qui a été demandé pour Talixio Agent Network, tirée des 43 messages de
-l'utilisateur (du 20 au 21 novembre 2026), relus un à un. Chaque demande porte la phrase exacte
+Liste exhaustive de ce qui a été demandé pour Talixio Agent Network, tirée des messages de
+l'utilisateur (depuis le 20 novembre 2026), relus un à un. Les demandes venues après la première
+vérification portent les numéros D110 et suivants. Chaque demande porte la phrase exacte
 qui la fonde, la référence de la spécification (`SPEC.md`) qui la traite, et le critère qui
 permet de dire si elle est tenue.
 
@@ -47,6 +48,7 @@ permet de dire si elle est tenue.
 | D22 | Aucune demi-mesure sur la sécurité : les liens entre agents doivent être chiffrés (obligatoire). | « on peut pas se permettre d'avoir des demi-mesures pour la sécurité là. Donc ça, c'est un must. » | G6 | Une connexion en clair au lien ou à l'API échoue ; un enfant refuse un parent dont le certificat n'est pas celui attendu (tests). |
 | D23 | L'agent reçoit une configuration chiffrée, qu'il ne peut déchiffrer qu'avec une clé donnée par son parent. | « il faudrait que l'agent reçoive une configuration chiffrée et qu'il ne peut décoder qu'avec une clé que le parent lui donne » | décision 23 | L'enveloppe transmise à l'enfant ne contient ni droits ni instructions lisibles ; elle ne s'ouvre qu'avec la clé remise par le parent (tests). |
 | D24 | Un agent ne doit pas pouvoir modifier lui-même sa configuration. | « Comme ça, il ne peut pas modifier lui-même la configuration. » | décision 23 | Un octet changé dans la configuration scellée, ou dans l'enveloppe, et l'agent refuse de démarrer (test). Aucun outil ne permet à un agent de changer ses propres droits. |
+| D110 | Un enfant ne peut jamais lire directement sa configuration : il doit passer par son parent, qui lui remet la clé de déchiffrement. | « chaque enfant ne peut pas lire directement la configuration et qu'il doit absolument passer par le parent qui lui donne une clé de déchiffrement » | décision 23 | (1) Ce que l'enfant reçoit au lancement ne contient en clair que son identifiant, l'adresse et le certificat du parent et son jeton de présentation : ni rôle, ni instructions, ni droits (test). (2) Sans la clé, la configuration ne s'ouvre pas ; avec une autre clé non plus (test). (3) La clé n'existe que chez le parent, n'est écrite nulle part chez l'enfant, et ne lui est remise que sur le lien chiffré, après authentification mutuelle. (4) Elle n'est remise qu'une fois : une seconde demande est refusée (test). (5) Parent injoignable : l'enfant ne démarre pas. |
 | D25 | Un agent ne doit disposer d'aucune liberté au-delà de ce que son parent lui a donné ; ce point doit être « béton ». | « Il ne faut pas laisser de liberté supplémentaire à l'agent, autre que ce que le parent lui a donné. » | D2, D5 | `check_grant` refuse tout droit que le parent n'a pas (test d'escalade) ; chaque appel d'outil revérifie les droits. Limite à juger : sans cloisonnement par le système (D5), une commande autorisée a les droits du compte. |
 
 ## 3. Grappe, lien et déploiement
@@ -135,6 +137,11 @@ permet de dire si elle est tenue.
 | D75 | Fournir une API JSON, pour que l'assistant de l'utilisateur (Talixio AI Assistant) puisse éventuellement s'y connecter. | « il faudra surtout une interface JSON API aussi pour que éventuellement mon assistant puisse se connecter » | P1 | L'API JSON est documentée dans la spec et couverte par le test de bout en bout ; elle suffit à piloter le maître. |
 | D76 | Montrer une maquette graphique de l'interface proposée. | « T'as une maquette à me montrer là de ce que tu as proposé graphiquement? » | — | Demande ponctuelle : une maquette a été publiée et montrée. |
 | D77 | Faire quelque chose de joli (interface). | « fais un truc joli » | P2 | Subjectif : captures à l'appui, bureau et téléphone, clair et sombre. |
+| D111 | L'interface utilise la bibliothèque shadcn/ui elle-même, personnalisée, la moins « sloppy » possible, avec une identité propre. | « ce sera utiliser la librairie, ouais, la bibliothèque elle-même […] Il faut la customiser et la rendre moins sloppy possible que notre interface ait une identité propre à elle » | P2, décision 22 | `web/components.json` et `web/src/components/ui/` viennent de shadcn/ui ; le thème n'est pas celui par défaut (couleurs, polices, formes définies dans `web/src/index.css`) ; captures dans `docs/images/`. |
+| D112 | Voir dans l'interface les fournisseurs d'API et les modèles disponibles. | « travaille aussi d'abord sur les fournisseurs d'API et les modèles disponibles dans l'interface, que je puisse les visualiser » | F1, P2 | `GET /api/models` (test) ; écran « Modèles » : modèles regroupés par fournisseur, sans aucune clé ; pour chacun, qui l'utilise et à qui il est accordé. |
+| D113 | Voir les rôles dans l'interface. | « et également les rôles » | R1, P2 | `GET /api/roles` (test) ; écran « Rôles » : chaque agent créé, à tout niveau, avec rôle, modèle, parent et droits ; le répertoire survit à un redémarrage du maître. |
+| D114 | Voir toutes les commandes qui existent : le maître en détient la liste et peut les déléguer ou non aux enfants. L'utilisateur veut maîtriser cela et le voir. | « toutes les commandes qui existent, puisque du coup c'est le maître qui aura la liste des commandes et qui pourra les déléguer ou non aux enfants. Donc je veux bien maîtriser tout ça et le voir dans l'interface » | D2, D3, P2 | Écran « Commandes » : chaque règle du maître, telle qu'elle est vérifiée ; pour chacune, les agents à qui elle est confiée, telle quelle ou restreinte ; les règles à arguments libres sont signalées. Un enfant ne peut recevoir qu'une règle que son parent détient (test d'escalade). |
+| D115 | Mesurer la « sloppiness » de l'interface avec un outil existant. | « Peux-tu scorer la sloppiness de ton interface? Je crois qu'il existe des repos GitHub qui permettent de faire ça » | — | Une mesure est faite avec un outil public nommé, et son résultat est consigné. À défaut : dire lequel n'a pas pu être exécuté et pourquoi. |
 
 ## 10. Notes de version
 
@@ -198,7 +205,7 @@ permet de dire si elle est tenue.
 Relevés à la relecture : la dictée ou la formulation laisse un doute.
 
 1. **D20, coffre des clés** : « Vault » désigne-t-il un logiciel de coffre dédié, ou seulement le fait que les clés ne vivent qu'au niveau 0 ?
-2. **D74** : « CHACDN » est compris comme shadcn/ui. L'allure suffit-elle, ou la bibliothèque elle-même (React) est-elle voulue ?
+2. **D74** : tranché le 21 novembre, c'est la bibliothèque elle-même (voir D111).
 3. **D60** : la notion de quota doit-elle être dans les instructions des agents, dans le code, ou les deux ? Compris : les deux.
 4. **D82** : la parité de sécurité est demandée pour Windows ; compris comme valant aussi pour macOS.
 5. **D69, apprentissage** : au-delà du répertoire de rôles, rien n'est défini.

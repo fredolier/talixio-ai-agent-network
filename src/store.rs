@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use rusqlite::{params, Connection};
 
-use crate::protocol::ActivityEvent;
+use crate::protocol::{ActivityEvent, NodeInfo};
 
 /// Nombre de notes au plus dans la mémoire d'un agent.
 pub const MAX_NOTES: usize = 200;
@@ -17,6 +17,8 @@ pub const MAX_NOTES: usize = 200;
 pub const MAX_NOTE_CHARS: usize = 20_000;
 /// Événements du journal gardés sur disque.
 const JOURNAL_KEPT: i64 = 200_000;
+/// Agents gardés dans le répertoire des rôles.
+const ROLES_KEPT: i64 = 5_000;
 
 pub struct Store {
     db: Mutex<Connection>,
@@ -38,6 +40,14 @@ impl Store {
              CREATE TABLE IF NOT EXISTS journal (
                  id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, agent_name TEXT NOT NULL,
                  ts_ms INTEGER NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS roles (
+                 agent_id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL,
+                 model TEXT NOT NULL DEFAULT '', parent_id TEXT, depth INTEGER NOT NULL DEFAULT 0,
+                 target TEXT NOT NULL DEFAULT '', host TEXT NOT NULL DEFAULT '',
+                 capabilities TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT '',
+                 instructions TEXT, objective TEXT, criteria TEXT,
+                 first_seen_ms INTEGER NOT NULL, last_seen_ms INTEGER NOT NULL
              );",
         )
         .map_err(err)?;
@@ -79,6 +89,64 @@ impl Store {
         let mut query = db.prepare("SELECT key, content FROM memory ORDER BY key").map_err(err)?;
         let rows = query.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?;
         rows.collect::<Result<_, _>>().map_err(err)
+    }
+
+    /// Répertoire des rôles : note un agent vu dans l'arbre (créé ici ou plus bas), ou met à
+    /// jour ce qu'on sait de lui. Ce qu'on lui a demandé (`role_brief`) n'est pas touché.
+    pub fn role_seen(&self, info: &NodeInfo) {
+        let db = self.db.lock().unwrap();
+        let status = serde_json::to_value(info.status).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
+        let caps = serde_json::to_string(&info.capabilities).unwrap_or_else(|_| "{}".into());
+        let now = crate::now_ms() as i64;
+        let _ = db.execute(
+            "INSERT INTO roles (agent_id, name, role, model, parent_id, depth, target, host, capabilities, status, first_seen_ms, last_seen_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)
+             ON CONFLICT(agent_id) DO UPDATE SET name = ?2, role = ?3, model = ?4, parent_id = ?5, depth = ?6,
+                 target = ?7, host = ?8, capabilities = ?9, status = ?10, last_seen_ms = ?11",
+            params![info.id, info.name, info.role, info.model, info.parent_id, info.depth, info.target, info.host, caps, status, now],
+        );
+        let _ = db.execute(
+            "DELETE FROM roles WHERE agent_id NOT IN (SELECT agent_id FROM roles ORDER BY last_seen_ms DESC LIMIT ?1)",
+            params![ROLES_KEPT],
+        );
+    }
+
+    /// Ce que ce nœud a demandé à l'enfant qu'il vient de créer.
+    pub fn role_brief(&self, agent_id: &str, name: &str, role: &str, instructions: &str, objective: &str, criteria: &str) {
+        let db = self.db.lock().unwrap();
+        let now = crate::now_ms() as i64;
+        let _ = db.execute(
+            "INSERT INTO roles (agent_id, name, role, instructions, objective, criteria, first_seen_ms, last_seen_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+             ON CONFLICT(agent_id) DO UPDATE SET instructions = ?4, objective = ?5, criteria = ?6",
+            params![agent_id, name, role, instructions, objective, criteria, now],
+        );
+    }
+
+    /// Le répertoire des rôles, du plus récent au plus ancien.
+    pub fn roles(&self) -> Vec<serde_json::Value> {
+        let db = self.db.lock().unwrap();
+        let Ok(mut query) = db.prepare(
+            "SELECT agent_id, name, role, model, parent_id, depth, target, host, capabilities, status,
+                    instructions, objective, criteria, first_seen_ms, last_seen_ms
+             FROM roles ORDER BY first_seen_ms DESC, agent_id",
+        ) else {
+            return Vec::new();
+        };
+        let rows = query.query_map([], |r| {
+            let caps: String = r.get(8)?;
+            Ok(serde_json::json!({
+                "agent_id": r.get::<_, String>(0)?, "name": r.get::<_, String>(1)?, "role": r.get::<_, String>(2)?,
+                "model": r.get::<_, String>(3)?, "parent_id": r.get::<_, Option<String>>(4)?, "depth": r.get::<_, i64>(5)?,
+                "target": r.get::<_, String>(6)?, "host": r.get::<_, String>(7)?,
+                "capabilities": serde_json::from_str::<serde_json::Value>(&caps).unwrap_or_default(),
+                "status": r.get::<_, String>(9)?,
+                "instructions": r.get::<_, Option<String>>(10)?, "objective": r.get::<_, Option<String>>(11)?,
+                "criteria": r.get::<_, Option<String>>(12)?,
+                "first_seen_ms": r.get::<_, i64>(13)?, "last_seen_ms": r.get::<_, i64>(14)?,
+            }))
+        });
+        rows.map(|rows| rows.filter_map(Result::ok).collect()).unwrap_or_default()
     }
 
     /// Inscrit un événement du journal. Une erreur d'écriture ne doit pas arrêter la grappe.

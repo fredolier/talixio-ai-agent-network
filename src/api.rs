@@ -48,14 +48,18 @@ pub async fn start_listener(
     let mut router = Router::new().route("/link", get(link));
     if api_token.is_some() {
         router = router
-            .route("/", get(|| async { asset("text/html; charset=utf-8", include_str!("../web/index.html")) }))
-            .route("/app.js", get(|| async { asset("text/javascript; charset=utf-8", include_str!("../web/app.js")) }))
-            .route("/app.css", get(|| async { asset("text/css; charset=utf-8", include_str!("../web/app.css")) }))
-            .route("/icon.svg", get(|| async { asset("image/svg+xml", include_str!("../web/icon.svg")) }))
-            .route("/manifest.webmanifest", get(|| async { asset("application/manifest+json", include_str!("../web/manifest.webmanifest")) }))
+            .route("/", get(|| async { asset("text/html; charset=utf-8", include_bytes!("../web/dist/index.html")) }))
+            .route("/app.js", get(|| async { asset("text/javascript; charset=utf-8", include_bytes!("../web/dist/app.js")) }))
+            .route("/app.css", get(|| async { asset("text/css; charset=utf-8", include_bytes!("../web/dist/app.css")) }))
+            .route("/sans.woff2", get(|| async { asset("font/woff2", include_bytes!("../web/dist/sans.woff2")) }))
+            .route("/mono.woff2", get(|| async { asset("font/woff2", include_bytes!("../web/dist/mono.woff2")) }))
+            .route("/icon.svg", get(|| async { asset("image/svg+xml", include_bytes!("../web/dist/icon.svg")) }))
+            .route("/manifest.webmanifest", get(|| async { asset("application/manifest+json", include_bytes!("../web/dist/manifest.webmanifest")) }))
             .route("/api/health", get(|| async { Json(json!({ "ok": true })) }))
             .route("/api/tree", get(tree))
             .route("/api/releases", get(releases))
+            .route("/api/models", get(models))
+            .route("/api/roles", get(roles))
             .route("/api/activity", get(activity))
             .route("/api/events", get(events))
             .route("/api/messages", post(message))
@@ -79,11 +83,11 @@ pub async fn start_listener(
 
 /// Ce que la page a le droit de faire : charger ses propres fichiers et appeler sa propre API.
 /// Ni script ni style en ligne, aucune ressource d'ailleurs, jamais dans un cadre.
-const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; \
+const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; \
                    manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 /// Un fichier de l'interface web, embarqué dans l'exécutable. Rien de secret : servi sans jeton.
-fn asset(content_type: &'static str, body: &'static str) -> Response {
+fn asset(content_type: &'static str, body: &'static [u8]) -> Response {
     (
         [
             (header::CONTENT_TYPE, content_type),
@@ -96,6 +100,25 @@ fn asset(content_type: &'static str, body: &'static str) -> Response {
         body,
     )
         .into_response()
+}
+
+/// Les modèles que le maître peut appeler, par fournisseur. Jamais de clé, ni où elle est rangée.
+async fn models(State(app): State<App>, headers: HeaderMap) -> Response {
+    if let Err(response) = authorize(&app, &headers) {
+        return response;
+    }
+    let catalog = app.node.providers.as_ref().map(|p| p.catalog().to_vec()).unwrap_or_default();
+    Json(json!({ "default": app.node.model, "models": catalog })).into_response()
+}
+
+/// Le répertoire des rôles : chaque agent créé dans la grappe, avec ce qu'on lui a accordé.
+async fn roles(State(app): State<App>, headers: HeaderMap) -> Response {
+    if let Err(response) = authorize(&app, &headers) {
+        return response;
+    }
+    let store = app.node.store.clone();
+    let roles = tokio::task::spawn_blocking(move || store.roles()).await.unwrap_or_default();
+    Json(json!({ "roles": roles })).into_response()
 }
 
 /// Les notes de version, pour l'interface : la version qui tourne, puis toutes les notes.

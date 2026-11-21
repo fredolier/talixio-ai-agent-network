@@ -562,6 +562,7 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
         }
     }
     let mission = format!("Mission : {objective}\n\nCritère de réussite mesurable : {criteria}");
+    node.store.role_brief(&boot.agent_id, &name, &boot.role, &boot.instructions, objective, criteria);
     node.send_child(&boot.agent_id, Msg::Instruction { text: mission }, true)?;
     node.emit("spawn", format!("agent {name} ({}) créé — rôle : {}", boot.agent_id, boot.role));
     node.tree_dirty.notify_one();

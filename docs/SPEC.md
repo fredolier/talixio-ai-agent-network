@@ -113,7 +113,7 @@ Demandé le 2026-11-20, sur le modèle de Talixio AI Assistant. Rien n'est codé
 
 | N° | Exigence | État |
 |---|---|---|
-| F1 | Le maître tient un catalogue de fournisseurs ; chaque fournisseur offre des modèles de plusieurs natures : texte (LLM), image, voix, et d'autres. | ⬜ aujourd'hui : une liste plate d'alias de modèles de texte |
+| F1 | Le maître tient un catalogue de fournisseurs ; chaque fournisseur offre des modèles de plusieurs natures : texte (LLM), image, voix, et d'autres. | 🟡 `GET /api/models` et l'écran « Modèles » montrent les modèles du maître regroupés par fournisseur et par machine (alias, modèle, effort, clé en place ou non, agents qui l'utilisent, à qui il est accordé) ; jamais la clé. Reste : la nature des modèles (image, voix) et un vrai catalogue par fournisseur |
 | F2 | Un agent reçoit le droit d'utiliser tel modèle de tel fournisseur, nature par nature. Ses enfants n'en reçoivent jamais plus. | 🟡 fait pour les modèles de texte (`capabilities.models`) |
 | F3 | À la création d'un enfant, le parent choisit son modèle, son niveau d'effort, la taille de son contexte, ses instructions, et ses capacités (texte, image, voix), en plus de ses droits sur les dossiers et les commandes. | 🟡 modèle, instructions et droits ; l'effort et le contexte sont fixés par l'alias, pas par enfant |
 | F4 | Les appels d'image et de voix passent par le maître, comme ceux de texte : les clés ne descendent jamais, et chaque appel est compté dans le budget. | ⬜ voir Q10 |
@@ -124,7 +124,7 @@ Demandé le 2026-11-20. Rien n'est codé.
 
 | N° | Exigence | État |
 |---|---|---|
-| R1 | Chaque rôle créé dans la grappe (nom, rôle, instructions, droits demandés, modèle, contexte de la mission) remonte au maître, qui le range dans un répertoire qui dure. | ⬜ voir Q11 |
+| R1 | Chaque rôle créé dans la grappe (nom, rôle, instructions, droits demandés, modèle, contexte de la mission) remonte au maître, qui le range dans un répertoire qui dure. | 🟡 le maître inscrit dans sa base chaque agent vu dans l'arbre (nom, rôle, modèle, parent, niveau, cible, droits accordés, dates), à tout niveau ; `GET /api/roles`, écran « Rôles ». Mission, critère et consignes ne sont connus que pour les enfants directs du maître : pour les niveaux plus bas, ils ne remontent pas encore (Q11) |
 | R2 | Tout agent, à n'importe quel niveau, peut interroger ce répertoire avant de créer un enfant, pour reprendre un rôle qui existe déjà et convient au contexte. | ⬜ |
 | R3 | Le répertoire apprend : pour chaque rôle, ce que ses missions ont donné (réussie, échouée, impossible, coût), pour que les rôles qui marchent soient préférés et les autres corrigés. | ⬜ |
 
@@ -141,7 +141,7 @@ Demandé le 2026-11-20. Rien n'est codé.
 | N° | Exigence | État |
 |---|---|---|
 | P1 | API JSON au niveau du maître, utilisable par Talixio AI Assistant. | ✅ |
-| P2 | Interface web soignée (shadcn/ui) : la grappe en direct, chaque agent avec nom, rôle, machine, IP, état ; le fil des messages ; le dialogue avec le maître. | 🟡 servie par le maître à `/` : grappe, détail et arrêt d'un agent, dialogue, journal, nouveautés. Aux couleurs de shadcn/ui mais écrite à la main, sans React ni étape de construction (décision 22). Restent : budgets, validations, réglages |
+| P2 | Interface web soignée, faite avec la bibliothèque shadcn/ui personnalisée, à l'identité propre : la grappe en direct, chaque agent avec nom, rôle, machine, IP, état ; le fil des messages ; le dialogue avec le maître ; les commandes et à qui elles sont confiées ; les fournisseurs et modèles ; les rôles. | ✅ servie par le maître à `/` (React, shadcn/ui, Tailwind ; décision 22) : Grappe, Dialogue, Journal, Commandes, Modèles, Rôles, Nouveautés ; clair et sombre ; téléphone. Reste : revue de sécurité indépendante de l'interface |
 | P3 | Vue de la grappe et du journal en ligne de commande. | ✅ |
 | P5 | Notes de version, tenues à chaque version, lisibles en ligne de commande et dans l'interface web. | 🟡 `releases.toml` embarqué, `talixio-agent releases`, `GET /api/releases` ; écran « Nouveautés » de l'interface |
 | P4 | Pilotage depuis un téléphone (Android) : discuter avec le maître, voir la grappe, être prévenu. | 🟡 l'interface s'adapte au téléphone et porte un manifeste d'application ; l'installation demande un certificat reconnu ; pas encore de notification |
@@ -216,14 +216,21 @@ Demandé le 2026-11-20. Rien n'est codé.
     musl est plus lent sous forte charge (sans effet pour un agent, qui attend surtout son
     modèle), et la résolution de noms ignore NSS (pas de LDAP ni de mDNS ; `/etc/hosts` et DNS
     seulement).
-22. **L'interface web est faite de fichiers statiques embarqués** (`web/`), sans React ni étape
-    de construction : l'exécutable reste petit et se compile avec `cargo` seul. Elle reprend
-    l'allure de shadcn/ui. Elle est servie sans jeton (elle ne contient rien de secret) ; toute
-    donnée passe par l'API, avec le jeton saisi par l'utilisateur, gardé dans le navigateur
-    (session, ou appareil s'il le demande). Politique de contenu stricte : aucun script ni style
-    en ligne, aucune ressource extérieure, jamais dans un cadre ; tout texte venu de la grappe
-    est posé comme du texte, jamais comme du HTML. Si l'interface grossit au point de justifier
-    React et shadcn/ui, le résultat construit prendra la place de ces fichiers.
+22. **L'interface web est une application React faite avec shadcn/ui** (`web/` : Vite, Tailwind,
+    composants shadcn sur Base UI), à la demande de l'utilisateur, avec un thème propre à Talixio
+    (`web/src/index.css` : papier chaud, encre verte, un seul signal vert acide réservé à ce qui
+    vit ou à la page ouverte ; Instrument Sans, et JetBrains Mono pour les seules données).
+    Le résultat construit (`web/dist/`, noms de fichiers fixes, polices comprises) est **gardé au
+    dépôt** et embarqué dans l'exécutable : `cargo build` n'a toujours pas besoin de Node, et
+    l'intégration continue vérifie que `dist/` correspond bien aux sources. Elle est servie sans
+    jeton (elle ne contient rien de secret) ; toute donnée passe par l'API, avec le jeton saisi
+    par l'utilisateur, gardé dans le navigateur (session, ou appareil s'il le demande).
+    Politique de contenu stricte, inchangée : aucun script ni style en ligne, aucune ressource
+    extérieure (polices embarquées), jamais dans un cadre ; tout texte venu de la grappe est posé
+    comme du texte (React l'échappe ; `dangerouslySetInnerHTML` est proscrit). Coût : environ
+    500 Ko de plus dans l'exécutable. Les dépendances npm ne servent qu'à la construction ; ce
+    qui en reste dans `dist/` (React, Base UI, icônes) s'exécute dans le navigateur de
+    l'exploitant, sous la politique de contenu.
 23. **La configuration d'un enfant est scellée.** Au lancement, l'enfant ne reçoit en clair que
     de quoi joindre son parent (adresse, empreinte du certificat, identifiant, secret du lien).
     Tout le reste (nom, rôle, instructions, modèle, droits, plafond, interdits, limites) est
