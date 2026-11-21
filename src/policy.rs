@@ -303,7 +303,13 @@ mod tests {
     use super::*;
 
     fn rule(program: &str, args: Option<&[&str]>) -> ExecRule {
-        ExecRule { program: program.into(), args: args.map(|a| a.iter().map(|s| s.to_string()).collect()), cwd: None }
+        ExecRule { program: abs(program), args: args.map(|a| a.iter().map(|s| s.to_string()).collect()), cwd: None }
+    }
+
+    /// Les chemins des tests sont écrits à la façon POSIX ; sous Windows, un chemin n'est absolu
+    /// qu'avec sa lettre de lecteur.
+    fn abs(path: &str) -> PathBuf {
+        if cfg!(windows) && path.starts_with('/') { format!("C:{path}").into() } else { path.into() }
     }
 
     fn strings(args: &[&str]) -> Vec<String> {
@@ -312,8 +318,8 @@ mod tests {
 
     fn parent() -> Capabilities {
         Capabilities {
-            fs_read: vec!["/srv/projet".into()],
-            fs_write: vec!["/srv/projet/out".into()],
+            fs_read: vec![abs("/srv/projet")],
+            fs_write: vec![abs("/srv/projet/out")],
             exec: vec![rule("/usr/bin/git", Some(&["status"])), rule("/bin/ls", None)],
             spawn: Some(SpawnPolicy { max_children: 3, max_depth: 2, targets: local_only() }),
             models: vec!["main".into()],
@@ -324,7 +330,7 @@ mod tests {
     #[test]
     fn child_within_parent_rights_is_granted() {
         let child = Capabilities {
-            fs_read: vec!["/srv/projet/docs".into()],
+            fs_read: vec![abs("/srv/projet/docs")],
             exec: vec![rule("/usr/bin/git", Some(&["status"])), rule("/bin/ls", Some(&["-l"]))],
             spawn: Some(SpawnPolicy { max_children: 1, max_depth: 1, targets: local_only() }),
             models: vec!["main".into()],
@@ -339,13 +345,13 @@ mod tests {
         let p = parent();
         let base = Capabilities { max_tokens: Some(10), ..Default::default() };
         let cases = [
-            Capabilities { fs_read: vec!["/srv".into()], ..base.clone() },
-            Capabilities { fs_read: vec!["/srv/projet/../secret".into()], ..base.clone() },
-            Capabilities { fs_write: vec!["/srv/projet".into()], ..base.clone() },
+            Capabilities { fs_read: vec![abs("/srv")], ..base.clone() },
+            Capabilities { fs_read: vec![abs("/srv/projet/../secret")], ..base.clone() },
+            Capabilities { fs_write: vec![abs("/srv/projet")], ..base.clone() },
             Capabilities { exec: vec![rule("/usr/bin/git", Some(&["push"]))], ..base.clone() },
             Capabilities { exec: vec![rule("/usr/bin/git", None)], ..base.clone() },
             Capabilities { exec: vec![rule("/bin/rm", None)], ..base.clone() },
-            Capabilities { exec: vec![ExecRule { cwd: Some("/".into()), ..rule("/usr/bin/git", Some(&["status"])) }], ..base.clone() },
+            Capabilities { exec: vec![ExecRule { cwd: Some(abs("/")), ..rule("/usr/bin/git", Some(&["status"])) }], ..base.clone() },
             Capabilities { models: vec!["deep".into()], ..base.clone() },
             Capabilities { max_tokens: Some(1001), ..base.clone() },
             Capabilities { max_tokens: None, ..base.clone() },
@@ -368,7 +374,7 @@ mod tests {
         let relative = Capabilities { exec: vec![rule("git", None)], ..Default::default() };
         assert!(relative.validate().is_err());
         let writable = Capabilities {
-            fs_write: vec!["/opt/outils".into()],
+            fs_write: vec![abs("/opt/outils")],
             exec: vec![rule("/opt/outils/script", None)],
             ..Default::default()
         };
@@ -415,7 +421,7 @@ mod tests {
             exec: vec![rule("/bin/cat", Some(&["{read}"]))],
             ..Default::default()
         };
-        let ok = |arg: &Path| caps.check_exec(Path::new("/bin/cat"), &[arg.display().to_string()], &[]).is_ok();
+        let ok = |arg: &Path| caps.check_exec(&abs("/bin/cat"), &[arg.display().to_string()], &[]).is_ok();
         assert!(ok(&allowed.join("a.txt")));
         assert!(!ok(&secret.join("s.txt")));
         assert!(!ok(&allowed.join("../secret/s.txt")));

@@ -92,6 +92,20 @@ fn plain(value: &str, extra: &str) -> bool {
         && value.chars().all(|c| c.is_ascii_alphanumeric() || extra.contains(c))
 }
 
+/// Chemin de la machine pour un montage : rien qui puisse passer pour une option, un autre
+/// montage (« : ») ou une remontée (« .. »). Sous Windows, la lettre de lecteur est admise.
+fn plain_host_path(text: &str) -> bool {
+    if text.contains("..") {
+        return false;
+    }
+    if cfg!(windows) {
+        let bytes = text.as_bytes();
+        bytes.len() > 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/') && plain(&text[3..], "\\/._-")
+    } else {
+        text.len() > 1 && text.starts_with('/') && plain(&text[1..], "/._-")
+    }
+}
+
 impl Target {
     pub fn validate(&self) -> Result<()> {
         self.capabilities.validate().map_err(anyhow::Error::msg)?;
@@ -127,11 +141,14 @@ impl Target {
                     bail!("cible docker : `user` doit être un numéro de compte non privilégié, « 1000 » ou « 1000:1000 »");
                 }
                 for mount in &self.mounts {
-                    for path in [&mount.host, &mount.container] {
-                        let text = path.to_str().unwrap_or("");
-                        if !path.is_absolute() || !plain(&text[1..], "/._-") || text.contains("..") {
-                            bail!("cible docker : montage invalide ({})", path.display());
-                        }
+                    // Le chemin dans le conteneur est toujours celui d'un Linux ; celui de la
+                    // machine suit le système qui lance le conteneur.
+                    let inside = mount.container.to_str().unwrap_or("");
+                    if !inside.starts_with('/') || !plain(&inside[1..], "/._-") || inside.contains("..") {
+                        bail!("cible docker : montage invalide ({})", mount.container.display());
+                    }
+                    if !mount.host.is_absolute() || !plain_host_path(mount.host.to_str().unwrap_or("")) {
+                        bail!("cible docker : montage invalide ({})", mount.host.display());
                     }
                 }
                 if self.host.is_some() || self.identity_file.is_some() || self.remote_dir.is_some() || self.port.is_some() {

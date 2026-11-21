@@ -30,7 +30,7 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
       - name: Tests
-        run: cargo test -- --nocapture
+        run: cargo test --no-fail-fast -- --nocapture
 
   statique:
     name: exécutable statique (musl)

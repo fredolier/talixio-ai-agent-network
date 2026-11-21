@@ -295,9 +295,12 @@ mod tests {
 
     #[test]
     fn un_conteneur_est_ferme_et_ne_montre_que_ses_montages() {
-        let t = target("kind = 'docker'\nimage = 'debian:12-slim'\nuser = '1000:1000'\nmounts = [{ host = '/srv/data', container = '/data' }]").unwrap();
-        let args = docker_args("abc", &t, std::path::Path::new("/opt/talixio-agent"));
-        for wanted in ["--cap-drop=ALL", "--security-opt=no-new-privileges", "--read-only", "--user=1000:1000", "/srv/data:/data:ro", "/opt/talixio-agent:/talixio-agent:ro", "--pull=never"] {
+        // Côté machine, les chemins suivent le système ; côté conteneur, toujours Linux.
+        let (data, exe) = if cfg!(windows) { ("C:/srv/data", "C:/opt/talixio-agent") } else { ("/srv/data", "/opt/talixio-agent") };
+        let t = target(&format!("kind = 'docker'\nimage = 'debian:12-slim'\nuser = '1000:1000'\nmounts = [{{ host = '{data}', container = '/data' }}]")).unwrap();
+        let args = docker_args("abc", &t, std::path::Path::new(exe));
+        let (mount, binary) = (format!("{data}:/data:ro"), format!("{exe}:/talixio-agent:ro"));
+        for wanted in ["--cap-drop=ALL", "--security-opt=no-new-privileges", "--read-only", "--user=1000:1000", mount.as_str(), binary.as_str(), "--pull=never"] {
             assert!(args.iter().any(|a| a == wanted), "{wanted} manque dans {args:?}");
         }
         assert!(!args.iter().any(|a| a.contains("privileged") || a.contains("docker.sock")));

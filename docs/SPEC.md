@@ -3,6 +3,9 @@
 Ce document fixe ce que le système doit faire, les décisions prises et ce qui reste ouvert.
 Il fait foi : toute décision nouvelle y est reportée dans le même commit que le code.
 L'avancement tâche par tâche est dans [PLAN.md](PLAN.md).
+La liste exhaustive de ce qui a été demandé, phrase d'origine à l'appui, avec un critère
+d'acceptation par demande, est dans [EXIGENCES.md](EXIGENCES.md) ; l'état constaté par une
+vérification indépendante est dans [VERIFICATION.md](VERIFICATION.md).
 
 ## 1. Vision
 

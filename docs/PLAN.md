@@ -82,3 +82,4 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 | 2026-11-20 | Deuxième passe de sécurité (déploiement, TLS) : 10 constats, 9 traités. |
 | 2026-11-20 | Compilation croisée Windows réussie ; écarts de sécurité Windows et macOS inscrits (A2). |
 | 2026-11-21 | v0.6.0 : configuration scellée des enfants ; rotation des journaux. |
+| 2026-11-21 | `EXIGENCES.md` : les 109 demandes relevées dans la conversation, avec critères d'acceptation. Intégration continue : Linux, macOS et musl verts ; sous Windows, les protections système passent, deux tests écrits avec des chemins POSIX corrigés. |
