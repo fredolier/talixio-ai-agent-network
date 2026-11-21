@@ -7,6 +7,24 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.13.1"
+date = "2026-11-21"
+title = "L'abonnement Claude, revu"
+summary = "Les suites de la revue de sécurité du connecteur `claude` : le maître vérifie pendant le tour que `claude` n'a que les outils de l'agent."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Le maître lit ce que `claude` annonce avoir en main et chacun de ses appels : au moindre outil qui n'est pas à l'agent, le tour est tué. Jusqu'ici, seules les options passées à la commande le garantissaient."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Le dossier où `claude` garde sa connexion et ses conversations (`~/.claude`, `~/.claude.json`, `CLAUDE_CONFIG_DIR`) est interdit d'office à tous les agents."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Process `claude` bornés par branche (quatre, seize en tout, deux gardés au maître) ; une session n'est reprise que pour la même conversation ; un contenu lu ne peut plus imiter le rôle de l'utilisateur dans une conversation redonnée."
+
+[[release]]
 version = "0.13.0"
 date = "2026-11-21"
 title = "L'abonnement Claude, par la commande officielle"

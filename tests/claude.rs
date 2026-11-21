@@ -34,10 +34,14 @@ impl Api {
     }
 
     async fn wait_message(&self, what: &str) -> String {
+        self.wait("message", what).await
+    }
+
+    async fn wait(&self, kind: &str, what: &str) -> String {
         let start = Instant::now();
         loop {
             let body = self.get("/api/activity?after=0&limit=5000").await;
-            let found = body["events"].as_array().unwrap().iter().find(|e| e["kind"] == "message" && e["text"].as_str().is_some_and(|t| t.contains(what)));
+            let found = body["events"].as_array().unwrap().iter().find(|e| e["kind"] == kind && e["text"].as_str().is_some_and(|t| t.contains(what)));
             if let Some(event) = found {
                 return event["text"].as_str().unwrap().to_string();
             }
@@ -70,6 +74,9 @@ async fn the_claude_command_serves_a_model_through_our_own_tools() {
         .env("TALIXIO_API_TOKEN", TOKEN)
         .env("ANTHROPIC_API_KEY", "sk-ant-cle-qui-ne-doit-pas-passer")
         .env("FAUX_CLAUDE_JOURNAL", &journal)
+        // le dossier personnel du maître est ici dans un dossier ouvert aux agents : le pire cas
+        .env("HOME", &work)
+        .env_remove("CLAUDE_CONFIG_DIR")
         .stderr(Stdio::null())
         .kill_on_drop(true)
         .spawn()
@@ -119,9 +126,36 @@ async fn the_claude_command_serves_a_model_through_our_own_tools() {
     api.say(&format!("OUTIL read_file {}", json!({ "path": tmp.join("ailleurs.txt") }))).await;
     let refused = api.wait_message("erreur=true").await;
     assert!(refused.contains("hors des dossiers autorisés") && !refused.contains("secret-ailleurs"), "{refused}");
+    // ce que `claude` garde chez lui (sa connexion, les conversations de tous les agents) est
+    // interdit d'office, même dans un dossier ouvert, même créé après le démarrage
+    std::fs::create_dir_all(work.join(".claude")).unwrap();
+    std::fs::write(work.join(".claude").join(".credentials.json"), "jeton-abonnement").unwrap();
+    api.say(&format!("OUTIL read_file {}", json!({ "path": work.join(".claude").join(".credentials.json") }))).await;
+    let kept = api.wait_message("credentials.json").await;
+    assert!(kept.contains("erreur=true") && !kept.contains("jeton-abonnement"), "{kept}");
     // un outil que l'agent n'a pas : jamais exécuté
     api.say("OUTIL outil_invente {\"x\":1}").await;
     assert!(api.wait_message("outil inconnu").await.contains("erreur=true"));
+
+    // la commande annonce un outil qui n'est pas à l'agent, ou s'en sert : le tour est tué
+    for (trick, seen) in [("INTRUS", "(outil \"Bash\")"), ("HORS", "(appel d'un outil qui n'est pas à nous)")] {
+        let before = Instant::now();
+        api.say(trick).await;
+        let stopped = api.wait("error", seen).await;
+        assert!(stopped.contains("ne s'en tient pas aux outils") && before.elapsed() < Duration::from_secs(20), "{stopped}");
+    }
+    // et la conversation reprend, dans une session neuve
+    let lines = || std::fs::read_to_string(&journal).unwrap().lines().map(str::to_string).collect::<Vec<_>>();
+    let before = lines().len();
+    api.say("après").await;
+    let start = Instant::now();
+    while lines().len() == before {
+        assert!(start.elapsed() < Duration::from_secs(20), "pas de nouveau tour");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(lines().last().unwrap().contains("--session-id"), "une session tuée n'est pas reprise");
+    api.wait_message("hirondelle").await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
     // ce que la commande a reçu : nos consignes par un fichier fermé, ses outils intégrés coupés,
     // et rien des secrets du maître, même si la configuration demandait de les transmettre
@@ -132,7 +166,7 @@ async fn the_claude_command_serves_a_model_through_our_own_tools() {
         let env: Vec<&str> = call["env"].as_array().unwrap().iter().map(|a| a.as_str().unwrap()).collect();
         assert!(env.contains(&"FAUX_CLAUDE_JOURNAL") && !env.contains(&"ANTHROPIC_API_KEY") && !env.contains(&"TALIXIO_API_TOKEN"), "{env:?}");
         let pair = |flag: &str, value: &str| args.windows(2).any(|w| w[0] == flag && w[1] == value);
-        assert!(pair("--tools", "") && pair("--setting-sources", "") && pair("--permission-mode", "dontAsk") && pair("--allowedTools", "mcp__talixio"), "{args:?}");
+        assert!(pair("--tools", "") && pair("--setting-sources", "") && pair("--permission-mode", "dontAsk") && pair("--allowedTools", "mcp__talixio") && pair("--permission-prompts", "none"), "{args:?}");
         assert!(args.contains(&"--strict-mcp-config") && args.contains(&"-p"));
         assert!(call["system"].as_str().unwrap().contains("consigne-reconnaissable"));
         assert!(!args.iter().any(|a| a.contains("consigne-reconnaissable") || a.contains("TALIXIO_BRIDGE_TOKEN")), "rien de sensible sur la ligne de commande");

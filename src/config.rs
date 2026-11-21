@@ -316,7 +316,8 @@ impl RootConfig {
     /// Ce que les outils des agents ne doivent jamais atteindre : les fichiers de clés.
     /// Un fichier de clé déclaré mais introuvable est une erreur : on ne protège pas ce qu'on
     /// ne sait pas situer. Le dossier `.ssh` du compte (clés, machines connues, réglages de
-    /// `ssh`) est interdit d'office.
+    /// `ssh`) est interdit d'office, comme ce que la commande `claude` garde (`.claude`,
+    /// `.claude.json`, `CLAUDE_CONFIG_DIR`).
     pub fn secret_paths(&self) -> Result<Vec<PathBuf>> {
         let keys = self.models.values().filter_map(|m| m.api_key_file.as_ref());
         let ssh = self.targets.values().filter_map(|t| t.identity_file.as_ref());
@@ -325,8 +326,13 @@ impl RootConfig {
             paths.push(path.canonicalize().with_context(|| format!("fichier de clé introuvable : {}", path.display()))?);
         }
         let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
-        if let Some(dir) = home.map(|h| PathBuf::from(h).join(".ssh")).and_then(|d| d.canonicalize().ok()) {
-            paths.push(dir);
+        // le dossier personnel : les clés SSH, et ce que la commande `claude` y garde (sa connexion,
+        // et les conversations de tous les agents qu'elle sert), même s'ils n'existent pas encore
+        if let Some(home) = home.map(PathBuf::from).and_then(|h| h.canonicalize().ok()) {
+            paths.extend([".ssh", ".claude", ".claude.json"].map(|name| home.join(name)).map(|path| path.canonicalize().unwrap_or(path)));
+        }
+        if let Some(dir) = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from).filter(|d| d.is_absolute()) {
+            paths.push(dir.canonicalize().unwrap_or(dir));
         }
         Ok(paths)
     }

@@ -319,6 +319,10 @@ async fn run_root(config: &Path) -> Result<()> {
     // la commande `claude` travaille dans un dossier à nous, vide, hors de portée des agents
     let claude_dir = cfg.state_dir.join("claude");
     std::fs::create_dir_all(&claude_dir).with_context(|| format!("création de {}", claude_dir.display()))?;
+    // un lien posé là enverrait ailleurs les consignes et les jetons des tours
+    if !std::fs::symlink_metadata(&claude_dir).is_ok_and(|m| m.file_type().is_dir()) {
+        anyhow::bail!("{} n'est pas un vrai dossier", claude_dir.display());
+    }
     talixio_agent::os::make_private(&claude_dir).map_err(anyhow::Error::msg)?;
     for stale in std::fs::read_dir(&claude_dir).into_iter().flatten().flatten() {
         let _ = std::fs::remove_file(stale.path());
@@ -355,6 +359,7 @@ async fn run_root(config: &Path) -> Result<()> {
         async move { talixio_agent::tools::restore_permanent(&node).await }
     });
     shutdown_signal().await;
+    talixio_agent::model::cli::stop_all();
     node.terminate("arrêt du maître", 0).await
 }
 

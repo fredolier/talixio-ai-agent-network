@@ -2,7 +2,8 @@
 //! événement, outils servis par le pont qu'elle lance), sans appeler aucun modèle.
 //!
 //! Ce qu'on lui dit décide de ce qu'elle fait : « OUTIL <nom> <arguments JSON> » lui fait appeler
-//! cet outil et répéter sa réponse ; tout autre texte est répété tel quel.
+//! cet outil et répéter sa réponse ; « INTRUS » et « HORS » lui font sortir de son rôle ; tout
+//! autre texte est répété tel quel.
 
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
@@ -30,6 +31,14 @@ fn main() {
     let say = |text: &str| {
         println!("{}", json!({ "type": "assistant", "parent_tool_use_id": null, "message": { "id": "m1", "content": [{ "type": "text", "text": text }], "usage": { "input_tokens": 7, "output_tokens": 3 } } }));
     };
+    // comme la vraie, elle annonce ce qu'elle a en main ; « INTRUS » : un outil qui n'est pas à
+    // l'agent ; « HORS » : elle s'en sert
+    let tools = if text.contains("INTRUS") { json!(["Bash"]) } else { json!(["mcp__talixio__read_file"]) };
+    println!("{}", json!({ "type": "system", "subtype": "init", "tools": tools, "mcp_servers": [{ "name": "talixio", "status": "connected" }] }));
+    if text.contains("HORS") {
+        println!("{}", json!({ "type": "assistant", "parent_tool_use_id": null, "message": { "id": "m0", "content": [{ "type": "tool_use", "id": "t1", "name": "Bash", "input": { "command": "id" } }], "usage": {} } }));
+        std::thread::sleep(std::time::Duration::from_secs(30));
+    }
     let mode = if after("--resume").is_some() { "suite" } else { "début" };
     let reply = match text.lines().find_map(|l| l.strip_prefix("de l'utilisateur : OUTIL ").or(l.strip_prefix("OUTIL "))) {
         Some(order) => {

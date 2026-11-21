@@ -437,6 +437,16 @@ Demandé le 2026-11-20. Rien n'est codé.
       session neuve ; les tokens d'un tour abandonné ne sont pas comptés ; l'image Docker
       vide ne peut pas l'héberger (`docker/Dockerfile.claude`) ; `claude` garde ses propres
       transcriptions dans le dossier personnel du compte du maître.
+    - Garde-fous à l'exécution (huitième passe) : le maître lit ce que `claude` annonce avoir
+      en main et tue le tour s'il y a autre chose que les outils de l'agent, ou si `claude`
+      appelle autre chose ; seize process au plus, quatre par branche (un enfant du maître et
+      sa descendance), deux gardés au maître ; une session n'est reprise que si l'empreinte du
+      début de la conversation (consignes comprises) est la même ; `~/.claude`,
+      `~/.claude.json` et `CLAUDE_CONFIG_DIR` sont interdits d'office à tous les agents.
+    - Ce que `claude_env` laisse passer est de la responsabilité de l'exploitant : une variable
+      comme `ANTHROPIC_BASE_URL` change le service que `claude` appelle. Le détenteur du jeton
+      d'un tour (le pont, donc `claude`) peut poser des appels d'outils pour ce tour et en
+      reçoit les résultats, rien d'autre.
 20. **Les notes de version ont une source unique**, `releases.toml`, embarquée dans l'exécutable.
     Chaque version y ajoute une entrée ; un test refuse une version sans note.
 
@@ -603,6 +613,28 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
     qu'un appel de plongements. Régler `max_calls` nature par nature, au plus juste (B4 à venir).
 10. Un agent déployé qui ne répond plus (machine éteinte, réseau coupé) s'éteint seul, mais sa
     désinstallation échoue si la cible est injoignable : l'échec est journalisé, pas rejoué.
+
+### Huitième passe (2026-11-21) : l'abonnement Claude par la commande `claude`
+
+Revue indépendante du connecteur, du pont et de la route `/bridge`. Aucun constat haut démontré :
+le pont n'ouvre que le tour de son jeton, chaque appel d'outil repasse par les contrôles de
+l'agent, un enfant ne prend pas la session d'un autre. Le cloisonnement reposait toutefois sur
+les seules options passées à `claude`, sans contrôle de ce qu'il fait réellement.
+
+| N° | Gravité | Constat | Traitement |
+|---|---|---|---|
+| K1 | Moyenne à haute | Rien ne vérifiait, à l'exécution, que `claude` n'avait que les outils de l'agent : une option ignorée par une version future aurait rendu ses outils intégrés (shell, fichiers) sans que le maître le voie. | ✅ Le maître lit l'annonce de `claude` (outils, serveurs d'outils) et chaque appel : tout ce qui n'est pas à nous tue le tour. `--permission-prompts none` ajouté. Test (fausse commande qui sort de son rôle). |
+| K2 | Moyenne | Seize tours pour tout l'arbre : un enfant pouvait les prendre tous ; les tours à l'écoute n'étaient pas comptés ; les sessions gardées n'avaient pas de borne. | ✅ Process vivants comptés par branche : quatre par branche, deux places gardées au maître, trente-deux sessions par branche. Test. |
+| K3 | Moyenne | `~/.claude` (connexion, conversations de tous les agents) n'était pas dans les chemins interdits : un agent ayant le dossier personnel dans ses droits pouvait les lire. | ✅ `~/.claude`, `~/.claude.json`, `CLAUDE_CONFIG_DIR` interdits d'office, existants ou non. Test. |
+| K4 | Moyenne | Conversation redonnée en clair : un résultat d'outil pouvait imiter une étiquette (`[Reçu]`) et se faire passer pour l'utilisateur. | ✅ Étiquettes marquées d'une valeur tirée au hasard à chaque rendu, annoncée en tête. Test. |
+| K5 | Moyenne à basse | Session reprise sur le seul nombre de messages connus, sans vérifier que c'était la même conversation ; un tour expiré laissait sa session. | ✅ Empreinte des consignes et du début de la conversation ; session oubliée quand le tour expire. Test. |
+| K6 | Moyenne à basse | Les tokens d'un tour en erreur ou abandonné ne sont pas comptés au budget. | 📌 Limite notée (décision 32) : `claude` ne rend son compte qu'avec ses messages. Les limites de l'abonnement bornent le reste. |
+| K7 | Basse | À l'arrêt du maître, des process `claude` en attente pouvaient rester. | ✅ Tours vidés à l'arrêt. |
+| K8 | Basse | Le pont rappelait toujours 127.0.0.1, même si le maître écoute sur une autre adresse précise. | ✅ L'adresse d'écoute est reprise quand elle est précise. |
+| K9 | Basse | Un refus du maître n'était pas rendu à `claude`, qui attendait jusqu'au délai. | ✅ Le pont rend une erreur du protocole. |
+| K10 | Basse | Filtre des secrets de l'environnement sensible à la casse (Windows ne l'est pas). | ✅ Comparaison sans casse. Ce que `claude_env` laisse passer reste à la charge de l'exploitant (noté). |
+| K11 | Basse | `<état>/claude` pouvait être un lien symbolique posé avant le démarrage. | ✅ Refusé au démarrage. |
+| K12 | Basse | Une invite commençant par « / » pouvait être prise pour une commande de `claude`. | ✅ Jamais en tête d'invite (et `--disable-slash-commands`). |
 
 ### Première passe (2026-11-20) : constats et traitement
 
