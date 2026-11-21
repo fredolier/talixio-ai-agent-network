@@ -29,6 +29,17 @@ pub fn random_hex(uuids: usize) -> String {
     (0..uuids).map(|_| uuid::Uuid::new_v4().simple().to_string()).collect()
 }
 
+pub fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+pub fn unhex(text: &str) -> Option<Vec<u8>> {
+    if text.len() % 2 != 0 || !text.is_ascii() {
+        return None;
+    }
+    (0..text.len()).step_by(2).map(|i| u8::from_str_radix(&text[i..i + 2], 16).ok()).collect()
+}
+
 /// Preuve qu'on détient un secret, sans le montrer : HMAC-SHA256 du rôle (`parent` ou
 /// `child`) et des éléments de l'échange, chacun précédé de sa longueur. Ces éléments sont
 /// l'aléa de l'enfant, celui du parent, l'identifiant de l'enfant et l'empreinte du certificat

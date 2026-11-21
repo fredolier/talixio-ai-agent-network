@@ -51,12 +51,12 @@ pub fn harden_process() {
 
 /// Lance le même exécutable en mode enfant. Les consignes, jeton compris, passent par
 /// l'entrée standard : elles n'apparaissent ni dans la ligne de commande ni dans l'environnement.
-pub async fn spawn_local(node: &Node, boot: &Bootstrap) -> Result<Child, String> {
+pub async fn spawn_local(node: &Node, boot: &Bootstrap, envelope: &[u8]) -> Result<Child, String> {
     let exe = std::env::current_exe().map_err(|e| format!("exécutable introuvable : {e}"))?;
     let logs = node.state_dir.join("logs");
     std::fs::create_dir_all(&logs).map_err(|e| format!("{} : {e}", logs.display()))?;
     let log_path = logs.join(format!("{}-{}.log", boot.name, boot.agent_id));
-    let log = std::fs::File::create(&log_path).map_err(|e| format!("{} : {e}", log_path.display()))?;
+    let log = std::fs::OpenOptions::new().create(true).append(true).open(&log_path).map_err(|e| format!("{} : {e}", log_path.display()))?;
 
     let mut command = Command::new(exe);
     command
@@ -71,8 +71,7 @@ pub async fn spawn_local(node: &Node, boot: &Bootstrap) -> Result<Child, String>
 
     let mut child = command.spawn().map_err(|e| format!("lancement de l'agent : {e}"))?;
     let mut stdin = child.stdin.take().ok_or("entrée standard de l'enfant indisponible")?;
-    let payload = serde_json::to_vec(boot).map_err(|e| e.to_string())?;
-    stdin.write_all(&payload).await.map_err(|e| format!("transmission des consignes : {e}"))?;
+    stdin.write_all(envelope).await.map_err(|e| format!("transmission des consignes : {e}"))?;
     drop(stdin);
     Ok(child)
 }
@@ -84,11 +83,11 @@ pub async fn spawn_local(node: &Node, boot: &Bootstrap) -> Result<Child, String>
 use crate::config::Target;
 
 /// Lance un enfant : sur cette machine, ou sur la cible donnée.
-pub async fn launch(node: &Node, boot: &Bootstrap, target: Option<&Target>) -> Result<Child, String> {
+pub async fn launch(node: &Node, boot: &Bootstrap, envelope: &[u8], target: Option<&Target>) -> Result<Child, String> {
     match target {
-        None => spawn_local(node, boot).await,
-        Some(target) if target.kind == "ssh" => spawn_ssh(node, boot, target).await,
-        Some(target) => spawn_docker(node, boot, target).await,
+        None => spawn_local(node, boot, envelope).await,
+        Some(target) if target.kind == "ssh" => spawn_ssh(node, boot, envelope, target).await,
+        Some(target) => spawn_docker(node, boot, envelope, target).await,
     }
 }
 
@@ -96,7 +95,7 @@ fn log_file(node: &Node, boot: &Bootstrap) -> Result<std::fs::File, String> {
     let logs = node.state_dir.join("logs");
     std::fs::create_dir_all(&logs).map_err(|e| format!("{} : {e}", logs.display()))?;
     let path = logs.join(format!("{}-{}.log", boot.name, boot.agent_id));
-    std::fs::File::create(&path).map_err(|e| format!("{} : {e}", path.display()))
+    std::fs::OpenOptions::new().create(true).append(true).open(&path).map_err(|e| format!("{} : {e}", path.display()))
 }
 
 async fn feed(child: &mut Child, payload: &[u8]) -> Result<(), String> {
@@ -158,7 +157,7 @@ fn remote_paths(target: &Target, id: &str) -> (String, String, String) {
 /// Dépose l'exécutable sur la machine distante et y lance l'agent. Tout passe par `ssh` :
 /// l'exécutable et les consignes voyagent dans son canal chiffré, rien n'est écrit en clair
 /// hors du dossier réservé aux agents.
-async fn spawn_ssh(node: &Node, boot: &Bootstrap, target: &Target) -> Result<Child, String> {
+async fn spawn_ssh(node: &Node, boot: &Bootstrap, envelope: &[u8], target: &Target) -> Result<Child, String> {
     let (binary, state, dir) = remote_paths(target, &boot.agent_id);
     // le dossier doit être à ce compte, et à lui seul : personne d'autre n'y prépare ni n'y remplace rien
     let prepare = format!(
@@ -177,17 +176,16 @@ async fn spawn_ssh(node: &Node, boot: &Bootstrap, target: &Target) -> Result<Chi
     // les erreurs de l'agent vont dans un journal distant : sa vie ne dépend pas de la session ssh
     // son numéro de process est noté : c'est ce qui permettra de le tuer, pas seulement de le lâcher
     let id = &boot.agent_id;
-    let run = format!("umask 077 && echo $$ > {state}/{id}.pid && exec {binary} child --state-dir {state} 2>>{state}/{id}.log");
+    let run = format!("umask 077 && echo $$ > {state}/{id}.pid && exec {binary} child --state-dir {state} --log-file {state}/{id}.log 2>>{state}/{id}.log");
     let mut command = ssh(target, &run);
     command.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(log_file(node, boot)?);
     let mut child = command.spawn().map_err(|e| format!("ssh : {e}"))?;
-    send_bootstrap(&mut child, boot).await?;
+    send_bootstrap(&mut child, envelope).await?;
     Ok(child)
 }
 
-async fn send_bootstrap(child: &mut Child, boot: &Bootstrap) -> Result<(), String> {
-    let payload = serde_json::to_vec(boot).map_err(|e| e.to_string())?;
-    tokio::time::timeout(std::time::Duration::from_secs(30), feed(child, &payload)).await.map_err(|_| "transmission des consignes : délai dépassé".to_string())?
+async fn send_bootstrap(child: &mut Child, envelope: &[u8]) -> Result<(), String> {
+    tokio::time::timeout(std::time::Duration::from_secs(30), feed(child, envelope)).await.map_err(|_| "transmission des consignes : délai dépassé".to_string())?
 }
 
 fn docker(target: &Target) -> Command {
@@ -220,13 +218,13 @@ pub fn docker_args(id: &str, target: &Target, exe: &std::path::Path) -> Vec<Stri
     args
 }
 
-async fn spawn_docker(node: &Node, boot: &Bootstrap, target: &Target) -> Result<Child, String> {
+async fn spawn_docker(node: &Node, boot: &Bootstrap, envelope: &[u8], target: &Target) -> Result<Child, String> {
     let exe = std::env::current_exe().map_err(|e| format!("exécutable introuvable : {e}"))?;
     let mut command = docker(target);
     command.args(docker_args(&boot.agent_id, target, &exe));
     command.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(log_file(node, boot)?);
     let mut child = command.spawn().map_err(|e| format!("docker : {e}"))?;
-    send_bootstrap(&mut child, boot).await?;
+    send_bootstrap(&mut child, envelope).await?;
     Ok(child)
 }
 
@@ -253,6 +251,49 @@ pub async fn uninstall(target: &Target, id: &str) -> Result<(), String> {
     }
 }
 
+/// Fait tourner un journal trop gros : son contenu passe dans `<journal>.1` (l'ancien `.1` est
+/// perdu), puis il est vidé. Celui qui écrit dedans n'a rien à savoir : il écrit en ajout.
+pub fn rotate_log(path: &std::path::Path, max_bytes: u64) {
+    let too_big = std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file() && m.len() > max_bytes);
+    if !too_big {
+        return;
+    }
+    let mut old = path.as_os_str().to_owned();
+    old.push(".1");
+    let _ = std::fs::copy(path, &old);
+    if let Ok(file) = std::fs::OpenOptions::new().write(true).open(path) {
+        let _ = file.set_len(0);
+    }
+}
+
+/// Tient les journaux des enfants dans la limite fixée : rotation, et oubli des journaux
+/// auxquels plus personne n'écrit depuis une semaine.
+pub async fn keep_logs_small(dir: std::path::PathBuf, max_bytes: u64) {
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(20));
+    loop {
+        tick.tick().await;
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let stale = entry.metadata().ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok());
+            if stale.is_some_and(|age| age > std::time::Duration::from_secs(7 * 24 * 3600)) {
+                let _ = std::fs::remove_file(&path);
+            } else if path.extension().is_some_and(|e| e == "log") {
+                rotate_log(&path, max_bytes);
+            }
+        }
+    }
+}
+
+/// Le journal de l'agent lui-même, quand c'est lui qui le tient (déployé par SSH).
+pub async fn keep_own_log_small(path: std::path::PathBuf, max_bytes: u64) {
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(20));
+    loop {
+        tick.tick().await;
+        rotate_log(&path, max_bytes);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,6 +302,18 @@ mod tests {
         let target: Target = toml::from_str(toml).map_err(|e| e.to_string())?;
         target.validate().map_err(|e| e.to_string())?;
         Ok(target)
+    }
+
+    #[test]
+    fn un_journal_trop_gros_tourne() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("a.log");
+        std::fs::write(&log, vec![b'x'; 2000]).unwrap();
+        rotate_log(&log, 5000);
+        assert_eq!(std::fs::metadata(&log).unwrap().len(), 2000);
+        rotate_log(&log, 1000);
+        assert_eq!(std::fs::metadata(&log).unwrap().len(), 0);
+        assert_eq!(std::fs::metadata(dir.path().join("a.log.1")).unwrap().len(), 2000);
     }
 
     #[test]

@@ -14,6 +14,7 @@ model = "main"
 # Adresse de l'API et du lien avec les enfants, toujours en TLS. Par défaut : cette machine seule.
 # Pour des enfants sur d'autres machines ou dans Docker : "0.0.0.0:7700", derrière un pare-feu.
 listen = "127.0.0.1:7700"
+# log_max_bytes = 5242880            # taille maximale du journal d'un agent, transmise à toute la grappe
 # advertise = "maitre.exemple.net"   # nom ou adresse par lequel les enfants distants joignent le maître
 
 # Dossier d'état : jeton de l'API, journaux des enfants, bases SQLite (mémoire des agents, journal).

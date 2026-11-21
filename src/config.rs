@@ -33,6 +33,10 @@ pub struct RootConfig {
     pub state_dir: PathBuf,
     #[serde(default)]
     pub timing: Timing,
+    /// Taille maximale du journal d'un agent, en octets. Au-delà, le journal tourne : l'ancien
+    /// est gardé une fois, puis jeté. La limite descend de parent en enfant.
+    #[serde(default = "default_log_max")]
+    pub log_max_bytes: u64,
     pub models: BTreeMap<String, ModelConfig>,
     #[serde(default)]
     pub capabilities: Capabilities,
@@ -351,8 +355,84 @@ pub struct Bootstrap {
     /// Déployé sur une cible : le plafond de droits de celle-ci, que l'enfant revérifie à l'arrivée.
     #[serde(default)]
     pub ceiling: Option<Capabilities>,
+    /// Taille maximale de son journal, fixée par le parent.
+    #[serde(default = "default_log_max")]
+    pub log_max_bytes: u64,
 }
 
+/// Ce que l'enfant reçoit au lancement : de quoi joindre son parent, et sa configuration
+/// scellée. Il ne peut ni la lire ni la changer : seul le parent en détient la clé, et il ne
+/// la remet, une seule fois, qu'à l'enfant qui a prouvé qui il est sur le lien chiffré.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Envelope {
+    pub agent_id: String,
+    pub parent_addr: String,
+    pub parent_cert: String,
+    pub token: String,
+    /// Aléa puis configuration chiffrée et signée (ChaCha20-Poly1305), en hexadécimal.
+    pub sealed: String,
+}
+
+impl Envelope {
+    /// Ce qui est lié au chiffrement sans être chiffré : une enveloppe ne s'ouvre que pour
+    /// l'agent et le parent pour lesquels elle a été faite.
+    fn bound(agent_id: &str, parent_cert: &str) -> Vec<u8> {
+        format!("talixio-config-v1\n{agent_id}\n{parent_cert}").into_bytes()
+    }
+
+    fn key(key: &str) -> Result<ring::aead::LessSafeKey> {
+        let bytes = crate::unhex(key).filter(|k| k.len() == 32).context("clé de configuration invalide")?;
+        let key = ring::aead::UnboundKey::new(&ring::aead::CHACHA20_POLY1305, &bytes).map_err(|_| anyhow::anyhow!("clé refusée"))?;
+        Ok(ring::aead::LessSafeKey::new(key))
+    }
+
+    /// Une clé neuve, pour un seul enfant et une seule enveloppe.
+    pub fn new_key() -> Result<String> {
+        use ring::rand::SecureRandom;
+        let mut key = [0u8; 32];
+        ring::rand::SystemRandom::new().fill(&mut key).map_err(|_| anyhow::anyhow!("pas de source d'aléa"))?;
+        Ok(crate::hex(&key))
+    }
+
+    pub fn seal(boot: &Bootstrap, key: &str) -> Result<Self> {
+        use ring::rand::SecureRandom;
+        let mut nonce = [0u8; 12];
+        ring::rand::SystemRandom::new().fill(&mut nonce).map_err(|_| anyhow::anyhow!("pas de source d'aléa"))?;
+        let mut data = serde_json::to_vec(boot)?;
+        let aad = ring::aead::Aad::from(Self::bound(&boot.agent_id, &boot.parent_cert));
+        Self::key(key)?
+            .seal_in_place_append_tag(ring::aead::Nonce::assume_unique_for_key(nonce), aad, &mut data)
+            .map_err(|_| anyhow::anyhow!("chiffrement impossible"))?;
+        Ok(Self {
+            agent_id: boot.agent_id.clone(),
+            parent_addr: boot.parent_addr.clone(),
+            parent_cert: boot.parent_cert.clone(),
+            token: boot.token.clone(),
+            sealed: format!("{}{}", crate::hex(&nonce), crate::hex(&data)),
+        })
+    }
+
+    /// Ouvre la configuration. Un seul octet changé, dans la configuration ou dans ce qui
+    /// l'accompagne, et elle est refusée en bloc.
+    pub fn open(&self, key: &str) -> Result<Bootstrap> {
+        let mut data = crate::unhex(&self.sealed).filter(|d| d.len() > 12 + 16).context("configuration scellée illisible")?;
+        let nonce: [u8; 12] = data[..12].try_into().expect("longueur vérifiée");
+        let aad = ring::aead::Aad::from(Self::bound(&self.agent_id, &self.parent_cert));
+        let clear = Self::key(key)?
+            .open_in_place(ring::aead::Nonce::assume_unique_for_key(nonce), aad, &mut data[12..])
+            .map_err(|_| anyhow::anyhow!("configuration scellée altérée, ou clé qui n'est pas la sienne"))?;
+        let boot: Bootstrap = serde_json::from_slice(clear).context("configuration scellée invalide")?;
+        if boot.agent_id != self.agent_id || boot.parent_addr != self.parent_addr || boot.parent_cert != self.parent_cert || boot.token != self.token {
+            bail!("l'enveloppe ne correspond pas à la configuration qu'elle contient");
+        }
+        Ok(boot)
+    }
+}
+
+fn default_log_max() -> u64 {
+    5 * 1024 * 1024
+}
 fn default_name() -> String {
     "maître".into()
 }
@@ -364,4 +444,45 @@ fn default_listen() -> SocketAddr {
 }
 fn default_state_dir() -> PathBuf {
     ".talixio".into()
+}
+
+#[cfg(test)]
+mod sealed_tests {
+    use super::*;
+
+    fn boot() -> Bootstrap {
+        serde_json::from_value(serde_json::json!({
+            "agent_id": "a-1", "name": "n", "role": "r", "instructions": "i", "model": "m",
+            "capabilities": { "fs_read": ["/srv/data"] }, "parent_id": "p", "parent_name": "p",
+            "parent_addr": "127.0.0.1:1", "parent_cert": "c".repeat(64), "token": "t", "depth": 1, "target": "local",
+            "timing": { "heartbeat_secs": 1, "suspend_after_secs": 2, "die_after_secs": 4 }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn une_configuration_scellee_ne_se_lit_ni_ne_se_change_sans_la_cle() {
+        let key = Envelope::new_key().unwrap();
+        let envelope = Envelope::seal(&boot(), &key).unwrap();
+        // rien de la configuration n'est lisible dans l'enveloppe
+        let wire = serde_json::to_string(&envelope).unwrap();
+        assert!(!wire.contains("/srv/data") && !wire.contains("fs_read") && !wire.contains("instructions"));
+        // la bonne clé l'ouvre
+        assert_eq!(envelope.open(&key).unwrap().capabilities.fs_read, vec![PathBuf::from("/srv/data")]);
+        // une autre clé, non
+        assert!(envelope.open(&Envelope::new_key().unwrap()).is_err());
+        // un seul caractère changé dans la configuration : refusée en bloc
+        let mut forged = envelope.clone();
+        let last = forged.sealed.pop().unwrap();
+        forged.sealed.push(if last == '0' { '1' } else { '0' });
+        assert!(forged.open(&key).is_err());
+        // l'enveloppe d'un agent ne vaut pas pour un autre, ni pour un autre parent
+        for change in [|e: &mut Envelope| e.agent_id = "a-2".into(), |e: &mut Envelope| e.parent_cert = "d".repeat(64), |e: &mut Envelope| e.parent_addr = "10.0.0.1:1".into(), |e: &mut Envelope| e.token = "x".into()] {
+            let mut moved = envelope.clone();
+            change(&mut moved);
+            assert!(moved.open(&key).is_err());
+        }
+        // deux scellés de la même configuration ne se ressemblent pas
+        assert_ne!(Envelope::seal(&boot(), &key).unwrap().sealed, envelope.sealed);
+    }
 }

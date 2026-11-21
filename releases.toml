@@ -7,6 +7,24 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.6.0"
+date = "2026-11-21"
+title = "Configuration scellée"
+summary = "Un agent ne reçoit plus sa configuration en clair : elle arrive chiffrée et signée, et seul son parent en détient la clé. Les journaux sont tenus dans une taille fixée par le maître."
+
+[[release.changes]]
+kind = "sécurité"
+text = "La configuration d'un enfant (rôle, instructions, droits, plafond, limites) lui est remise scellée (ChaCha20-Poly1305). Il ne peut ni la lire ni la changer : un seul octet modifié et elle est refusée en bloc."
+
+[[release.changes]]
+kind = "sécurité"
+text = "La clé ne quitte le parent qu'une seule fois, sur le lien chiffré, après que l'enfant a prouvé qui il est et que le parent l'a prouvé aussi. Une enveloppe volée ensuite ne s'ouvre plus ; elle ne vaut que pour cet agent et ce parent."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Rotation des journaux : `log_max_bytes` dans la configuration du maître (5 Mio par défaut) descend de parent en enfant. Un journal trop gros passe dans `.1` puis repart de zéro ; les journaux abandonnés depuis une semaine sont effacés."
+
+[[release]]
 version = "0.5.0"
 date = "2026-11-20"
 title = "L'interface"

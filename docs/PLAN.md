@@ -47,7 +47,8 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 - [x] Interface web embarquée : arbre en direct, détail et arrêt d'un agent, dialogue avec le maître, journal, nouveautés ; téléphone et manifeste d'application (P2, P4, décision 22) — essayée dans un navigateur, bureau et téléphone
 - [ ] Interface, suite : budgets, validations, réglages ; notifications ; hors ligne
 - [x] Passe de sécurité indépendante sur le déploiement et le TLS : 10 constats, 9 traités (SPEC §7, deuxième passe)
-- [ ] Suites de la deuxième passe : borner les journaux locaux des enfants ; test du constat 1 (clés interdites aux enfants) ; rapatrier le journal distant ; retirer les bases des petits-enfants
+- [x] Configuration scellée des enfants, clé remise une fois par le parent (décision 23) ; rotation des journaux (décision 24)
+- [ ] Suites de la deuxième passe : test du constat 1 (clés interdites aux enfants) ; rapatrier le journal distant ; retirer les bases des petits-enfants
 - [ ] Passe de sécurité indépendante sur l'interface web
 
 ## Étape 3 — durcir et durer
@@ -79,3 +80,4 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 | 2026-11-20 | v0.5.0 : interface web embarquée, servie par le maître. |
 | 2026-11-20 | Deuxième passe de sécurité (déploiement, TLS) : 10 constats, 9 traités. |
 | 2026-11-20 | Compilation croisée Windows réussie ; écarts de sécurité Windows et macOS inscrits (A2). |
+| 2026-11-21 | v0.6.0 : configuration scellée des enfants ; rotation des journaux. |

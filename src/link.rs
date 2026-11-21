@@ -174,6 +174,38 @@ pub async fn run_uplink(node: Arc<Node>, addr: String, cert: String, token: Stri
     }
 }
 
+/// Premier geste d'un enfant : aller chercher chez son parent la clé de sa configuration.
+/// Le parent doit d'abord prouver qui il est (certificat épinglé, puis secret du lien).
+pub async fn fetch_key(agent_id: &str, addr: &str, cert: &str, token: &str) -> Option<String> {
+    let tls = tokio_rustls::TlsConnector::from(Arc::new(crate::tls::pinned_client(cert).ok()?));
+    let exchange = async {
+        let tcp = tokio::net::TcpStream::connect(addr).await.ok()?;
+        let name = rustls::pki_types::ServerName::try_from(crate::tls::NAME).ok()?;
+        let stream = tls.connect(name, tcp).await.ok()?;
+        let (ws, _) = tokio_tungstenite::client_async(format!("wss://{addr}/link"), stream).await.ok()?;
+        let (mut sink, mut stream) = ws.split();
+        let mine = random_hex(1);
+        if !put::<_, TMessage>(&mut sink, &plain(Msg::Hello { agent_id: agent_id.to_string(), nonce: mine.clone() })).await {
+            return None;
+        }
+        let Some(Ok(TMessage::Text(text))) = stream.next().await else { return None };
+        let Some(Msg::Challenge { nonce: theirs, proof }) = decode(text.as_str()).map(|f| f.msg) else { return None };
+        if theirs.len() > 128 || !secret_eq(&proof, &crate::proof(token, "parent", [&mine, &theirs, agent_id, cert])) {
+            return None;
+        }
+        let proof = crate::proof(token, "unseal", [&mine, &theirs, agent_id, cert]);
+        if !put::<_, TMessage>(&mut sink, &plain(Msg::Unseal { proof })).await {
+            return None;
+        }
+        let Some(Ok(TMessage::Text(text))) = stream.next().await else { return None };
+        match decode(text.as_str()).map(|f| f.msg) {
+            Some(Msg::Key { key }) if key.len() == 64 => Some(key),
+            _ => None,
+        }
+    };
+    tokio::time::timeout(HANDSHAKE, exchange).await.ok().flatten()
+}
+
 async fn session(
     node: &Arc<Node>,
     uplink: &Arc<Uplink>,
@@ -362,13 +394,20 @@ pub async fn serve_child(node: Arc<Node>, socket: WebSocket, permit: tokio::sync
             return Err(None);
         }
         let Some(Ok(WsMessage::Text(text))) = stream.next().await else { return Err(None) };
-        let Some(Msg::Proof { proof, node: info }) = decode_quiet(text.as_str()).map(|f| f.msg) else {
-            return Err(Some(REFUSED));
-        };
-        if !secret_eq(&proof, &crate::proof(&token, "child", [&theirs, &mine, &agent_id, cert])) {
-            return Err(Some(REFUSED));
+        match decode_quiet(text.as_str()).map(|f| f.msg) {
+            Some(Msg::Proof { proof, node: info }) if secret_eq(&proof, &crate::proof(&token, "child", [&theirs, &mine, &agent_id, cert])) => {
+                Ok((agent_id, info))
+            }
+            // premier démarrage : l'enfant, reconnu, vient chercher la clé de sa configuration.
+            // Elle n'est remise qu'une fois : qui volerait l'enveloppe ensuite n'en tirerait rien.
+            Some(Msg::Unseal { proof }) if secret_eq(&proof, &crate::proof(&token, "unseal", [&theirs, &mine, &agent_id, cert])) => {
+                let key = node.children.lock().unwrap().get_mut(&agent_id).filter(|c| !c.stopped).and_then(|c| c.seal_key.take());
+                let Some(key) = key else { return Err(Some(REFUSED)) };
+                let _ = put::<_, WsMessage>(&mut sink, &plain(Msg::Key { key })).await;
+                Err(None)
+            }
+            _ => Err(Some(REFUSED)),
         }
-        Ok((agent_id, info))
     };
     let (agent_id, info) = match tokio::time::timeout(HANDSHAKE, handshake).await {
         Ok(Ok(proven)) => proven,

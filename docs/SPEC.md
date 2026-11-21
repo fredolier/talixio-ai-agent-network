@@ -221,6 +221,23 @@ Demandé le 2026-11-20. Rien n'est codé.
     en ligne, aucune ressource extérieure, jamais dans un cadre ; tout texte venu de la grappe
     est posé comme du texte, jamais comme du HTML. Si l'interface grossit au point de justifier
     React et shadcn/ui, le résultat construit prendra la place de ces fichiers.
+23. **La configuration d'un enfant est scellée.** Au lancement, l'enfant ne reçoit en clair que
+    de quoi joindre son parent (adresse, empreinte du certificat, identifiant, secret du lien).
+    Tout le reste (nom, rôle, instructions, modèle, droits, plafond, interdits, limites) est
+    chiffré et signé d'un bloc (ChaCha20-Poly1305), avec une clé neuve par enfant que seul le
+    parent détient. L'enfant va la chercher sur le lien chiffré : le parent prouve d'abord qui il
+    est (certificat épinglé, puis secret), l'enfant ensuite, et la clé n'est remise qu'une fois.
+    L'enveloppe est liée à l'identifiant de l'enfant, au certificat et à l'adresse du parent.
+    Ce que cela garantit : la configuration ne peut être ni lue ni modifiée en chemin ou au
+    repos (tube, canal SSH, entrée du conteneur, et demain fichier d'un agent permanent), et un
+    agent ne démarre jamais avec autre chose que ce que son parent a écrit. Ce que cela ne
+    garantit pas : un process d'agent dont le code serait remplacé ou détourné n'est tenu par
+    aucun chiffrement ; ce qui le borne alors, c'est ce que le parent vérifie lui-même (modèles,
+    budget, taille de l'arbre, messages) et le cloisonnement par le système (D5).
+24. **Les journaux sont bornés par le parent.** `log_max_bytes` (maître) descend dans la
+    configuration scellée. Le parent fait tourner les journaux de ses enfants locaux et de ses
+    conteneurs ; un agent déployé par SSH fait tourner le sien. Le journal SQLite du maître
+    garde ses 200 000 derniers événements.
 20. **Les notes de version ont une source unique**, `releases.toml`, embarquée dans l'exécutable.
     Chaque version y ajoute une entrée ; un test refuse une version sans note.
 
@@ -386,7 +403,7 @@ Revue indépendante, à la lecture, du code de déploiement et du TLS. Dix const
 | 3 | Moyenne | Un agent déployé par SSH qui n'obéissait plus n'était que désinstallé, pas tué. | ✅ Son numéro de process est noté au lancement ; la désinstallation le tue, lui et son groupe. Rejoué dans `tests/deploy.rs`. |
 | 4 | Moyenne | Docker : sans `user`, l'agent tournait sous le compte de l'image, souvent root. | ✅ `user` obligatoire, numérique, jamais 0. |
 | 5 | Moyenne | Dossier distant : ni propriétaire ni droits vérifiés ; `//` et `/tmp` acceptés. | ✅ Le dossier doit appartenir au compte, ne pas être un lien, passe en 0700 ; `/tmp`, `//` et `/` final refusés ; fichiers créés fermés aux autres. |
-| 6 | Basse | Le journal local d'un enfant n'est pas borné : un enfant peut remplir le disque du maître. | ⬜ à faire : quota ou rotation. |
+| 6 | Basse | Le journal local d'un enfant n'est pas borné : un enfant peut remplir le disque du maître. | ✅ Rotation par le parent, à la taille fixée par le maître (décision 24). |
 | 7 | Basse | À l'extinction, une cible injoignable privait les suivantes de nettoyage. | ✅ Désinstallations en parallèle, un délai par cible. |
 | 8 | Basse | Un enfant déployé ne pouvait pas recevoir le droit de créer des enfants si le maître n'avait pas `local`. | ✅ Sur une cible, `local` désigne la machine de l'enfant. |
 | 9 | Basse | Arrêt pendant un lancement : l'exécutable restait sur la cible. | ✅ Revérifié après le lancement ; un dépôt interrompu est nettoyé. Restent : le journal distant d'un enfant mort au démarrage n'est pas rapatrié ; les bases des petits-enfants nés sur la cible ne sont pas retirées. |

@@ -6,7 +6,7 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value};
 
-use talixio_agent::config::{ensure_private, prepare_state_dir, Bootstrap, RootConfig};
+use talixio_agent::config::{ensure_private, prepare_state_dir, Bootstrap, Envelope, RootConfig};
 use talixio_agent::model::Providers;
 use talixio_agent::node::Node;
 use talixio_agent::protocol::{ActivityEvent, NodeInfo};
@@ -32,6 +32,9 @@ enum Command {
     Child {
         #[arg(long)]
         state_dir: PathBuf,
+        /// Son propre journal, s'il doit le tenir lui-même dans la limite fixée.
+        #[arg(long)]
+        log_file: Option<PathBuf>,
     },
     /// Affiche la grappe.
     Tree(Remote),
@@ -78,7 +81,7 @@ struct Remote {
 async fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Root { config } => run_root(&config).await,
-        Command::Child { state_dir } => run_child(state_dir).await,
+        Command::Child { state_dir, log_file } => run_child(state_dir, log_file).await,
         Command::Releases { last } => {
             use std::io::IsTerminal;
             let mut releases = talixio_agent::releases::all();
@@ -145,17 +148,34 @@ async fn run_root(config: &Path) -> Result<()> {
     eprintln!("[{}] jeton de l'API : {}", node.name, cfg.state_dir.join("api-token").display());
 
     tokio::spawn(link::run_child_monitor(node.clone()));
+    tokio::spawn(spawn::keep_logs_small(node.state_dir.join("logs"), node.log_max_bytes));
     tokio::spawn(print_activity(node.clone()));
     tokio::spawn(agent::run_agent(node.clone(), inbox));
     shutdown_signal().await;
     node.terminate("arrêt du maître", 0).await
 }
 
-async fn run_child(state_dir: PathBuf) -> Result<()> {
+async fn run_child(state_dir: PathBuf, log_file: Option<PathBuf>) -> Result<()> {
     let mut raw = String::new();
     std::io::stdin().read_to_string(&mut raw).context("lecture des consignes")?;
     spawn::harden_process();
-    let mut boot: Bootstrap = serde_json::from_str(&raw).context("consignes de démarrage invalides")?;
+    let envelope: Envelope = serde_json::from_str(&raw).context("consignes de démarrage invalides")?;
+    drop(raw);
+    // la configuration est scellée : seul le parent, une fois reconnu, en remet la clé
+    let mut key = None;
+    for _ in 0..40 {
+        key = link::fetch_key(&envelope.agent_id, &envelope.parent_addr, &envelope.parent_cert, &envelope.token).await;
+        if key.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    let key = key.context("le parent n'a pas remis la clé de la configuration")?;
+    let mut boot: Bootstrap = envelope.open(&key)?;
+    drop(key);
+    if let Some(path) = log_file {
+        tokio::spawn(spawn::keep_own_log_small(path, boot.log_max_bytes));
+    }
     boot.capabilities.canonicalize().map_err(anyhow::Error::msg)?;
     if let Some(ceiling) = &boot.ceiling {
         boot.capabilities.check_ceiling(ceiling).map_err(anyhow::Error::msg)?;
@@ -165,6 +185,7 @@ async fn run_child(state_dir: PathBuf) -> Result<()> {
     if node.caps.spawn.is_some() {
         api::start_listener(node.clone(), ([127, 0, 0, 1], 0).into(), None, tls::ephemeral()?).await?;
         tokio::spawn(link::run_child_monitor(node.clone()));
+        tokio::spawn(spawn::keep_logs_small(node.state_dir.join("logs"), node.log_max_bytes));
     }
     tokio::spawn(link::run_uplink(node.clone(), boot.parent_addr.clone(), boot.parent_cert.clone(), boot.token.clone()));
     tokio::spawn(link::run_tree_reporter(node.clone()));

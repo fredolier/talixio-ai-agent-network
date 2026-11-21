@@ -41,6 +41,7 @@ fn enroll(node: &Node, id: &str, name: &str, token: &str) {
             id: id.into(),
             name: name.into(),
             token: token.into(),
+            seal_key: None,
             caps: Capabilities::default(),
             subtree,
             conn: None,
@@ -131,6 +132,23 @@ async fn the_link_trusts_nothing_a_child_says() {
     assert!(connect(addr, &tls::ephemeral().unwrap().fingerprint, None).await.is_none());
     enroll(&node, "a-enfant", "honnête", "le-bon-secret");
     enroll(&node, "a-voisin", "voisin", "autre-secret");
+
+    // la clé d'une configuration scellée : jamais sans preuve, jamais celle d'un autre, et une seule fois
+    enroll(&node, "a-scelle", "scellé", "secret-du-scelle");
+    node.children.lock().unwrap().get_mut("a-scelle").unwrap().seal_key = Some("ab".repeat(32));
+    let ask = |id: &'static str, token: &'static str| async move {
+        let mut ws = connect(addr, cert, None).await.unwrap();
+        send(&mut ws, json!({ "type": "hello", "agent_id": id, "nonce": "alea-enfant" })).await;
+        let challenge = next(&mut ws).await?;
+        let theirs = challenge["nonce"].as_str()?.to_string();
+        send(&mut ws, json!({ "type": "unseal", "proof": proof(token, "unseal", ["alea-enfant", &theirs, id, cert]) })).await;
+        next(&mut ws).await
+    };
+    assert_eq!(ask("a-scelle", "mauvais-secret").await.unwrap()["type"], "rejected");
+    assert_eq!(ask("a-voisin", "autre-secret").await.unwrap()["type"], "rejected", "un agent sans clé en attente n'en obtient pas");
+    let given = ask("a-scelle", "secret-du-scelle").await.unwrap();
+    assert_eq!((given["type"].as_str(), given["key"].as_str()), (Some("key"), Some("ab".repeat(32).as_str())));
+    assert_eq!(ask("a-scelle", "secret-du-scelle").await.unwrap()["type"], "rejected", "la clé n'est remise qu'une fois");
 
     // une page web (en-tête Origin) n'atteint pas le lien
     assert!(connect(addr, cert, Some("http://evil.example")).await.is_none());

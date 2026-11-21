@@ -515,7 +515,11 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
         // les interdits ne valent que sur cette machine
         deny: if target.is_none() { node.deny.iter().filter(|p| **p != node.state_dir).cloned().collect() } else { Vec::new() },
         ceiling,
+        log_max_bytes: node.log_max_bytes,
     };
+    // sa configuration part scellée : il ne l'ouvrira qu'avec la clé que ce parent lui remettra
+    let seal_key = crate::config::Envelope::new_key().map_err(|e| e.to_string())?;
+    let envelope = crate::config::Envelope::seal(&boot, &seal_key).and_then(|e| Ok(serde_json::to_vec(&e)?)).map_err(|e| e.to_string())?;
     let placeholder = NodeInfo {
         id: boot.agent_id.clone(),
         name: name.clone(),
@@ -551,6 +555,7 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
                 id: boot.agent_id.clone(),
                 name: name.clone(),
                 token: boot.token.clone(),
+                seal_key: Some(seal_key.clone()),
                 caps,
                 subtree: placeholder,
                 conn: None,
@@ -568,7 +573,7 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
             },
         );
     }
-    match spawn::launch(node, &boot, target.as_ref()).await {
+    match spawn::launch(node, &boot, &envelope, target.as_ref()).await {
         Ok(mut process) => {
             let mut children = node.children.lock().unwrap();
             match children.get_mut(&boot.agent_id).filter(|child| !child.stopped) {

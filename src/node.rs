@@ -69,6 +69,8 @@ pub struct Node {
     pub listen: OnceLock<SocketAddr>,
     /// Empreinte du certificat TLS de cette écoute.
     pub cert: OnceLock<String>,
+    /// Taille maximale d'un journal d'agent, reçue du parent (du fichier de configuration chez le maître).
+    pub log_max_bytes: u64,
     /// Nom ou adresse annoncé aux enfants d'autres machines.
     pub advertise: Option<String>,
     /// Cibles de déploiement. Seul le maître en a : lui seul écoute hors de sa machine.
@@ -136,6 +138,8 @@ pub struct ChildRec {
     pub id: String,
     pub name: String,
     pub token: String,
+    /// Clé de sa configuration scellée. Remise une seule fois, puis oubliée.
+    pub seal_key: Option<String>,
     pub caps: Capabilities,
     /// Dernier état connu de l'enfant et de sa descendance.
     pub subtree: NodeInfo,
@@ -268,6 +272,7 @@ impl Node {
             store,
             listen: OnceLock::new(),
             cert: OnceLock::new(),
+            log_max_bytes: cfg.log_max_bytes,
             advertise: cfg.advertise.clone(),
             targets: cfg.targets.clone(),
             tree_dirty: Notify::new(),
@@ -310,6 +315,7 @@ impl Node {
             store,
             listen: OnceLock::new(),
             cert: OnceLock::new(),
+            log_max_bytes: boot.log_max_bytes,
             advertise: None,
             targets: BTreeMap::new(),
             tree_dirty: Notify::new(),

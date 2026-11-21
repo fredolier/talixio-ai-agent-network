@@ -25,6 +25,9 @@ pub enum Msg {
     Hello { agent_id: String, nonce: String },
     /// L'enfant prouve qui il est, puis décrit son état.
     Proof { proof: String, node: Box<NodeInfo> },
+    /// À la place de `Proof`, au tout premier démarrage : l'enfant prouve qui il est et demande
+    /// la clé de sa configuration scellée. Le parent répond `Key`, une seule fois, puis raccroche.
+    Unseal { proof: String },
     /// L'état de l'enfant et de toute sa descendance.
     Tree { node: Box<NodeInfo> },
     /// Ce que l'enfant dit à son parent : fin de mission, question, erreur.
@@ -38,6 +41,8 @@ pub enum Msg {
     /// Le parent prouve qui il est, et met l'enfant au défi avec son propre aléa.
     Challenge { nonce: String, proof: String },
     Welcome,
+    /// La clé de la configuration scellée de l'enfant.
+    Key { key: String },
     Rejected { reason: String },
     Instruction { text: String },
     ModelResponse {
