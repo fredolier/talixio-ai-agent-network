@@ -12,7 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { count, flat, plural } from '@/lib/format'
 import type { Cluster } from '@/lib/store'
 import type { Agent, CatalogModel, CatalogProvider, ModelsData } from '@/lib/types'
-import { cn } from '@/lib/utils'
+import { cn, pick } from '@/lib/utils'
 
 /** Le fournisseur demandé par la page Fournisseurs (`#modeles?f=mistral`). */
 const wantedProvider = () => new URLSearchParams(location.hash.split('?')[1] ?? '').get('f') ?? ''
@@ -151,7 +151,7 @@ function ModelRow({ model, provider, data, agents }: { model: CatalogModel; prov
             {model.aliases.map((alias) => <Activation key={alias} alias={alias} data={data} agents={agents} />)}
           </span>
         ) : !model.callable ? (
-          <span title="Le maître ne sait appeler que le texte et la vision pour un agent : le reste est listé pour comparer">Pas encore appelable</span>
+          <span title={model.soon ? 'Annoncé par le fournisseur, pas encore proposé' : "Le maître n'a pas de connecteur pour ce modèle chez ce fournisseur : il est listé pour comparer"}>Pas encore appelable</span>
         ) : provider.connected ? (
           <span>Disponible, non activé</span>
         ) : (
@@ -168,6 +168,11 @@ function Activation({ alias, data, agents }: { alias: string; data: ModelsData; 
   const running = agents.filter((a) => a.model === alias)
   const granted = agents.filter((a) => a.depth > 0 && a.capabilities.models?.includes(alias))
   const tokens = running.reduce((sum, a) => sum + (a.depth === 0 ? 0 : a.tokens_used), 0)
+  // un modèle de service ne fait tourner aucun agent : il se compte en appels, par nature
+  const service = info?.nature && info.nature !== 'llm' ? info.nature : null
+  const root = agents.find((a) => a.depth === 0)
+  const allowed = service ? pick(root?.capabilities.max_calls ?? {}, service) ?? 0 : 0
+  const used = service ? pick(root?.calls_used ?? {}, service) ?? 0 : 0
   return (
     <span className="text-[13px] text-foreground">
       <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -181,7 +186,8 @@ function Activation({ alias, data, agents }: { alias: string; data: ModelsData; 
         {[
           info?.effort && `effort ${info.effort}`,
           info?.max_tokens && `${count(info.max_tokens)} tokens par réponse`,
-          `${plural(running.length, 'agent')} en cours`,
+          info?.vision && 'lit les images',
+          service ? (allowed > 0 ? `${count(used)} / ${count(allowed)} appels « ${service} »` : `aucun appel « ${service} » accordé (max_calls)`) : `${plural(running.length, 'agent')} en cours`,
           tokens > 0 && `${count(tokens)} tokens chez les enfants`,
         ].filter(Boolean).join(' · ')}
       </span>

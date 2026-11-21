@@ -15,6 +15,8 @@ export interface Capabilities {
   spawn?: { max_children: number; max_depth: number; targets: string[] } | null
   models?: string[]
   max_tokens?: number | null
+  /** Appels permis aux modèles de service, par nature ; une nature absente : aucun. */
+  max_calls?: Record<string, number>
 }
 
 export interface Agent {
@@ -33,6 +35,8 @@ export interface Agent {
   started_at_ms: number
   last_seen_ms: number
   tokens_used: number
+  /** Appels aboutis aux modèles de service, par nature, descendance comprise. */
+  calls_used?: Record<string, number>
   capabilities: Capabilities
   /** Ce que l'agent déclare dépasse ce que son parent déclare pouvoir accorder. */
   unverified?: boolean
@@ -56,6 +60,9 @@ export interface ModelInfo {
   effort: string | null
   max_tokens: number | null
   has_key: boolean
+  /** `llm`, `transcription`, `speech`, `image`, `embedding`, `forecast` ou `decision`. */
+  nature?: string
+  vision?: boolean
 }
 
 export interface RoleEntry {
@@ -96,8 +103,8 @@ export interface CatalogProvider {
   trust: string
   kind: string
   billing: string
-  /** Comment le maître sait l'appeler ; vide : pas encore appelable. */
-  api: string
+  /** Les API que le maître sait parler chez lui ; vide : pas encore appelable. */
+  apis: string[]
   endpoint: string
   hosts: string[]
   /** Un de ses modèles est déclaré chez le maître, avec sa clé. */
@@ -124,8 +131,10 @@ export interface CatalogModel {
   soon: boolean
   /** Les alias sous lesquels le maître l'a activé. */
   aliases: string[]
-  /** Un agent peut l'appeler (texte et vision ; pas encore l'image ni la voix). */
+  /** Le maître a un connecteur pour lui : un agent peut l'appeler une fois le modèle activé. */
   callable: boolean
+  /** Comment le déclarer dans la configuration du maître. */
+  declare?: { provider: string; nature: string; vision: boolean }
   listed: boolean
 }
 

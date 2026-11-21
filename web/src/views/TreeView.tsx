@@ -168,6 +168,19 @@ function AgentDetail({ agent, cluster }: { agent: Agent; cluster: Cluster }) {
           <Field label="Lire" mono>{list(caps.fs_read)}</Field>
           <Field label="Écrire" mono>{list(caps.fs_write)}</Field>
           <Field label="Modèles" mono>{list(caps.models)}</Field>
+          <Field label="Appels de service">
+            {Object.keys(caps.max_calls ?? {}).length ? (
+              <ul className="flex flex-col gap-1">
+                {Object.entries(caps.max_calls ?? {}).map(([nature, max]) => (
+                  <li key={nature} className="num">
+                    {nature} : {count(pick(agent.calls_used ?? {}, nature) ?? 0)} / {count(max)}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <span className="text-muted-foreground">aucun</span>
+            )}
+          </Field>
           <Field label="Enfants">
             {caps.spawn
               ? `${caps.spawn.max_children} au plus, sur ${caps.spawn.max_depth} niveau${caps.spawn.max_depth > 1 ? 'x' : ''} (${caps.spawn.targets.map(targetLabel).join(', ')})`

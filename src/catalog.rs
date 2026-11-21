@@ -25,8 +25,9 @@ pub struct Provider {
     pub trust: String,
     pub kind: String,
     pub billing: String,
-    /// `anthropic`, `openai` (toute API compatible), ou vide : pas encore appelable.
-    pub api: String,
+    /// Les familles d'API par lesquelles le maître sait l'appeler : `anthropic`, `openai` (toute
+    /// API compatible), `elevenlabs`, `timesfm`, `systemone`. Vide : pas encore appelable.
+    pub apis: Vec<String>,
     /// Adresse publique à donner dans la configuration ; vide si elle dépend du compte.
     pub endpoint: String,
     pub hosts: Vec<String>,
@@ -57,6 +58,9 @@ pub struct Model {
     /// Annoncé, pas encore proposé par le fournisseur ou par la pile qui le sert.
     #[serde(default)]
     pub soon: bool,
+    /// `Voice` : le modèle parle (synthèse) au lieu d'écouter (transcription).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub speech: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,9 +75,37 @@ fn catalog() -> &'static Catalog {
     CATALOG.get_or_init(|| toml::from_str(SOURCE).expect("catalog.toml illisible (vérifié par un test)"))
 }
 
-/// Les natures que le maître sait appeler aujourd'hui pour un agent.
-fn callable(nature: &str) -> bool {
-    matches!(nature, "LLM" | "Vision")
+/// Comment déclarer ce modèle dans la configuration du maître : `(provider, nature)`, si le
+/// maître a un connecteur pour lui chez ce fournisseur. (La famille d'API est connue ; l'essai
+/// réel chez chaque fournisseur reste à faire.)
+fn declared(model: &Model, apis: &[String]) -> Option<(&'static str, &'static str)> {
+    let (nature, wanted): (&str, &[&'static str]) = match model.nature.as_str() {
+        "LLM" | "Vision" => ("llm", &["anthropic", "openai"]),
+        "Voice" if model.speech => ("speech", &["openai", "elevenlabs"]),
+        "Voice" => ("transcription", &["openai"]),
+        "Image" => ("image", &["openai"]),
+        "Embedding" => ("embedding", &["openai"]),
+        "Forecast" => ("forecast", &["timesfm"]),
+        "Decision" => ("decision", &["systemone"]),
+        _ => return None,
+    };
+    if model.soon {
+        return None;
+    }
+    wanted.iter().find(|api| apis.iter().any(|a| a == **api)).map(|api| (*api, nature))
+}
+
+/// La nature d'un modèle configuré, dans le vocabulaire du catalogue.
+fn listed_nature(model: &ModelInfo) -> &'static str {
+    match model.nature.as_str() {
+        "transcription" | "speech" => "Voice",
+        "image" => "Image",
+        "embedding" => "Embedding",
+        "forecast" => "Forecast",
+        "decision" => "Decision",
+        _ if model.vision => "Vision",
+        _ => "LLM",
+    }
 }
 
 impl Provider {
@@ -120,10 +152,15 @@ pub fn view(configured: &[ModelInfo]) -> Value {
                 .filter(|(c, o)| o.is_some_and(|o| o.id == m.provider) && c.model == m.id)
                 .map(|(c, _)| c.alias.as_str())
                 .collect();
-            let api = catalog.provider.iter().find(|p| p.id == m.provider).map(|p| p.api.as_str()).unwrap_or_default();
+            let apis = catalog.provider.iter().find(|p| p.id == m.provider).map(|p| p.apis.as_slice()).unwrap_or_default();
             let mut value = serde_json::to_value(m).unwrap_or_default();
             value["aliases"] = json!(aliases);
-            value["callable"] = json!(callable(&m.nature) && !api.is_empty());
+            let declared = declared(m, apis);
+            value["callable"] = json!(declared.is_some());
+            // les lignes à écrire dans la configuration du maître pour l'activer
+            if let Some((provider, nature)) = declared {
+                value["declare"] = json!({ "provider": provider, "nature": nature, "vision": m.nature == "Vision" });
+            }
             value["listed"] = json!(true);
             value
         })
@@ -141,7 +178,7 @@ pub fn view(configured: &[ModelInfo]) -> Value {
                     }
                     None => providers.push(json!({
                         "id": id, "name": model.host, "country": "", "europe": null, "trust": "", "kind": "Hors catalogue",
-                        "billing": "", "api": model.provider, "endpoint": "", "hosts": [model.host],
+                        "billing": "", "apis": [model.provider], "endpoint": "", "hosts": [model.host],
                         "connected": model.has_key, "configured": 1, "listed": false,
                     })),
                 }
@@ -157,7 +194,7 @@ pub fn view(configured: &[ModelInfo]) -> Value {
                     }
                 }
                 None => models.push(json!({
-                    "name": model.model, "id": model.model, "provider": provider, "nature": "LLM", "rank": null,
+                    "name": model.model, "id": model.model, "provider": provider, "nature": listed_nature(model), "rank": null,
                     "price_in": null, "price_out": null, "unit_price": null, "unit": null, "currency": null,
                     "estimated": false, "deprecated": false, "soon": false, "aliases": [model.alias], "callable": true, "listed": false,
                 })),
@@ -172,7 +209,7 @@ mod tests {
     use super::*;
 
     fn configured(alias: &str, model: &str, host: &str, has_key: bool) -> ModelInfo {
-        ModelInfo { alias: alias.into(), provider: "openai".into(), model: model.into(), host: host.into(), effort: None, max_tokens: None, has_key }
+        ModelInfo { alias: alias.into(), provider: "openai".into(), model: model.into(), host: host.into(), effort: None, max_tokens: None, has_key, nature: "llm".into(), vision: false }
     }
 
     #[test]
@@ -184,9 +221,9 @@ mod tests {
         }
         for p in &catalog.provider {
             assert!(matches!(p.trust.as_str(), "1" | "2" | "3" | "4" | "5" | "L"), "{}", p.id);
-            assert!(matches!(p.api.as_str(), "" | "anthropic" | "openai"), "{}", p.id);
+            assert!(p.apis.iter().all(|a| matches!(a.as_str(), "anthropic" | "openai" | "elevenlabs" | "timesfm" | "systemone")), "{}", p.id);
             // sans machine connue, rien ne peut s'y rattacher : permis seulement pour ce qu'on ne sait pas appeler
-            assert!(!p.hosts.is_empty() || p.api.is_empty(), "{}", p.id);
+            assert!(!p.hosts.is_empty() || p.apis.is_empty(), "{}", p.id);
             // « européen » veut dire souverain : jamais accordé à un niveau de confiance moindre
             assert_eq!(p.europe, p.trust == "5", "{}", p.id);
         }
@@ -220,8 +257,18 @@ mod tests {
         let large = models.iter().find(|m| m["id"] == "mistral-large-latest" && m["provider"] == "mistral").unwrap();
         assert_eq!(large["aliases"], json!(["grand"]));
         assert!(models.iter().any(|m| m["id"] == "qwen3:8b" && m["provider"] == "local" && m["listed"] == false));
-        let voice = models.iter().find(|m| m["nature"] == "Voice").unwrap();
-        assert_eq!(voice["callable"], false, "la voix n'est pas encore appelable par un agent");
+        let callable = |name: &str| models.iter().find(|m| m["name"] == name).unwrap()["callable"].clone();
+        assert_eq!(callable("Voxtral"), true, "transcription par l'API compatible OpenAI");
+        assert_eq!(callable("ElevenLabs v3"), true);
+        let declare = |name: &str| models.iter().find(|m| m["name"] == name).unwrap()["declare"].clone();
+        assert_eq!(declare("Voxtral"), json!({ "provider": "openai", "nature": "transcription", "vision": false }));
+        assert_eq!(declare("ElevenLabs v3"), json!({ "provider": "elevenlabs", "nature": "speech", "vision": false }));
+        assert_eq!(declare("Jev"), json!({ "provider": "systemone", "nature": "decision", "vision": false }));
+        assert_eq!(declare("TimeGPT"), Value::Null);
+        assert_eq!(callable("Jev"), true);
+        assert_eq!(callable("TimesFM 2.5 (local)"), true);
+        assert_eq!(callable("TimeGPT"), false, "annoncé, et aucun connecteur");
+        assert_eq!(callable("TimesFM (BigQuery AI.FORECAST)"), false);
         assert!(!view.to_string().contains("api_key"));
     }
 }

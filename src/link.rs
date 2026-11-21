@@ -15,7 +15,7 @@ use futures_util::{Sink, SinkExt, StreamExt};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_tungstenite::tungstenite::Message as TMessage;
 
-use crate::model::{ModelRequest, ModelResponse};
+use crate::model::{ModelRequest, ModelResponse, ServiceRequest, ServiceResponse};
 use crate::node::{Input, Node, MAX_REPORTS};
 use crate::protocol::{Frame, Msg, NodeInfo, Outbox, ReportKind, Status};
 use crate::{now_ms, random_hex, secret_eq};
@@ -54,12 +54,14 @@ fn plain(msg: Msg) -> Frame {
 // ---------------------------------------------------------------------------------------
 
 type ModelReply = Result<ModelResponse, String>;
+type ServiceReply = Result<ServiceResponse, String>;
 
 /// Le lien d'un enfant vers son parent.
 pub struct Uplink {
     out: Mutex<UpOut>,
     connected: watch::Sender<bool>,
     pending: Mutex<HashMap<String, oneshot::Sender<ModelReply>>>,
+    pending_services: Mutex<HashMap<String, oneshot::Sender<ServiceReply>>>,
     last_recv_seq: AtomicU64,
 }
 
@@ -77,6 +79,7 @@ impl Uplink {
             out: Mutex::new(UpOut::default()),
             connected: watch::channel(false).0,
             pending: Mutex::new(HashMap::new()),
+            pending_services: Mutex::new(HashMap::new()),
             last_recv_seq: AtomicU64::new(0),
         }
     }
@@ -127,7 +130,26 @@ impl Uplink {
         }
     }
 
+    /// Appel d'un modèle de service par le parent. Si le lien tombe, l'appel n'est pas
+    /// refait : il a peut-être abouti, et un appel compté ne se fait qu'une fois.
+    pub async fn service_request(&self, origin: &str, request: ServiceRequest) -> ServiceReply {
+        if !self.is_connected() {
+            return Err("parent injoignable : réessaie plus tard".into());
+        }
+        let request_id = random_hex(1);
+        let (tx, rx) = oneshot::channel();
+        self.pending_services.lock().unwrap().insert(request_id.clone(), tx);
+        self.send(Msg::ServiceRequest { request_id, origin: origin.to_string(), request: Box::new(request) });
+        match rx.await {
+            Ok(reply) => reply,
+            Err(_) => Err("le lien avec le parent a été coupé pendant l'appel".into()),
+        }
+    }
+
     fn fail_pending(&self) {
+        for (_, tx) in self.pending_services.lock().unwrap().drain() {
+            let _ = tx.send(Err("le lien avec le parent a été coupé pendant l'appel".into()));
+        }
         for (_, tx) in self.pending.lock().unwrap().drain() {
             let _ = tx.send(Err(LINK_LOST.to_string()));
         }
@@ -346,6 +368,15 @@ fn child_receive(node: &Arc<Node>, uplink: &Arc<Uplink>, frame: Frame, ended: &m
                 let _ = tx.send(reply);
             }
         }
+        Msg::ServiceResponse { request_id, response, error } => {
+            if let Some(tx) = uplink.pending_services.lock().unwrap().remove(&request_id) {
+                let reply = match (response, error) {
+                    (Some(response), _) => Ok(*response),
+                    (None, error) => Err(crate::clean(&error.unwrap_or_else(|| "réponse vide".into()), 500, false)),
+                };
+                let _ = tx.send(reply);
+            }
+        }
         Msg::StopDescendant { target } => {
             if let Err(e) = node.stop_descendant(&target) {
                 node.emit("error", format!("arrêt de {target} : {e}"));
@@ -475,8 +506,8 @@ pub async fn serve_child(node: Arc<Node>, socket: WebSocket, permit: tokio::sync
                 Some(Ok(WsMessage::Text(text))) => {
                     last_rx = Instant::now();
                     let Some(frame) = decode(text.as_str()) else { continue };
-                    // seul un appel de modèle (une conversation entière) peut être volumineux
-                    if text.len() > MAX_SMALL_FRAME && !matches!(frame.msg, Msg::ModelRequest { .. }) {
+                    // seuls un appel de modèle (une conversation entière) ou de service (un son) peuvent être volumineux
+                    if text.len() > MAX_SMALL_FRAME && !matches!(frame.msg, Msg::ModelRequest { .. } | Msg::ServiceRequest { .. }) {
                         continue;
                     }
                     for reply in parent_receive(&node, &agent_id, frame) {
@@ -684,6 +715,21 @@ fn parent_receive(node: &Arc<Node>, child_id: &str, frame: Frame) -> Vec<Frame> 
                 let msg = match node.complete_for_child(&child_id, &origin, *request).await {
                     Ok(response) => Msg::ModelResponse { request_id, response: Some(Box::new(response)), error: None },
                     Err(error) => Msg::ModelResponse { request_id, response: None, error: Some(error) },
+                };
+                let _ = node.send_child(&child_id, msg, false);
+            });
+        }
+        Msg::ServiceRequest { request_id, origin, request } => {
+            if request_id.len() > 64 {
+                return replies;
+            }
+            let origin = crate::clean(&origin, 64, false);
+            let node = node.clone();
+            let child_id = child_id.to_string();
+            tokio::spawn(async move {
+                let msg = match node.service_for_child(&child_id, &origin, *request).await {
+                    Ok(response) => Msg::ServiceResponse { request_id, response: Some(Box::new(response)), error: None },
+                    Err(error) => Msg::ServiceResponse { request_id, response: None, error: Some(error) },
                 };
                 let _ = node.send_child(&child_id, msg, false);
             });

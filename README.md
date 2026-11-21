@@ -65,6 +65,30 @@ qualité et leur prix indicatif, et dit lesquels sont activés chez le maître.
 
 ![Les fournisseurs](docs/images/interface-fournisseurs.png)
 
+### Voix, image, prévision, décision
+
+Un agent peut aussi transcrire un son, lire un texte à voix haute, créer ou décrire une image,
+chercher dans sa mémoire par le sens, prévoir la suite d'une série ou poser des questions fermées
+à un modèle de décision. Ces modèles se déclarent chez le maître avec leur `nature`, et se
+comptent en appels :
+
+```toml
+[models.oreille]
+provider = "openai"
+nature = "transcription"
+base_url = "https://api.mistral.ai/v1"
+model = "voxtral-mini-latest"
+api_key_file = "/etc/talixio/mistral.key"
+
+[capabilities.max_calls]
+transcription = 200
+```
+
+Comme pour le texte, la clé reste chez le maître et un enfant n'obtient un modèle de service et
+un nombre d'appels que si son parent les lui confie, dans la limite des siens. Sans ligne dans
+`max_calls`, aucun appel n'est permis. Toutes les natures et leurs fournisseurs :
+`talixio.example.toml`.
+
 L'interface (`web/`) est faite avec React et shadcn/ui. Son résultat construit, `web/dist/`, est
 au dépôt : `cargo build` suffit. Pour la modifier :
 
@@ -114,4 +138,6 @@ cargo test
 - Le cloisonnement est fait par le process lui-même, pas encore par le système d'exploitation :
   une commande autorisée s'exécute avec tous les droits du compte. N'autoriser que des commandes
   inoffensives, et lancer le maître sous un compte dédié sans privilèges (voir la spécification, §7).
+- Les modèles de service (voix, image, prévision, décision…) n'ont été essayés qu'avec de faux fournisseurs : le premier
+  essai chez un vrai fournisseur peut demander un ajustement.
 - Testé en intégration continue sous Linux, macOS et Windows ; pas encore essayé sur un poste Windows ou macOS réel, ni avec un vrai `ssh` ou un vrai Docker.

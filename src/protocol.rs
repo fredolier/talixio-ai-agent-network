@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{ModelRequest, ModelResponse};
+use crate::model::{ModelRequest, ModelResponse, ServiceRequest, ServiceResponse};
 use crate::policy::Capabilities;
 
 /// Une trame. `seq` est présent sur les messages qui ne doivent pas se perdre : le
@@ -36,6 +36,9 @@ pub enum Msg {
     Activity { event: ActivityEvent },
     /// Appel de modèle, relayé jusqu'au maître, seul à détenir les clés.
     ModelRequest { request_id: String, origin: String, request: Box<ModelRequest> },
+    /// Appel d'un modèle de service (transcription, voix, image, plongements, prévision,
+    /// décision), relayé de même. Chaque parent revérifie le droit, la taille et le quota.
+    ServiceRequest { request_id: String, origin: String, request: Box<ServiceRequest> },
 
     // --- parent → enfant
     /// Le parent prouve qui il est, et met l'enfant au défi avec son propre aléa.
@@ -49,6 +52,13 @@ pub enum Msg {
         request_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         response: Option<Box<ModelResponse>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    ServiceResponse {
+        request_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        response: Option<Box<ServiceResponse>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
@@ -106,6 +116,9 @@ pub struct NodeInfo {
     pub started_at_ms: u64,
     pub last_seen_ms: u64,
     pub tokens_used: u64,
+    /// Appels aux modèles de service, par nature, descendance comprise.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub calls_used: std::collections::BTreeMap<String, u64>,
     pub capabilities: Capabilities,
     /// Posé par celui qui reçoit l'arbre, jamais cru de celui qui l'envoie : ce que cet agent
     /// déclare (droits, modèle) dépasse ce que son parent déclare pouvoir accorder.
@@ -165,6 +178,7 @@ impl NodeInfo {
             child.parent_id = Some(self.id.clone());
             child.depth = self.depth.saturating_add(1);
             child.capabilities.tidy_declared();
+            child.calls_used.retain(|nature, _| crate::policy::counted_nature(nature));
             child.tidy();
         }
     }

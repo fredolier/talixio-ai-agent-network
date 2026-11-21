@@ -89,7 +89,21 @@ fn wire_messages(request: &ModelRequest) -> Vec<Value> {
             }
         }
         let text = message.text();
-        if !text.is_empty() {
+        let images: Vec<Value> = message
+            .content
+            .iter()
+            .filter_map(|block| match block {
+                Block::Image { media_type, data } => {
+                    Some(json!({ "type": "image_url", "image_url": { "url": format!("data:{media_type};base64,{data}") } }))
+                }
+                _ => None,
+            })
+            .collect();
+        if !images.is_empty() {
+            let mut parts = vec![json!({ "type": "text", "text": text })];
+            parts.extend(images);
+            out.push(json!({ "role": "user", "content": parts }));
+        } else if !text.is_empty() {
             out.push(json!({ "role": "user", "content": text }));
         }
     }

@@ -94,6 +94,9 @@ fn wire_message(message: &Message) -> Value {
         .iter()
         .map(|block| match block {
             Block::Text { text } => json!({ "type": "text", "text": text }),
+            Block::Image { media_type, data } => {
+                json!({ "type": "image", "source": { "type": "base64", "media_type": media_type, "data": data } })
+            }
             Block::ToolUse { id, name, input } => {
                 json!({ "type": "tool_use", "id": id, "name": name, "input": input })
             }

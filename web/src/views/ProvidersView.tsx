@@ -138,9 +138,9 @@ function ProviderDetail({ provider, data }: { provider: CatalogProvider; data: M
             </span>
           ))}
         </p>
-      ) : !provider.api ? (
+      ) : !provider.apis?.length || !example?.declare ? (
         <p className="mt-3 text-[13px] text-muted-foreground">
-          Le maître ne sait pas encore appeler les modèles de ce fournisseur (voix, prévision ou décision) pour un agent. Il est listé pour comparer.
+          Le maître n'a pas encore de connecteur pour les modèles de ce fournisseur. Il est listé pour comparer.
         </p>
       ) : (
         <div className="mt-3 flex flex-col gap-3 text-[13px]">
@@ -153,14 +153,19 @@ function ProviderDetail({ provider, data }: { provider: CatalogProvider; data: M
           <pre className={cn('num overflow-x-auto rounded-md border bg-background px-4 py-3 text-[12.5px] leading-relaxed')}>
             {[
               `[models.${provider.id}]`,
-              `provider = "${provider.api}"`,
+              `provider = "${example.declare.provider}"`,
+              ...(example.declare.nature !== 'llm' ? [`nature = "${example.declare.nature}"`] : []),
+              ...(example.declare.vision ? ['vision = true'] : []),
               `base_url = "${provider.endpoint || "l'adresse donnée par votre compte"}"`,
-              `model = "${example?.id ?? 'le nom exact du modèle chez ce fournisseur'}"`,
+              `model = "${example.id}"`,
               ...(local ? [] : [`api_key_file = "/chemin/vers/cle-${provider.id}"`]),
             ].join('\n')}
           </pre>
           <p className="text-muted-foreground">
             Ajoutez ensuite l'alias à <span className="num">models</span> dans <span className="num">[capabilities]</span>, puis redémarrez le maître. Un agent ne peut utiliser ce modèle que si son parent le lui accorde.
+            {example.declare.nature !== 'llm' && (
+              <> Un modèle de service se compte en appels : sans <span className="num">{example.declare.nature} = …</span> sous <span className="num">[capabilities.max_calls]</span>, aucun appel n'est permis.</>
+            )}
           </p>
         </div>
       )}

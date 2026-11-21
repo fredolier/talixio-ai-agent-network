@@ -2,10 +2,11 @@
 
 mod anthropic;
 mod openai;
+pub mod service;
 
 use std::collections::BTreeMap;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -13,6 +14,7 @@ use crate::config::ModelConfig;
 
 pub use anthropic::Anthropic;
 pub use openai::OpenAi;
+pub use service::{Nature, Service, ServiceError, ServiceRequest, ServiceResponse};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ModelRequest {
@@ -52,6 +54,8 @@ pub enum Block {
     Text { text: String },
     ToolUse { id: String, name: String, input: Value },
     ToolResult { tool_use_id: String, content: String, is_error: bool },
+    /// Une image jointe à une question (`data` : en base64).
+    Image { media_type: String, data: String },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -121,6 +125,8 @@ impl Provider {
 /// Les modèles du maître, par alias. C'est ici, et seulement ici, que vivent les clés.
 pub struct Providers {
     by_alias: BTreeMap<String, Provider>,
+    /// Les modèles qui ne tiennent pas une conversation.
+    services: BTreeMap<String, Service>,
     /// Ce qu'on peut montrer de chaque modèle : jamais la clé, ni où elle est rangée.
     catalog: Vec<ModelInfo>,
 }
@@ -137,6 +143,10 @@ pub struct ModelInfo {
     pub max_tokens: Option<u64>,
     /// Une clé est configurée (fichier ou variable d'environnement).
     pub has_key: bool,
+    /// `llm`, `transcription`, `speech`, `image`, `embedding`, `forecast` ou `decision`.
+    pub nature: String,
+    /// `llm` : le modèle sait lire une image.
+    pub vision: bool,
 }
 
 impl Providers {
@@ -146,10 +156,22 @@ impl Providers {
             .timeout(std::time::Duration::from_secs(600))
             .build()?;
         let mut by_alias = BTreeMap::new();
+        let mut services = BTreeMap::new();
         let mut catalog = Vec::new();
         for (alias, cfg) in models {
             let key = cfg.api_key()?;
-            let default_url = if cfg.provider == "anthropic" { "https://api.anthropic.com" } else { "https://api.openai.com" };
+            let nature = match cfg.nature.as_deref() {
+                None => Nature::Llm,
+                Some(name) => Nature::parse(name).ok_or_else(|| anyhow!("modèle « {alias} » : nature inconnue « {name} »"))?,
+            };
+            if cfg.vision && nature != Nature::Llm {
+                bail!("modèle « {alias} » : `vision` ne vaut que pour un modèle de nature llm");
+            }
+            let default_url = match cfg.provider.as_str() {
+                "anthropic" => "https://api.anthropic.com",
+                "elevenlabs" => "https://api.elevenlabs.io",
+                _ => "https://api.openai.com",
+            };
             let host = reqwest::Url::parse(cfg.base_url.as_deref().unwrap_or(default_url))
                 .ok()
                 .and_then(|u| u.host_str().map(|h| match u.port() { Some(p) => format!("{h}:{p}"), None => h.to_string() }))
@@ -162,7 +184,14 @@ impl Providers {
                 effort: cfg.effort.clone(),
                 max_tokens: cfg.max_tokens,
                 has_key: !key.is_empty(),
+                nature: nature.as_str().to_string(),
+                vision: cfg.vision,
             });
+            if nature != Nature::Llm {
+                let service = Service::new(http.clone(), cfg, key, nature).with_context(|| format!("modèle « {alias} »"))?;
+                services.insert(alias.clone(), service);
+                continue;
+            }
             let provider = match cfg.provider.as_str() {
                 "anthropic" => Provider::Anthropic(Anthropic::new(http.clone(), cfg, key)?),
                 // OpenAI, Gemini, Mistral, Ollama, vLLM, OpenRouter… : la même API, une autre adresse
@@ -171,7 +200,7 @@ impl Providers {
             };
             by_alias.insert(alias.clone(), provider);
         }
-        Ok(Self { by_alias, catalog })
+        Ok(Self { by_alias, services, catalog })
     }
 
     pub fn catalog(&self) -> &[ModelInfo] {
@@ -179,7 +208,23 @@ impl Providers {
     }
 
     pub fn aliases(&self) -> Vec<String> {
-        self.by_alias.keys().cloned().collect()
+        self.by_alias.keys().chain(self.services.keys()).cloned().collect()
+    }
+
+    /// La nature de chaque modèle, telle qu'on la dit aux agents (`vision` : un llm qui lit les images).
+    pub fn natures(&self) -> BTreeMap<String, String> {
+        self.catalog.iter().map(|m| (m.alias.clone(), if m.vision { "vision".to_string() } else { m.nature.clone() })).collect()
+    }
+
+    /// Appelle un modèle de service. La nature demandée doit être celle du modèle.
+    pub async fn service(&self, request: &ServiceRequest) -> Result<ServiceResponse, ServiceError> {
+        let service = self.services.get(&request.model).ok_or_else(|| {
+            ServiceError::Refused(match self.by_alias.contains_key(&request.model) {
+                true => "ce modèle tient une conversation : il ne rend pas ce service".to_string(),
+                false => "modèle inconnu".to_string(),
+            })
+        })?;
+        service.call(&request.input).await
     }
 
     pub async fn complete(&self, request: &ModelRequest) -> Result<ModelResponse> {

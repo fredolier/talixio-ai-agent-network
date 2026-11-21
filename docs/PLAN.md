@@ -43,14 +43,18 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 - [x] Notes de version : `releases.toml`, `talixio-agent releases`, `GET /api/releases` (P5)
 - [ ] Répertoire des rôles chez le maître, interrogeable par toute la grappe, avec le résultat des missions (R1–R3, Q11)
 - [ ] Couverture des tests : première mesure à 52 % des lignes (`cargo llvm-cov`), sous-estimée car les process maître et enfants lancés par les tests ne sont pas comptés ; à faire : les compter (arrêt propre, variable de profil transmise sous `cfg(coverage)`), puis couvrir `agent.rs`, `tools.rs`, `spawn.rs`, `main.rs`
-- [ ] Catalogue de fournisseurs, modèles par nature (texte, image, voix), effort et contexte par enfant (F1–F4, Q10)
+- [x] Catalogue de fournisseurs et de modèles, embarqué, visible dans l'interface (F1)
+- [x] Modèles de service appelables par les agents : transcription, voix, image, vision, plongements, prévision, décision ; quota en appels par nature ; outils ; tests avec faux fournisseurs (F2, F4, décision 25)
+- [ ] Revue de sécurité indépendante des modèles de service : lancée, rapport attendu ; constats à traiter et à inscrire en SPEC §7 (quatrième passe)
+- [ ] Modèles de service, suite : essai chez de vrais fournisseurs ; comptage en argent (B4) ; effort et contexte par enfant (F3) ; fournisseur déclaré une seule fois (`[providers.<nom>]`)
+- [ ] Se connecter à un fournisseur et activer un modèle depuis l'interface (Q10 : à trancher par l'utilisateur)
 - [x] Interface web embarquée : arbre en direct, détail et arrêt d'un agent, dialogue avec le maître, journal, nouveautés ; téléphone et manifeste d'application (P2, P4, décision 22) — essayée dans un navigateur, bureau et téléphone
 - [ ] Interface, suite : budgets, validations, réglages ; notifications ; hors ligne
 - [x] Passe de sécurité indépendante sur le déploiement et le TLS : 10 constats, 9 traités (SPEC §7, deuxième passe)
 - [x] Configuration scellée des enfants, clé remise une fois par le parent (décision 23) ; rotation des journaux (décision 24)
 - [x] Test du constat 1 de la deuxième passe : clés interdites aux enfants (`tests/security.rs`)
 - [ ] Suites de la deuxième passe : rapatrier le journal distant ; retirer les bases des petits-enfants
-- [ ] Passe de sécurité indépendante sur l'interface web
+- [x] Passe de sécurité indépendante sur l'interface web (SPEC §7, troisième passe)
 
 ## Étape 3 — durcir et durer
 
@@ -91,3 +95,4 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 | 2026-11-21 | v0.7.1 : revue de sécurité indépendante de l'interface et des deux routes rendue (SPEC §7, troisième passe) : un constat haut, trois moyens, cinq bas, tous traités et rejoués en test. Demandé ensuite : une table des fournisseurs (européen ou non, connecté ou non) et une page des modèles par fournisseur avec leurs qualités, à la manière de l'assistant. |
 | 2026-11-21 | v0.8.0 : catalogue des fournisseurs et des modèles repris de l'assistant, embarqué ; écrans « Fournisseurs » (table : pays, Europe, confiance, connecté) et « Modèles » (par fournisseur, qualité, prix, activé ou non). D116, D117 inscrites. À décider : se connecter et activer depuis la page (saisie de clé, droits du maître modifiés à chaud). |
 | 2026-11-21 | v0.8.1 : modèles de prévision et de décision ajoutés au catalogue (10 modèles ; fournisseurs TypeSafe AI et Nixtla), listés pour comparer. |
+| 2026-11-21 | v0.9.0 : les agents appellent les modèles de service (transcription, voix, image, vision, plongements, prévision, décision) par le maître, comptés en appels par nature (`max_calls`). Sept outils, un message du lien (`service_request`), quatre familles d'API. Tests : `tests/services.rs` (faux fournisseur), scénario de prévision par un vrai enfant dans `tests/e2e.rs`. Revue de sécurité indépendante lancée, rapport attendu. D119 inscrite. Pas d'essai réel, faute de clés. |

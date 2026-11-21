@@ -54,6 +54,38 @@ api_key_env = "ANTHROPIC_API_KEY"
 # base_url = "http://localhost:11434/v1"
 # model = "qwen3"
 
+# --- Modèles de service ---------------------------------------------------------------------
+# Un modèle qui ne tient pas une conversation dit sa nature. Les agents l'appellent par un outil,
+# toujours à travers le maître, et chaque appel est compté ([capabilities.max_calls] plus bas).
+#   nature          provider                 outil de l'agent
+#   transcription   openai                   transcribe_audio
+#   speech          openai, elevenlabs       speak_text
+#   image           openai                   generate_image
+#   embedding       openai                   memory_search (recherche par le sens dans sa mémoire)
+#   forecast        timesfm                  forecast   (base_url obligatoire)
+#   decision        systemone                decide     (base_url obligatoire)
+# Un modèle de texte qui lit les images : `vision = true` (outil describe_image, compté en tokens).
+#
+# [models.oreille]
+# provider = "openai"
+# nature = "transcription"
+# base_url = "https://api.mistral.ai/v1"
+# model = "voxtral-mini-latest"
+# api_key_file = "/etc/talixio/mistral.key"
+#
+# [models.voix]
+# provider = "elevenlabs"
+# nature = "speech"
+# model = "eleven_v3"
+# voice = "identifiant-de-la-voix"       # celle employée quand l'agent n'en demande pas
+# api_key_file = "/etc/talixio/elevenlabs.key"
+#
+# [models.oracle]
+# provider = "timesfm"
+# nature = "forecast"
+# base_url = "http://127.0.0.1:8100"
+# model = "timesfm"
+
 # --- Droits du maître ----------------------------------------------------------------------
 # Tout ce qui n'est pas listé est refusé. Un enfant ne reçoit jamais plus que son parent.
 # Les dossiers doivent exister ; ils sont figés sur leur chemin réel au démarrage.
@@ -64,6 +96,13 @@ fs_read = ["/srv/projet"]
 fs_write = ["/srv/projet/travail"]
 # models = ["main", "fast"]   # par défaut : tous les modèles définis ci-dessus
 # max_tokens = 5000000         # budget global ; absent : pas de plafond
+
+# Appels permis aux modèles de service, par nature, pour toute la grappe.
+# Une nature absente : aucun appel, même si le modèle est défini.
+# [capabilities.max_calls]
+# transcription = 200
+# speech = 50
+# forecast = 100
 
 # Commandes autorisées, sans shell. Le programme est un chemin absolu. Arguments, position par position :
 #   "texte"    cet argument exact

@@ -7,6 +7,36 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.9.0"
+date = "2026-11-21"
+title = "Voix, image, prévision, décision"
+summary = "Les agents appellent maintenant les modèles qui ne tiennent pas une conversation : transcription, synthèse vocale, image, lecture d'image, plongements, prévision et décision. Toujours à travers le maître, et comptés en appels."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Sept outils pour les agents : transcribe_audio, speak_text, generate_image, describe_image, memory_search (recherche par le sens dans la mémoire), forecast et decide. Un outil n'apparaît que si l'agent détient un modèle de cette nature et des appels."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Un modèle déclare sa nature dans la configuration du maître (nature, vision, voice). Quatre familles d'API : openai (transcription, voix, image, plongements), elevenlabs (voix), timesfm (prévision), systemone (décision)."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Quota en appels par nature (capabilities.max_calls), descendance comprise. Un parent confie à un enfant des modèles de service et un nombre d'appels, jamais plus que les siens. L'interface montre les appels utilisés et permis de chaque agent."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Tout est refusé par défaut : sans ligne dans max_calls, aucun appel. Chaque niveau revérifie l'alias, les bornes et le quota ; seul le maître appelle le fournisseur. Une image rendue par adresse n'est pas suivie, une réponse est lue sous une borne, rien du fournisseur n'atteint un agent. Revue de sécurité indépendante en cours : ses constats seront traités dans la version suivante."
+
+[[release.changes]]
+kind = "attention"
+text = "Pour s'en servir : déclarer le modèle avec sa nature, puis ajouter la nature à [capabilities.max_calls]. Exemples dans talixio.example.toml."
+
+[[release.changes]]
+kind = "attention"
+text = "Essayé avec de faux fournisseurs seulement : le premier essai chez un vrai fournisseur peut demander un ajustement. Ce qu'un agent envoie à un service (son, notes, état d'une décision) part chez ce fournisseur."
+
+[[release]]
 version = "0.8.1"
 date = "2026-11-21"
 title = "Prévision et décision au catalogue"

@@ -201,6 +201,16 @@ pub struct ModelConfig {
     pub max_tokens: Option<u64>,
     /// Anthropic : laisser un autre modèle répondre quand celui-ci décline (activé par défaut).
     pub refusal_fallback: Option<bool>,
+    /// Ce que le modèle sait faire : `llm` (par défaut : il tient une conversation),
+    /// `transcription`, `speech`, `image`, `embedding`, `forecast` ou `decision`.
+    /// `provider` dit alors par quelle API : `openai` (transcription, speech, image, embedding),
+    /// `elevenlabs` (speech), `timesfm` (forecast), `systemone` (decision).
+    pub nature: Option<String>,
+    /// `llm` : le modèle sait lire une image (outil `describe_image`).
+    #[serde(default)]
+    pub vision: bool,
+    /// `speech` : la voix employée quand l'agent n'en demande pas.
+    pub voice: Option<String>,
 }
 
 impl ModelConfig {
@@ -255,6 +265,9 @@ impl RootConfig {
             toml::from_str(&text).with_context(|| format!("{} n'est pas une configuration valide", path.display()))?;
         if !cfg.models.contains_key(&cfg.model) {
             bail!("le modèle « {} » n'est pas défini dans [models]", cfg.model);
+        }
+        if cfg.models[&cfg.model].nature.as_deref().is_some_and(|n| n != "llm") {
+            bail!("le modèle du maître, « {} », doit tenir une conversation (nature llm)", cfg.model);
         }
         if cfg.capabilities.models.is_empty() {
             cfg.capabilities.models = cfg.models.keys().cloned().collect();
@@ -359,6 +372,10 @@ pub struct Bootstrap {
     /// Taille maximale de son journal, fixée par le parent.
     #[serde(default = "default_log_max")]
     pub log_max_bytes: u64,
+    /// La nature de chaque modèle accordé (`llm`, `vision`, `transcription`…), pour que l'agent
+    /// sache lequel sert à quoi. Indicatif : le maître revérifie la nature à chaque appel.
+    #[serde(default)]
+    pub natures: BTreeMap<String, String>,
 }
 
 /// Ce que l'enfant reçoit au lancement : de quoi joindre son parent, et sa configuration

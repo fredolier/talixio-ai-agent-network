@@ -9,6 +9,13 @@ use serde_json::{json, Value};
 
 const TOKEN: &str = "jeton-de-test-0123456789";
 
+/// Le faux service de prévision : il prolonge la série.
+async fn fake_forecast(Json(body): Json<Value>) -> Json<Value> {
+    let last = body["series"].as_array().unwrap().last().unwrap().as_f64().unwrap();
+    let mean: Vec<f64> = (1..=body["horizon"].as_u64().unwrap()).map(|i| last + i as f64).collect();
+    Json(json!({ "mean": mean, "model": "timesfm-faux" }))
+}
+
 /// Le faux modèle : il décide d'après qui parle (maître ou enfant) et le dernier message reçu.
 async fn fake_model(State(file): State<Arc<String>>, Json(body): Json<Value>) -> Json<Value> {
     let messages = body["messages"].as_array().unwrap();
@@ -33,9 +40,20 @@ async fn fake_model(State(file): State<Arc<String>>, Json(body): Json<Value>) ->
     let message = match (is_root, last["role"].as_str().unwrap()) {
         (true, "user") if text.contains("source=\"enfant\"") && text.contains("SECRET-42") => say("Le lecteur dit : SECRET-42"),
         (true, "user") if text.contains("lance le test") => spawn("lecteur", &folder),
+        (true, "user") if text.contains("prévois") => call("spawn_agent", json!({
+            "name": "prévisionniste", "role": "prévision", "instructions": "Prévois ce qu'on te demande.",
+            "objective": "Prévois la suite de la série 1, 2, 3.", "success_criteria": "La prévision figure dans le compte rendu.",
+            "capabilities": { "models": ["oracle"], "max_calls": { "forecast": 1 } }
+        })),
         (true, "user") if text.contains("escalade") => spawn("pirate", if cfg!(windows) { "C:\\" } else { "/" }),
         (true, "tool") if text.contains("Erreur") => say("Création refusée."),
         (true, _) => say("C'est noté."),
+        (false, "user") if text.contains("Prévois la suite") => call("forecast", json!({ "series": [1, 2, 3], "horizon": 2 })),
+        // une prévision obtenue : l'enfant en redemande une, au-delà de son quota
+        (false, "tool") if text.contains("Prévision (") => call("forecast", json!({ "series": [1, 2, 3], "horizon": 2 })),
+        (false, "tool") if text.contains("quota") => call("finish_mission", json!({
+            "outcome": "achieved", "summary": "Prévision faite : 4 puis 5", "evidence": "tableau reçu"
+        })),
         (false, "user") if text.contains("Mission") => call("read_file", json!({ "path": file.as_str() })),
         (false, "tool") if text.contains("SECRET-42") => call("finish_mission", json!({
             "outcome": "achieved", "summary": "Contenu : SECRET-42", "evidence": "fichier lu"
@@ -98,6 +116,7 @@ async fn cluster_end_to_end() {
     let model_port = listener.local_addr().unwrap().port();
     let app = Router::new()
         .route("/v1/chat/completions", post(fake_model))
+        .route("/ts/forecast", post(fake_forecast))
         .with_state(Arc::new(file.to_str().unwrap().to_string()));
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
@@ -122,8 +141,17 @@ provider = "openai"
 base_url = "http://127.0.0.1:{model_port}/v1"
 model = "faux"
 
+[models.oracle]
+provider = "timesfm"
+nature = "forecast"
+base_url = "http://127.0.0.1:{model_port}/ts"
+model = "timesfm"
+
 [capabilities]
 fs_read = [{data:?}]
+
+[capabilities.max_calls]
+forecast = 2
 
 [capabilities.spawn]
 max_children = 2
@@ -263,6 +291,26 @@ max_depth = 1
         assert_eq!(refused.headers()["x-content-type-options"], "nosniff", "{path}");
     }
     assert_eq!(api.get("/api/tree").await["children"].as_array().unwrap().len(), 1);
+
+    // un modèle de service, appelé par un enfant à travers le lien : servi dans son quota, refusé au-delà
+    let listed = models["models"].as_array().unwrap().iter().find(|m| m["alias"] == "oracle").unwrap();
+    assert_eq!(listed["nature"], "forecast");
+    api.say("prévois").await;
+    api.wait_event("la prévision faite par l'enfant", |e| {
+        e["agent_name"] == "prévisionniste" && e["kind"] == "tool" && e["text"].as_str().unwrap().starts_with("forecast")
+    })
+    .await;
+    api.wait_event("le refus au-delà du quota", |e| {
+        e["agent_name"] == "prévisionniste" && e["kind"] == "tool_error" && e["text"].as_str().unwrap().contains("quota d'appels « forecast » épuisé (1)")
+    })
+    .await;
+    api.wait_event("le compte rendu de la prévision", |e| e["text"].as_str().is_some_and(|t| t.contains("Prévision faite : 4 puis 5"))).await;
+    let tree = api.get("/api/tree").await;
+    assert_eq!(tree["calls_used"]["forecast"], 1);
+    let forecaster = tree["children"].as_array().unwrap().iter().find(|c| c["name"] == "prévisionniste").unwrap();
+    assert_eq!(forecaster["capabilities"]["models"], json!(["main", "oracle"]));
+    assert_eq!(forecaster["capabilities"]["max_calls"], json!({ "forecast": 1 }));
+    assert_eq!(forecaster["calls_used"]["forecast"], 1);
 
     // le maître disparaît brutalement : l'enfant, sans parent, finit par s'éteindre
     root.kill().await.unwrap();

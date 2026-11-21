@@ -11,7 +11,7 @@ use tokio::sync::{broadcast, mpsc, Notify};
 
 use crate::config::{Bootstrap, RootConfig, Target, Timing};
 use crate::link::Uplink;
-use crate::model::{ModelRequest, ModelResponse, Providers};
+use crate::model::{ModelRequest, ModelResponse, Providers, ServiceError, ServiceRequest, ServiceResponse};
 use crate::policy::Capabilities;
 use crate::protocol::{ActivityEvent, Frame, Msg, NodeInfo, Outbox, ReportKind, Status};
 use crate::store::Store;
@@ -40,6 +40,9 @@ pub struct Node {
     pub instructions: String,
     pub model: String,
     pub caps: Capabilities,
+    /// La nature de chaque modèle accordé (`llm`, `vision`, `transcription`…). Indicatif
+    /// hors du maître, qui seul la connaît vraiment et la revérifie à chaque appel.
+    pub natures: BTreeMap<String, String>,
     pub timing: Timing,
     pub target: String,
     pub state_dir: PathBuf,
@@ -99,6 +102,10 @@ pub struct Meter {
     pub used: u64,
     reserved: u64,
     in_flight: u32,
+    /// Appels aboutis aux modèles de service, par nature.
+    pub calls: BTreeMap<String, u64>,
+    /// Appels de service en cours, par nature : ils comptent déjà dans le quota.
+    calls_in_flight: BTreeMap<String, u64>,
 }
 
 impl Meter {
@@ -116,6 +123,34 @@ impl Meter {
         Ok(())
     }
 
+    /// Réserve un appel de service. Une nature absente des droits : aucun appel.
+    fn reserve_call(&mut self, limits: &BTreeMap<String, u64>, nature: &str, max_parallel: u64) -> Result<(), String> {
+        let limit = limits.get(nature).copied().unwrap_or(0);
+        let used = self.calls.get(nature).copied().unwrap_or(0);
+        let flying = self.calls_in_flight.get(nature).copied().unwrap_or(0);
+        if used.saturating_add(flying) >= limit {
+            return Err(match limit {
+                0 => format!("aucun appel de nature « {nature} » n'est accordé à cet agent (max_calls)"),
+                _ => format!("quota d'appels « {nature} » épuisé ({limit})"),
+            });
+        }
+        if self.calls_in_flight.values().sum::<u64>() >= max_parallel {
+            return Err("trop d'appels de service simultanés pour cet agent".into());
+        }
+        *self.calls_in_flight.entry(nature.to_string()).or_default() += 1;
+        Ok(())
+    }
+
+    /// Un appel compté est un appel abouti.
+    fn settle_call(&mut self, nature: &str, done: bool) {
+        if let Some(flying) = self.calls_in_flight.get_mut(nature) {
+            *flying = flying.saturating_sub(1);
+        }
+        if done {
+            *self.calls.entry(nature.to_string()).or_default() += 1;
+        }
+    }
+
     fn settle(&mut self, estimate: u64, actual: Option<u64>) {
         self.reserved = self.reserved.saturating_sub(estimate);
         self.in_flight = self.in_flight.saturating_sub(1);
@@ -128,9 +163,22 @@ const MAX_PARALLEL_CALLS: u32 = 16;
 /// Comptes rendus au plus entre deux consignes du parent.
 pub const MAX_REPORTS: u32 = 20;
 
+/// Appels de service simultanés au plus pour un enfant et sa descendance.
+const MAX_PARALLEL_SERVICES: u64 = 4;
+
 /// Coût probable d'un appel, avant de le lancer : la taille de la demande, plus une réponse.
+/// Une image jointe ne coûte pas sa taille en octets : un forfait.
 fn estimate(request: &ModelRequest) -> u64 {
-    serde_json::to_vec(request).map(|bytes| bytes.len() as u64 / 4).unwrap_or(0) + 4096
+    let mut images = 0u64;
+    let mut image_bytes = 0u64;
+    for block in request.messages.iter().flat_map(|m| &m.content) {
+        if let crate::model::Block::Image { data, .. } = block {
+            images += 1;
+            image_bytes += data.len() as u64;
+        }
+    }
+    let bytes = serde_json::to_vec(request).map(|bytes| bytes.len() as u64).unwrap_or(0);
+    bytes.saturating_sub(image_bytes) / 4 + images * 3000 + 4096
 }
 
 /// Ce qu'un parent sait d'un enfant.
@@ -171,6 +219,7 @@ impl ChildRec {
         node.last_seen_ms = self.last_seen_ms;
         // le compte du parent fait foi, pas celui que l'enfant déclare
         node.tokens_used = self.meter.used;
+        node.calls_used = self.meter.calls.clone();
         if self.stopped {
             node.set_status_deep(Status::Stopped);
         } else if self.conn.is_none() && self.ever_connected {
@@ -255,6 +304,7 @@ impl Node {
             parent_name: None,
             instructions: cfg.instructions.clone(),
             model: cfg.model.clone(),
+            natures: providers.natures().into_iter().filter(|(alias, _)| cfg.capabilities.models.contains(alias)).collect(),
             caps: cfg.capabilities.clone(),
             timing: cfg.timing,
             target: "root".into(),
@@ -298,6 +348,7 @@ impl Node {
             parent_name: Some(boot.parent_name.clone()),
             instructions: boot.instructions.clone(),
             model: boot.model.clone(),
+            natures: boot.natures.iter().filter(|(alias, _)| boot.capabilities.models.contains(alias)).map(|(a, n)| (crate::clean(a, 80, false), crate::clean(n, 20, false))).collect(),
             caps: boot.capabilities.clone(),
             timing: boot.timing,
             target: boot.target.clone(),
@@ -346,6 +397,7 @@ impl Node {
             started_at_ms: self.started_at_ms,
             last_seen_ms: now_ms(),
             tokens_used: self.tokens_used.load(Ordering::Relaxed),
+            calls_used: self.meter.lock().unwrap().calls.clone(),
             capabilities: self.caps.clone(),
             unverified: false,
             children,
@@ -427,6 +479,56 @@ impl Node {
             (None, Some(uplink)) => uplink.model_request(origin, request).await,
             (None, None) => Err("aucun accès aux modèles".into()),
         }
+    }
+
+    /// Appelle un modèle de service : directement chez le maître, en remontant par le parent
+    /// sinon. Le droit, la taille et le quota de cet agent (descendance comprise) sont vérifiés
+    /// ici, à chaque niveau.
+    pub async fn service(&self, origin: &str, request: ServiceRequest) -> Result<ServiceResponse, String> {
+        if !self.caps.models.contains(&request.model) {
+            return Err("modèle non autorisé pour cet agent".into());
+        }
+        request.input.validate()?;
+        let nature = request.input.nature().as_str();
+        self.meter.lock().unwrap().reserve_call(&self.caps.max_calls, nature, u64::MAX)?;
+        let result = match (&self.providers, &self.uplink) {
+            (Some(providers), _) => providers.service(&request).await.map_err(|e| match e {
+                ServiceError::Refused(reason) => reason,
+                // le détail d'une erreur de fournisseur reste chez le maître
+                ServiceError::Provider(e) => {
+                    self.emit("error", format!("appel du modèle « {} » pour {} : {e:#}", crate::clean(&request.model, 80, false), crate::clean(origin, 64, false)));
+                    "le modèle n'a pas pu répondre (détail dans le journal du maître)".to_string()
+                }
+            }),
+            (None, Some(uplink)) => uplink.service_request(origin, request).await,
+            (None, None) => Err("aucun accès aux modèles".into()),
+        };
+        self.meter.lock().unwrap().settle_call(nature, result.is_ok());
+        self.tree_dirty.notify_one();
+        result
+    }
+
+    /// Traite l'appel de service d'un enfant, après avoir vérifié qu'il y a droit.
+    pub async fn service_for_child(&self, child_id: &str, origin: &str, request: ServiceRequest) -> Result<ServiceResponse, String> {
+        let nature = request.input.nature().as_str();
+        {
+            let mut children = self.children.lock().unwrap();
+            let child = children.get_mut(child_id).ok_or("enfant inconnu")?;
+            if child.stopped {
+                return Err("agent arrêté".into());
+            }
+            if !child.caps.models.contains(&request.model) {
+                return Err("modèle non autorisé pour cet agent".into());
+            }
+            request.input.validate()?;
+            child.meter.reserve_call(&child.caps.max_calls, nature, MAX_PARALLEL_SERVICES)?;
+        }
+        let result = self.service(origin, request).await;
+        if let Some(child) = self.children.lock().unwrap().get_mut(child_id) {
+            child.meter.settle_call(nature, result.is_ok());
+        }
+        self.tree_dirty.notify_one();
+        result
     }
 
     /// Traite l'appel de modèle d'un enfant, après avoir vérifié qu'il y a droit.

@@ -105,7 +105,7 @@ Exemples visés :
 | B3 | Arrivé à un seuil de son budget, l'agent prévient son parent ; budget épuisé, il s'arrête et attend. L'alerte remonte de parent en parent. | 🟡 budget épuisé : l'agent rend compte à son parent et se met en pause. Manque : l'alerte avant la fin, et sa remontée |
 | B4 | Budget en argent, pas seulement en tokens : une clé d'API prépayée a un solde. | ⬜ il faut le prix de chaque modèle dans la configuration |
 | B5 | Quotas d'un abonnement (fenêtres d'usage) : les voir, et les répartir comme un budget. | ❓ voir Q8 |
-| B6 | Budgets et consommation visibles dans l'interface, agent par agent. | 🟡 consommation dans `/api/tree` ; budget restant à ajouter |
+| B6 | Budgets et consommation visibles dans l'interface, agent par agent. | 🟡 tokens et appels de service (utilisés / permis, par nature) dans `/api/tree` et la fiche de chaque agent ; reste : l'alerte et le reste en argent |
 
 ### Fournisseurs, modèles et capacités
 
@@ -113,10 +113,10 @@ Demandé le 2026-11-20, sur le modèle de Talixio AI Assistant. Rien n'est codé
 
 | N° | Exigence | État |
 |---|---|---|
-| F1 | Le maître tient un catalogue de fournisseurs ; chaque fournisseur offre des modèles de plusieurs natures : texte (LLM), image, voix, et d'autres. | 🟡 Catalogue embarqué (`catalog.toml`, repris de l'assistant : 13 fournisseurs, 61 modèles, prévision et décision comprises, avec pays, Europe ou non, niveau de confiance, nature, qualité de 1 à 10, prix indicatifs), servi par `GET /api/models`. Écran « Fournisseurs » : une table, connecté ou non. Écran « Modèles » : par fournisseur, activé (alias du maître, qui l'utilise, à qui il est accordé) ou non. Un modèle configuré est rattaché à son fournisseur par la machine qui le sert ; jamais la clé. Reste : se connecter et activer depuis la page (aujourd'hui dans la configuration, voir Q10), appeler l'image, la voix, la prévision et la décision (F4 ; listés pour comparer), mise à jour du catalogue depuis les fournisseurs. |
-| F2 | Un agent reçoit le droit d'utiliser tel modèle de tel fournisseur, nature par nature. Ses enfants n'en reçoivent jamais plus. | 🟡 fait pour les modèles de texte (`capabilities.models`) |
-| F3 | À la création d'un enfant, le parent choisit son modèle, son niveau d'effort, la taille de son contexte, ses instructions, et ses capacités (texte, image, voix), en plus de ses droits sur les dossiers et les commandes. | 🟡 modèle, instructions et droits ; l'effort et le contexte sont fixés par l'alias, pas par enfant |
-| F4 | Les appels d'image et de voix passent par le maître, comme ceux de texte : les clés ne descendent jamais, et chaque appel est compté dans le budget. | ⬜ voir Q10 |
+| F1 | Le maître tient un catalogue de fournisseurs ; chaque fournisseur offre des modèles de plusieurs natures : texte (LLM), image, voix, et d'autres. | 🟡 Catalogue embarqué (`catalog.toml`, repris de l'assistant : 13 fournisseurs, 61 modèles, prévision et décision comprises, avec pays, Europe ou non, niveau de confiance, nature, qualité de 1 à 10, prix indicatifs), servi par `GET /api/models`. Écran « Fournisseurs » : une table, connecté ou non. Écran « Modèles » : par fournisseur, activé (alias du maître, qui l'utilise, à qui il est accordé) ou non. Un modèle configuré est rattaché à son fournisseur par la machine qui le sert ; jamais la clé. Chaque modèle du catalogue dit s'il est appelable (le maître a un connecteur pour sa nature chez ce fournisseur) et comment le déclarer (`provider`, `nature`). Reste : se connecter et activer depuis la page (aujourd'hui dans la configuration, voir Q10), mise à jour du catalogue depuis les fournisseurs. |
+| F2 | Un agent reçoit le droit d'utiliser tel modèle de tel fournisseur, nature par nature. Ses enfants n'en reçoivent jamais plus. | ✅ `capabilities.models` (les alias, toutes natures) et `capabilities.max_calls` (nombre d'appels par nature de service : une nature absente vaut zéro). Un enfant reçoit son modèle de conversation, plus les seuls modèles de service que son parent lui confie nommément, et jamais plus d'appels que lui (tests). |
+| F3 | À la création d'un enfant, le parent choisit son modèle, son niveau d'effort, la taille de son contexte, ses instructions, et ses capacités (texte, image, voix), en plus de ses droits sur les dossiers et les commandes. | 🟡 modèle, instructions, droits, et capacités de service (`models`, `max_calls` dans `spawn_agent`) ; l'effort et le contexte sont fixés par l'alias, pas par enfant |
+| F4 | Les appels d'image et de voix passent par le maître, comme ceux de texte : les clés ne descendent jamais, et chaque appel est compté dans le budget. | 🟡 Fait pour sept natures : transcription, synthèse vocale, image, plongements (recherche par le sens dans la mémoire), prévision, décision, et lecture d'image par un modèle de texte (`vision`). Les appels remontent par le lien jusqu'au maître (décision 25), comptés en appels par nature à chaque niveau. Testé avec de faux fournisseurs, de bout en bout par un vrai enfant ; **aucun essai encore chez un vrai fournisseur** (pas de clé dans l'environnement de développement). Reste : compter en argent (B4), une image rendue par adresse (refusée aujourd'hui), le son en flux. |
 
 ### Répertoire des rôles et apprentissage
 
@@ -248,6 +248,37 @@ Demandé le 2026-11-20. Rien n'est codé.
     configuration scellée. Le parent fait tourner les journaux de ses enfants locaux et de ses
     conteneurs ; un agent déployé par SSH fait tourner le sien. Le journal SQLite du maître
     garde ses 200 000 derniers événements.
+25. **Les modèles de service passent par le maître, comptés en appels.** Un modèle a une nature :
+    `llm` (défaut ; `vision = true` s'il lit les images), `transcription`, `speech`, `image`,
+    `embedding`, `forecast`, `decision`. Le maître parle quatre familles d'API : `openai`
+    (transcription, voix, image, plongements, chez tout serveur compatible), `elevenlabs` (voix),
+    `timesfm` (prévision : `POST /forecast`), `systemone` (décision : `POST /v1/systemone`).
+    Un agent demande un service à son parent (`service_request`) ; chaque niveau revérifie
+    l'alias, les bornes de la demande et le quota, et seul le maître appelle le fournisseur.
+    - **Le quota se compte en appels, par nature** (`capabilities.max_calls`), descendance
+      comprise. Une nature absente : aucun appel, même si le modèle est accordé. On avait d'abord
+      pensé compter des minutes et des images : la durée d'un son ne se mesure pas de façon sûre
+      avant l'appel, alors que chaque appel est borné en taille. Un appel compté est un appel
+      abouti ; un appel de service n'est jamais retenté (ni par le maître, ni après une coupure
+      du lien : il a peut-être abouti).
+    - **Bornes** : son ou image de 8 Mio au plus ; image à lire de 4 Mio ; texte à dire ou à
+      dessiner de 4 000 caractères ; 64 textes de 8 000 caractères par appel de plongements,
+      vecteurs de 4 096 dimensions au plus ; série de 3 à 5 000 valeurs, horizon de 256 pas ;
+      état de 60 000 caractères et 20 questions pour une décision ; quatre appels de service
+      simultanés par enfant.
+    - **Rien ne sort de l'adresse configurée.** Voix, langue, taille et nom de fichier sont
+      réduits à des mots simples avant de former une adresse ou un formulaire. Une image que le
+      fournisseur rend par adresse n'est pas suivie. La réponse est lue sous une borne, et
+      vérifiée : une image doit en être une (PNG, JPEG, WebP), une décision ne garde que les
+      questions posées, les options proposées et des nombres bornés.
+    - **Ce que rend un service est une donnée** : texte transcrit nettoyé, et dit comme tel à
+      l'agent. Le détail d'une panne de fournisseur reste au journal du maître.
+    - **Les fichiers passent par les droits de l'agent** : le son ou l'image à lire dans ses
+      dossiers lisibles, le son ou l'image produits dans ses dossiers inscriptibles, vérifiés
+      avant de dépenser un appel.
+    - **Recherche par le sens** (`memory_search`) : les notes de l'agent partent chez le
+      fournisseur de plongements. Les vecteurs sont gardés dans sa base (table `vectors`) : seules
+      les notes nouvelles ou modifiées, et la question, coûtent un appel.
 20. **Les notes de version ont une source unique**, `releases.toml`, embarquée dans l'exécutable.
     Chaque version y ajoute une entrée ; un test refuse une version sans note.
 
@@ -278,8 +309,8 @@ Trames JSON `{ "seq": n?, "msg": { "type": … } }` sur WebSocket chiffré (TLS 
 
 | Sens | Messages |
 |---|---|
-| Enfant → parent | `hello` (identité, aléa), `proof` (preuve, état), `tree` (état de sa branche), `report` (fin de mission, question, erreur), `activity` (journal), `model_request` |
-| Parent → enfant | `challenge` (aléa, preuve), `welcome` / `rejected`, `instruction`, `model_response`, `stop_descendant`, `shutdown` |
+| Enfant → parent | `hello` (identité, aléa), `proof` (preuve, état), `tree` (état de sa branche), `report` (fin de mission, question, erreur), `activity` (journal), `model_request`, `service_request` (appel d'un modèle de service) |
+| Parent → enfant | `challenge` (aléa, preuve), `welcome` / `rejected`, `instruction`, `model_response`, `service_response`, `stop_descendant`, `shutdown` |
 | Les deux | `ping` / `pong`, `ack` |
 
 Les messages portant un `seq` sont acquittés et renvoyés après une reconnexion ; le destinataire
@@ -288,7 +319,7 @@ Les messages portant un `seq` sont acquittés et renvoyés après une reconnexio
 Présentation : `hello` → `challenge` → `proof` → `welcome`, en 10 s au plus. La preuve de chacun
 est `HMAC-SHA256(secret, rôle ‖ aléa de l'enfant ‖ aléa du parent ‖ identifiant ‖ empreinte du certificat du parent)`. Huit
 présentations simultanées au plus ; une requête portant un en-tête `Origin` (un navigateur) est
-refusée. Trames : 16 Mio au plus pour un appel de modèle, 1 Mio pour le reste. Un compte rendu
+refusée. Trames : 16 Mio au plus pour un appel de modèle ou de service, 1 Mio pour le reste. Un compte rendu
 n'est accepté que d'un enfant en mission, 20 au plus entre deux consignes, 20 000 caractères au plus.
 
 ### Outils d'un agent
@@ -301,6 +332,11 @@ n'est accepté que d'un enfant en mission, 20 au plus entre deux consignes, 20 0
 | `spawn_agent`, `send_to_agent`, `stop_agent`, `list_agents` | droit de créer des enfants |
 | `ask_parent`, `finish_mission` | l'agent a un parent |
 | `memory_write`, `memory_read` | toujours |
+| `memory_search` | un modèle `embedding` et des appels accordés |
+| `transcribe_audio` | un dossier lisible, un modèle `transcription` et des appels accordés |
+| `describe_image` | un dossier lisible et un modèle de texte qui lit les images (`vision`) ; compté en tokens |
+| `generate_image`, `speak_text` | un dossier inscriptible, un modèle `image` ou `speech` et des appels accordés |
+| `forecast`, `decide` | un modèle `forecast` ou `decision` et des appels accordés |
 
 ### API JSON du maître
 
@@ -311,13 +347,13 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 |---|---|---|
 | GET | `/`, `/app.js`, `/app.css`, `/sans.woff2`, `/mono.woff2`, `/icon.svg`, `/manifest.webmanifest` | L'interface web (sans jeton). |
 | GET | `/api/health` | Vie du maître (sans jeton). |
-| GET | `/api/tree` | La grappe : chaque agent avec nom, rôle, état, machine, OS, IP, droits, tokens, enfants. |
+| GET | `/api/tree` | La grappe : chaque agent avec nom, rôle, état, machine, OS, IP, droits, tokens, appels de service (`calls_used`), enfants. |
 | GET | `/api/activity?after=N&limit=M` | Le journal après l'événement N. |
 | GET | `/api/events?after=N` | Le journal en continu (Server-Sent Events). |
 | POST | `/api/messages` `{ "text": … }` | Un message au maître. |
 | POST | `/api/agents/{id}/stop` | Arrête un agent et sa descendance. |
 | GET | `/api/releases` | La version qui tourne et les notes de version. |
-| GET | `/api/models` | Les modèles du maître (`models`, `default`) et le catalogue : fournisseurs connus, connectés ou non (`providers`), modèles, activés ou non (`catalog`). Jamais de clé. |
+| GET | `/api/models` | Les modèles du maître avec leur nature (`models`, `default`) et le catalogue : fournisseurs connus, connectés ou non (`providers`), modèles, activés ou non (`catalog`). Jamais de clé. |
 | GET | `/api/roles` | Le répertoire des rôles (500 fiches au plus). |
 
 ## 6. Questions ouvertes
@@ -333,7 +369,7 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 | Q7 | Stockage et mémoire des agents (S1–S3) : dossier, SQLite, ou les deux ? | Tranché pour la mémoire et le journal : SQLite embarqué, pour tous les agents (décision 14). Reste à faire : un dossier de travail par agent, ajouté d'office à ses droits (S1) ; l'arbre et les conversations sur disque (S3) ; effacement de la base d'un enfant à sa désinstallation ; mémoire partagée entre agents, si un usage le demande. |
 | Q8 | Abonnement Claude Max au lieu d'une clé d'API (B5). | À vérifier avant tout : qu'un abonnement Max puisse servir à des agents tiers n'est pas acquis, ni techniquement ni dans les conditions d'Anthropic. La voie sûre est la clé d'API avec un solde. Si c'est permis : lire les limites renvoyées par le fournisseur à chaque réponse, et les traiter comme un budget qui se recharge. |
 | Q9 | Android (P4) : piloter depuis le téléphone, ou y faire tourner un agent ? | Piloter : l'interface web, installable comme application (PWA), suffit ; elle demande HTTPS et un maître joignable depuis le téléphone, donc l'étape 2. Agent sur le téléphone : Rust se compile pour Android, mais le système arrête les process d'arrière-plan et enferme chaque application ; à n'étudier que si un usage le demande. |
-| Q10 | Catalogue de fournisseurs et capacités image et voix (F1–F4). | Format de l'assistant relu (`src/ModelCatalog.php`, `Sovereign.php`, `Routing.php`, `Pricing.php`) : une table de fournisseurs (identifiant, nom, pays, niveau de confiance, adresse, mode de facturation) et une table de modèles (identifiant exact de l'API, fournisseur, nature `LLM`, `Vision`, `Voice`, `Image`, `Embedding`, prix par million de tokens ou par unité : minute, image). Usages liés à un modèle : `fast`, `standard`, `deep`, `voice`, `vision`, `embedding` ; effort et tokens de réflexion portés par le palier. À reprendre ici : `[providers.<nom>]` (adresse, type d'API, fichier de clé) et des modèles par nature, avec prix ; droits de la forme `fournisseur/modèle`. À savoir : l'assistant ne tient ni taille de contexte ni effort par modèle, ne compte que les tokens (minutes et images sont affichées, pas comptées), et n'appelle aucune API d'image ni de synthèse vocale : seules la transcription (`POST /audio/transcriptions`) et les embeddings existent. Image et synthèse sont donc à écrire, pas à reprendre. Côté maître, du code par nature : nouveaux messages du lien, tailles bornées autrement (un son ou une image pèse lourd), comptage en argent (B4), nouveaux outils chez l'agent. Nouvelle surface : revue de sécurité avant de coder. |
+| Q10 | Catalogue de fournisseurs et capacités image et voix (F1–F4). | Fait pour l'essentiel (décision 25, v0.9.0). Reste ouvert : se connecter à un fournisseur et activer un modèle depuis la page (saisie d'une clé dans le navigateur, droits du maître changés à chaud : à trancher) ; `[providers.<nom>]` pour ne déclarer l'adresse et la clé qu'une fois ; comptage en argent (B4). Notes de l'étude : Format de l'assistant relu (`src/ModelCatalog.php`, `Sovereign.php`, `Routing.php`, `Pricing.php`) : une table de fournisseurs (identifiant, nom, pays, niveau de confiance, adresse, mode de facturation) et une table de modèles (identifiant exact de l'API, fournisseur, nature `LLM`, `Vision`, `Voice`, `Image`, `Embedding`, prix par million de tokens ou par unité : minute, image). Usages liés à un modèle : `fast`, `standard`, `deep`, `voice`, `vision`, `embedding` ; effort et tokens de réflexion portés par le palier. À reprendre ici : `[providers.<nom>]` (adresse, type d'API, fichier de clé) et des modèles par nature, avec prix ; droits de la forme `fournisseur/modèle`. À savoir : l'assistant ne tient ni taille de contexte ni effort par modèle, ne compte que les tokens (minutes et images sont affichées, pas comptées), et n'appelle aucune API d'image ni de synthèse vocale : seules la transcription (`POST /audio/transcriptions`) et les embeddings existent. Image et synthèse sont donc à écrire, pas à reprendre. Côté maître, du code par nature : nouveaux messages du lien, tailles bornées autrement (un son ou une image pèse lourd), comptage en argent (B4), nouveaux outils chez l'agent. Nouvelle surface : revue de sécurité avant de coder. |
 | Q11 | Répertoire des rôles (R1–R3). | Une table SQLite chez le maître. Écriture : à chaque `spawn_agent`, le rôle remonte par le lien, de parent en parent ; à chaque fin de mission, son résultat. Lecture : un outil `find_role` (recherche par mots, puis par embeddings quand F1 existera), dont la demande remonte au maître comme une demande de modèle. Sécurité, à trancher avant de coder : un rôle enregistré contient des instructions écrites par un agent, donc un texte qui peut avoir été empoisonné et que d'autres agents reliront. Il doit être présenté comme une donnée à évaluer, jamais comme une consigne ; ne jamais porter de droits (les droits restent accordés par le parent, dans la limite des siens) ; et un rôle « approuvé » par l'humain doit se distinguer d'un rôle seulement observé. Fuite : un agent d'une branche lit ce qu'une autre branche a écrit ; prévoir de quoi cloisonner. |
 
 ## 7. Sécurité
@@ -372,6 +408,15 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
    reste du réseau de la machine. À fermer par un réseau Docker dédié, côté machine.
 9. **Lancer `docker` revient à être root sur la machine** : le maître d'une cible Docker doit
    être tenu pour tel. Le socket Docker n'est jamais montré à un conteneur d'agent.
+11. **Les modèles de service n'ont été essayés qu'avec de faux fournisseurs.** Les connecteurs
+    suivent la forme publique des API (OpenAI, ElevenLabs) et celle des services de l'assistant
+    (prévision, décision) ; le premier essai réel peut demander un ajustement.
+12. **Ce qu'un agent envoie à un service sort de la grappe** : le son à transcrire, le texte à
+    dire, ses notes (`memory_search`), l'état d'une décision partent chez le fournisseur du
+    modèle. N'accorder un modèle de service qu'à un agent dont les données peuvent y aller, et
+    préférer un fournisseur local ou souverain pour le reste.
+13. **Le quota de service compte des appels, pas de l'argent** : un appel d'image coûte plus
+    qu'un appel de plongements. Régler `max_calls` nature par nature, au plus juste (B4 à venir).
 10. Un agent déployé qui ne répond plus (machine éteinte, réseau coupé) s'éteint seul, mais sa
     désinstallation échoue si la cible est injoignable : l'échec est journalisé, pas rejoué.
 

@@ -4,6 +4,7 @@
 //! d'exploitation ne le double pas, une commande autorisée s'exécute avec tous les droits
 //! de l'utilisateur du process : une règle de commande se rédige donc au plus serré.
 
+use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -23,6 +24,16 @@ pub struct Capabilities {
     pub models: Vec<String>,
     /// Budget de tokens de l'agent et de toute sa descendance. Absent : pas de plafond.
     pub max_tokens: Option<u64>,
+    /// Appels permis aux modèles qui ne tiennent pas une conversation, par nature
+    /// (`transcription`, `speech`, `image`, `embedding`, `forecast`, `decision`), descendance
+    /// comprise. Une nature absente : aucun appel.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub max_calls: BTreeMap<String, u64>,
+}
+
+/// Une nature qui se compte en appels (`max_calls`).
+pub fn counted_nature(name: &str) -> bool {
+    crate::model::Nature::parse(name).is_some_and(|n| crate::model::Nature::SERVICES.contains(&n))
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -105,6 +116,9 @@ impl Capabilities {
                 return Err(format!("nom de cible invalide : {target}"));
             }
         }
+        if let Some(nature) = self.max_calls.keys().find(|n| !counted_nature(n)) {
+            return Err(format!("max_calls : nature inconnue « {} »", crate::clean(nature, 40, false)));
+        }
         Ok(())
     }
 
@@ -121,7 +135,8 @@ impl Capabilities {
             })
             .sum();
         let spawn = self.spawn.as_ref().map_or(0, |s| 32 + s.targets.iter().map(|t| t.len() + 4).sum::<usize>());
-        paths(&self.fs_read) + paths(&self.fs_write) + exec + spawn + self.models.iter().map(|m| m.len() + 4).sum::<usize>()
+        let calls: usize = self.max_calls.keys().map(|n| n.len() + 24).sum();
+        paths(&self.fs_read) + paths(&self.fs_write) + exec + spawn + calls + self.models.iter().map(|m| m.len() + 4).sum::<usize>()
     }
 
     /// Droits déclarés par un descendant, qu'on ne fait qu'afficher : textes rendus inoffensifs.
@@ -146,6 +161,7 @@ impl Capabilities {
         for model in &mut self.models {
             *model = crate::clean(model, 80, false);
         }
+        self.max_calls.retain(|nature, _| counted_nature(nature));
         if let Some(spawn) = &mut self.spawn {
             for target in &mut spawn.targets {
                 *target = crate::clean(target, 80, false);
@@ -222,6 +238,12 @@ impl Capabilities {
             match child.max_tokens {
                 Some(wanted) if wanted <= limit => {}
                 _ => return Err(format!("budget : l'enfant doit avoir un max_tokens d'au plus {limit}")),
+            }
+        }
+        for (nature, wanted) in &child.max_calls {
+            let held = self.max_calls.get(nature).copied().unwrap_or(0);
+            if *wanted > held {
+                return Err(format!("max_calls.{nature} de l'enfant : au plus {held}"));
             }
         }
         if let Some(wanted) = &child.spawn {
@@ -369,6 +391,7 @@ mod tests {
             spawn: Some(SpawnPolicy { max_children: 3, max_depth: 2, targets: local_only() }),
             models: vec!["main".into()],
             max_tokens: Some(1000),
+            max_calls: BTreeMap::from([("image".to_string(), 5)]),
         }
     }
 

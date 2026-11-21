@@ -49,6 +49,10 @@ impl Store {
              CREATE TABLE IF NOT EXISTS memory (
                  key TEXT PRIMARY KEY, content TEXT NOT NULL, updated_ms INTEGER NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS vectors (
+                 key TEXT NOT NULL, model TEXT NOT NULL, hash TEXT NOT NULL, vector BLOB NOT NULL,
+                 PRIMARY KEY (key, model)
+             );
              CREATE TABLE IF NOT EXISTS journal (
                  id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, agent_name TEXT NOT NULL,
                  ts_ms INTEGER NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL
@@ -109,6 +113,34 @@ impl Store {
         let mut query = db.prepare("SELECT key, content FROM memory ORDER BY key").map_err(err)?;
         let rows = query.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?;
         rows.collect::<Result<_, _>>().map_err(err)
+    }
+
+    /// Les vecteurs gardés pour la recherche en mémoire avec ce modèle : par clé de note,
+    /// l'empreinte du texte qui a été plongé, et son vecteur. Ceux des notes effacées sont retirés.
+    pub fn vectors(&self, model: &str) -> Result<HashMap<String, (String, Vec<f32>)>, String> {
+        let db = self.db.lock().unwrap();
+        db.execute("DELETE FROM vectors WHERE key NOT IN (SELECT key FROM memory)", []).map_err(err)?;
+        let mut query = db.prepare("SELECT key, hash, vector FROM vectors WHERE model = ?1").map_err(err)?;
+        let rows = query
+            .query_map([model], |r| {
+                let bytes: Vec<u8> = r.get(2)?;
+                let vector = bytes.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
+                Ok((r.get::<_, String>(0)?, (r.get::<_, String>(1)?, vector)))
+            })
+            .map_err(err)?;
+        rows.collect::<Result<_, _>>().map_err(err)
+    }
+
+    pub fn keep_vector(&self, key: &str, model: &str, hash: &str, vector: &[f32]) -> Result<(), String> {
+        let bytes: Vec<u8> = vector.iter().flat_map(|x| x.to_le_bytes()).collect();
+        let db = self.db.lock().unwrap();
+        db.execute(
+            "INSERT INTO vectors (key, model, hash, vector) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(key, model) DO UPDATE SET hash = ?3, vector = ?4",
+            params![key, model, hash, bytes],
+        )
+        .map_err(err)?;
+        Ok(())
     }
 
     /// Est-il temps de réécrire le répertoire des rôles pour cette branche ?

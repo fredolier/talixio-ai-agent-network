@@ -10,8 +10,10 @@
 #
 # Confiance (`trust`) : 1 grand public · 2 gratuit ou public · 3 professionnel ·
 # 4 professionnel sans conservation · 5 souverain (RGPD) · L local (votre propre machine).
-# `europe` : hébergé et régi en Europe (niveau 5). `api` : comment le maître sait l'appeler
-# (`anthropic`, `openai` pour toute API compatible, vide : pas encore appelable).
+# `europe` : hébergé et régi en Europe (niveau 5). `apis` : les familles d'API par lesquelles le
+# maître sait l'appeler (`anthropic` ; `openai` pour toute API compatible : texte, transcription,
+# voix, image, plongements ; `elevenlabs` : voix ; `timesfm` : prévision ; `systemone` : décision).
+# Vide : pas encore appelable.
 # `hosts` : machines qui servent ce fournisseur (un nom qui commence par un point vaut pour ses
 # sous-domaines) ; c'est ainsi qu'un modèle configuré est rattaché à son fournisseur.
 
@@ -23,7 +25,7 @@ europe = true
 trust = "5"
 kind = "Souverain (RGPD)"
 billing = "usage"
-api = "openai"
+apis = ["openai"]
 endpoint = "https://api.mistral.ai/v1"
 hosts = ["api.mistral.ai"]
 
@@ -35,7 +37,7 @@ europe = false
 trust = "4"
 kind = "Professionnel, sans conservation"
 billing = "usage"
-api = "anthropic"
+apis = ["anthropic"]
 endpoint = "https://api.anthropic.com"
 hosts = ["api.anthropic.com"]
 
@@ -47,7 +49,7 @@ europe = false
 trust = "3"
 kind = "Professionnel"
 billing = "usage"
-api = "openai"
+apis = ["openai"]
 endpoint = "https://api.openai.com/v1"
 hosts = ["api.openai.com"]
 
@@ -59,7 +61,7 @@ europe = false
 trust = "3"
 kind = "Professionnel"
 billing = "usage"
-api = "openai"
+apis = ["openai"]
 endpoint = "https://generativelanguage.googleapis.com/v1beta/openai"
 hosts = ["generativelanguage.googleapis.com"]
 
@@ -71,7 +73,7 @@ europe = true
 trust = "5"
 kind = "Souverain (RGPD)"
 billing = "usage"
-api = "openai"
+apis = ["openai"]
 endpoint = "https://api.scaleway.ai/v1"
 hosts = ["api.scaleway.ai"]
 
@@ -83,7 +85,7 @@ europe = true
 trust = "5"
 kind = "Souverain (RGPD)"
 billing = "usage"
-api = "openai"
+apis = ["openai"]
 endpoint = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"
 hosts = [".endpoints.kepler.ai.cloud.ovh.net"]
 
@@ -95,7 +97,7 @@ europe = true
 trust = "5"
 kind = "Souverain (RGPD)"
 billing = "usage"
-api = "openai"
+apis = ["openai"]
 endpoint = ""
 hosts = ["api.infomaniak.com"]
 
@@ -107,7 +109,7 @@ europe = true
 trust = "5"
 kind = "Souverain, sans conservation"
 billing = "usage"
-api = "openai"
+apis = ["openai"]
 endpoint = "https://aki.io/openai/v1"
 hosts = ["aki.io"]
 
@@ -119,7 +121,7 @@ europe = false
 trust = "3"
 kind = "Professionnel"
 billing = "usage"
-api = ""
+apis = ["elevenlabs"]
 endpoint = ""
 hosts = ["api.elevenlabs.io"]
 
@@ -131,7 +133,7 @@ europe = false
 trust = "1"
 kind = "Grand public"
 billing = "usage"
-api = "openai"
+apis = ["openai"]
 endpoint = "https://api.deepseek.com"
 hosts = ["api.deepseek.com"]
 
@@ -143,7 +145,7 @@ europe = false
 trust = "L"
 kind = "Local"
 billing = "gratuit"
-api = "openai"
+apis = ["openai", "timesfm", "systemone"]
 endpoint = "http://127.0.0.1:11434/v1"
 hosts = ["localhost", "127.0.0.1", "::1"]
 
@@ -155,7 +157,7 @@ europe = false
 trust = "2"
 kind = "Non évalué"
 billing = "usage"
-api = ""
+apis = ["systemone"]
 endpoint = ""
 hosts = ["api.typesafe.ai"]
 
@@ -167,7 +169,7 @@ europe = false
 trust = "2"
 kind = "Non évalué"
 billing = "usage"
-api = ""
+apis = []
 endpoint = ""
 hosts = []
 
@@ -508,9 +510,10 @@ estimated = true
 
 [[model]]
 name = "ElevenLabs v3"
-id = "ElevenLabs v3"
+id = "eleven_v3"
 provider = "elevenlabs"
 nature = "Voice"
+speech = true
 rank = 7
 unit_price = 0.1
 unit = "min"
@@ -679,7 +682,7 @@ unit = "Mtok"
 currency = "$"
 
 # Prévision (séries temporelles) et décision (questions typées, réponses en probabilités).
-# Listés pour comparer : le maître ne sait pas encore les appeler pour un agent.
+# Appelables quand le fournisseur parle `timesfm` (POST /forecast) ou `systemone` (POST /v1/systemone).
 # `soon` : dans l'assistant non plus, ce modèle ne peut pas encore être choisi.
 
 [[model]]
