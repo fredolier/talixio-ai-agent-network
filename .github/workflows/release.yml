@@ -15,6 +15,8 @@ permissions:
 jobs:
   executables:
     name: ${{ matrix.name }}
+    # une version ne part que d'une étiquette, ou de la branche principale du dépôt
+    if: github.ref_type == 'tag' || github.ref_name == github.event.repository.default_branch
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     strategy:
@@ -28,6 +30,8 @@ jobs:
           - { name: windows-x86_64, os: windows-latest, target: x86_64-pc-windows-msvc, ext: ".exe" }
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: L'étiquette est la version du code
         if: github.ref_type == 'tag'
         shell: bash
@@ -60,6 +64,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           path: sortie
@@ -73,6 +79,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version="v$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          # lancée à la main, la publication crée l'étiquette : elle ne reprend jamais une étiquette posée ailleurs
+          if [ "$GITHUB_REF_TYPE" != "tag" ] && gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$version" >/dev/null 2>&1; then
+            echo "L'étiquette $version existe déjà : montez la version dans Cargo.toml." >&2
+            exit 1
+          fi
           gh release create "$version" sortie/* --target "$GITHUB_SHA" \
             --title "Talixio Agent Network $version" \
             --notes "Notes de version : commande talixio-agent releases, ou écran Nouveautés de l'interface. Empreintes des fichiers : SHA256SUMS."

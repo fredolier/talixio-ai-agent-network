@@ -40,8 +40,19 @@ docker build -t talixio-agent .
 ```
 
 ```bash
-docker run -d --name talixio -p 127.0.0.1:7700:7700 -v talixio-data:/data -e ANTHROPIC_API_KEY=... -e TALIXIO_API_TOKEN=un-jeton-long-de-votre-choix talixio-agent
+export ANTHROPIC_API_KEY=...
 ```
+
+```bash
+export TALIXIO_API_TOKEN="$(openssl rand -hex 32)"; echo "$TALIXIO_API_TOKEN"
+```
+
+```bash
+docker run -d --name talixio -p 127.0.0.1:7700:7700 -v talixio-data:/data --cap-drop ALL --security-opt no-new-privileges --pids-limit 256 --memory 1g -e ANTHROPIC_API_KEY -e TALIXIO_API_TOKEN talixio-agent
+```
+
+La deuxième commande tire le jeton de l'interface au hasard et l'affiche : gardez-le. Un jeton
+faible ou recopié d'un exemple est refusé.
 
 Puis ouvrez `https://127.0.0.1:7700` (le certificat est fabriqué par le maître : le navigateur
 demande confirmation) et entrez votre jeton. Les agents ne lisent et n'écrivent que dans
@@ -70,8 +81,11 @@ Linux : unité systemd de votre compte (en root : `--user <compte>`, le maître 
 root). macOS : agent launchd. Windows : tâche planifiée à l'ouverture de session. `--print` montre
 ce qui serait fait sans rien faire ; `service status` et `service uninstall` font le reste. Un
 service n'hérite pas des variables de votre terminal : donnez les clés par `api_key_file`, depuis
-l'interface, ou sous Linux par `--env-file`. Les agents enfants ne sont pas encore recréés au
-redémarrage.
+l'interface, ou sous Linux par `--env-file`.
+
+Au redémarrage, le maître retrouve son journal, sa mémoire, ses fournisseurs, et ses agents
+**permanents** : demandez-lui de créer un agent « permanent », il le recrée à chaque démarrage
+avec sa mémoire, jusqu'à ce que vous l'arrêtiez. Les agents ordinaires ne reviennent pas.
 
 ## Compiler
 

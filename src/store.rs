@@ -53,6 +53,9 @@ impl Store {
                  key TEXT NOT NULL, model TEXT NOT NULL, hash TEXT NOT NULL, vector BLOB NOT NULL,
                  PRIMARY KEY (key, model)
              );
+             CREATE TABLE IF NOT EXISTS permanent (
+                 agent_id TEXT PRIMARY KEY, name TEXT NOT NULL, request TEXT NOT NULL, created_ms INTEGER NOT NULL
+             );
              CREATE TABLE IF NOT EXISTS journal (
                  id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, agent_name TEXT NOT NULL,
                  ts_ms INTEGER NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL
@@ -214,6 +217,32 @@ impl Store {
             params![ROLES_KEPT],
         );
         let _ = tx.commit();
+    }
+
+    /// Un agent permanent : la demande de création, telle que le maître l'a faite, pour la
+    /// refaire à son redémarrage. Elle repassera alors par les mêmes contrôles.
+    pub fn permanent_save(&self, agent_id: &str, name: &str, request: &str) -> Result<(), String> {
+        let db = self.db.lock().unwrap();
+        db.execute(
+            "INSERT INTO permanent (agent_id, name, request, created_ms) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(agent_id) DO UPDATE SET name = ?2, request = ?3",
+            params![agent_id, name, request, crate::now_ms() as i64],
+        )
+        .map(|_| ())
+        .map_err(err)
+    }
+
+    /// L'agent n'est plus permanent. Rend vrai s'il l'était.
+    pub fn permanent_delete(&self, agent_id: &str) -> bool {
+        self.db.lock().unwrap().execute("DELETE FROM permanent WHERE agent_id = ?1", params![agent_id]).is_ok_and(|n| n > 0)
+    }
+
+    /// Les agents permanents, du plus ancien au plus récent : (identifiant, nom, demande).
+    pub fn permanent_list(&self) -> Vec<(String, String, String)> {
+        let db = self.db.lock().unwrap();
+        let Ok(mut query) = db.prepare("SELECT agent_id, name, request FROM permanent ORDER BY created_ms, agent_id LIMIT 64") else { return Vec::new() };
+        let rows = query.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)));
+        rows.map(|rows| rows.flatten().collect()).unwrap_or_default()
     }
 
     /// Ce que le maître a demandé à l'enfant qu'il vient de créer.

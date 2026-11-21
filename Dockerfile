@@ -2,8 +2,10 @@
 # Ni système, ni shell, ni bibliothèque : il n'y a rien d'autre à mettre à jour ni à attaquer.
 #
 #   docker build -t talixio-agent .
+#   export TALIXIO_API_TOKEN="$(openssl rand -hex 32)"      # le jeton de l'interface : gardez-le
 #   docker run -d --name talixio -p 127.0.0.1:7700:7700 -v talixio-data:/data \
-#     -e ANTHROPIC_API_KEY=… -e TALIXIO_API_TOKEN=un-jeton-long-de-votre-choix talixio-agent
+#     --cap-drop ALL --security-opt no-new-privileges --pids-limit 256 --memory 1g \
+#     -e ANTHROPIC_API_KEY -e TALIXIO_API_TOKEN talixio-agent
 #   puis https://127.0.0.1:7700 (certificat fabriqué par le maître : le navigateur demande confirmation)
 #
 # /config/talixio.toml : la configuration (docker/talixio.toml par défaut ; montez la vôtre par-dessus).
@@ -13,7 +15,9 @@
 FROM rust:1-alpine AS construction
 RUN apk add --no-cache build-base
 WORKDIR /src
-COPY . .
+COPY Cargo.toml Cargo.lock catalog.toml releases.toml ./
+COPY src src
+COPY web/dist web/dist
 RUN cargo build --release --locked \
  && strip target/release/talixio-agent \
  && mkdir -p /data/work && chown -R 65532:65532 /data && chmod -R 700 /data

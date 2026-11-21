@@ -55,7 +55,9 @@ fn words(text: &[&str]) -> Vec<String> {
 /// changerait le sens de la ligne (guillemet, retour, `%` et `$` de systemd, chevrons du XML).
 fn plain(path: &Path, what: &str) -> Result<String, String> {
     let text = path.to_str().ok_or(format!("{what} : chemin illisible"))?;
-    let odd = text.chars().any(|c| c.is_control() || matches!(c, '"' | '\'' | '%' | '$' | '<' | '>' | '&' | '`' | ';' | '|'));
+    // hors Windows, « \ » n'a rien à faire dans un chemin : pour systemd, il joint deux lignes
+    // de l'unité ou change un caractère entre guillemets
+    let odd = text.chars().any(|c| c.is_control() || matches!(c, '"' | '\'' | '%' | '$' | '<' | '>' | '&' | '`' | ';' | '|') || (c == '\\' && !cfg!(windows)));
     if !path.is_absolute() || odd || text.is_empty() {
         return Err(format!("{what} : « {} » ne peut pas figurer dans un service (chemin absolu, sans guillemet ni % $ < > & ; |)", crate::clean(text, 200, false)));
     }
@@ -84,23 +86,34 @@ pub fn install_plan(spec: &Spec) -> Result<Plan, String> {
     if spec.env_file.is_some() && !matches!(spec.kind, Kind::SystemdUser | Kind::SystemdSystem) {
         return Err("`--env-file` ne vaut que sous Linux : ailleurs, donnez les clés par `api_key_file` ou depuis l'interface".into());
     }
+    if matches!(spec.kind, Kind::SystemdUser | Kind::Launchd) {
+        plain(&spec.home, "dossier personnel (HOME)")?;
+    }
     let mut plan = Plan::default();
     match spec.kind {
         Kind::SystemdUser | Kind::SystemdSystem => {
             let system = spec.kind == Kind::SystemdSystem;
-            let mut unit = format!(
+            let mut unit = String::from(
                 "# Écrit par `talixio-agent service install`. Aucun secret ici.\n\
                  [Unit]\nDescription=Talixio Agent Network (maître)\nAfter=network-online.target\nWants=network-online.target\n\
                  StartLimitIntervalSec=300\nStartLimitBurst=10\n\n\
-                 [Service]\nExecStart=\"{exe}\" root --config \"{config}\"\nWorkingDirectory={workdir}\n\
-                 Restart=on-failure\nRestartSec=5\nNoNewPrivileges=true\nUMask=0077\n"
+                 [Service]\n",
             );
-            if let Some(env) = &spec.env_file {
-                unit.push_str(&format!("EnvironmentFile={}\n", plain(env, "fichier d'environnement")?));
-            }
+            // le compte d'abord, avant toute ligne qui porte un chemin
             if system {
                 let user = spec.user.as_deref().filter(|u| user_name(u)).ok_or("installé en root, le service doit tourner sous un compte ordinaire : `--user <compte>` (jamais root)")?;
-                unit.push_str(&format!("User={user}\n"));
+                unit.push_str(&format!(
+                    "User={user}\nCapabilityBoundingSet=\nAmbientCapabilities=\nProtectKernelTunables=yes\nProtectKernelModules=yes\n\
+                     ProtectKernelLogs=yes\nProtectControlGroups=yes\nProtectClock=yes\nProtectHostname=yes\nRestrictSUIDSGID=yes\n\
+                     LockPersonality=yes\nRestrictRealtime=yes\n"
+                ));
+            }
+            unit.push_str(&format!(
+                "Restart=on-failure\nRestartSec=5\nNoNewPrivileges=true\nUMask=0077\nLimitCORE=0\n\
+                 ExecStart=\"{exe}\" root --config \"{config}\"\nWorkingDirectory={workdir}\n"
+            ));
+            if let Some(env) = &spec.env_file {
+                unit.push_str(&format!("EnvironmentFile={}\n", plain(env, "fichier d'environnement")?));
             }
             unit.push_str(&format!("\n[Install]\nWantedBy={}\n", if system { "multi-user.target" } else { "default.target" }));
             plan.file = Some((unit_path(spec), unit));
@@ -307,7 +320,13 @@ mod tests {
         let plan = install_plan(&Spec { user: Some("talixio".into()), ..spec(Kind::SystemdSystem) }).unwrap();
         let (path, unit) = plan.file.unwrap();
         assert_eq!(path, PathBuf::from("/etc/systemd/system/talixio-agent.service"));
-        assert!(unit.contains("User=talixio\n") && unit.contains("WantedBy=multi-user.target\n"));
+        assert!(unit.contains("\nUser=talixio\n") && unit.contains("WantedBy=multi-user.target\n"));
+        // le compte est dit avant toute ligne portant un chemin : aucun chemin ne peut l'avaler
+        assert!(unit.find("User=talixio").unwrap() < unit.find("ExecStart=").unwrap());
+        let asked = Spec { user: Some("talixio".into()), env_file: Some("/srv/talixio/cles.env\\".into()), ..spec(Kind::SystemdSystem) };
+        assert!(install_plan(&asked).is_err(), "une barre oblique inversée joindrait deux lignes de l'unité");
+        assert!(install_plan(&Spec { workdir: "/srv/talixio\\".into(), ..spec(Kind::SystemdUser) }).is_err());
+        assert!(install_plan(&Spec { home: PathBuf::new(), ..spec(Kind::SystemdUser) }).is_err(), "sans dossier personnel, pas de chemin relatif");
         assert_eq!(plan.commands[0], words(&["systemctl", "daemon-reload"]));
         assert!(plan.optional.is_empty());
     }

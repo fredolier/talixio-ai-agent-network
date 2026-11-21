@@ -123,6 +123,7 @@ pub fn specs(node: &Node) -> Vec<ToolSpec> {
                 "role": { "type": "string", "description": "Sa spécialité, en quelques mots." },
                 "instructions": { "type": "string", "description": "Comment il doit travailler : méthode, limites, format des comptes rendus." },
                 "objective": { "type": "string", "description": "La mission à accomplir." },
+                "permanent": { "type": "boolean", "description": "Chez le maître seulement. Vrai : l'agent est recréé à chaque redémarrage du maître, avec sa mémoire, jusqu'à ce qu'on l'arrête. À réserver à un travail qui doit durer." },
                 "success_criteria": { "type": "string", "description": "Critère de réussite mesurable : ce qui, vérifié, prouve que la mission est accomplie." },
                 "model": { "type": "string", "description": format!(
                     "Alias de son modèle de conversation, parmi : {}. Par défaut : le tien.",
@@ -395,7 +396,7 @@ pub async fn execute(node: &Arc<Node>, name: &str, input: &Value) -> Result<Stri
             blocking(move || write_checked(&node.caps, &node.deny, &asked, content.as_bytes())).await
         }
         "run_command" => run_command(node, input).await,
-        "spawn_agent" => spawn_agent(node, input).await,
+        "spawn_agent" => spawn_agent(node, input, None).await,
         "send_to_agent" => {
             let id = node.child_id(text(input, "agent")?).ok_or("aucun enfant de ce nom")?;
             node.send_child(&id, Msg::Instruction { text: text(input, "message")?.to_string() }, true)?;
@@ -403,6 +404,7 @@ pub async fn execute(node: &Arc<Node>, name: &str, input: &Value) -> Result<Stri
         }
         "stop_agent" => {
             let id = node.child_id(text(input, "agent")?).ok_or("aucun enfant de ce nom")?;
+            node.store.permanent_delete(&id);
             node.stop_child(&id, "arrêté par son parent");
             Ok("agent arrêté".into())
         }
@@ -684,8 +686,30 @@ async fn run_command(node: &Arc<Node>, input: &Value) -> Result<String, String> 
     Ok(result)
 }
 
-async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> {
+/// Au démarrage du maître : recrée ses agents permanents. Chaque demande repasse par tous les
+/// contrôles d'une création ordinaire, avec les droits que le maître a maintenant ; celle qui
+/// ne passe plus est signalée, et gardée pour le prochain démarrage.
+pub async fn restore_permanent(node: &Arc<Node>) {
+    for (id, name, request) in node.store.permanent_list() {
+        let outcome = match serde_json::from_str::<Value>(&request) {
+            Ok(input) => spawn_agent(node, &input, Some(&id)).await,
+            Err(e) => Err(format!("demande illisible ({e})")),
+        };
+        match outcome {
+            Ok(_) => node.emit("spawn", format!("agent permanent {} relancé après le redémarrage du maître", crate::clean(&name, 40, false))),
+            Err(e) => node.emit("error", format!("agent permanent {} non relancé : {e}", crate::clean(&name, 40, false))),
+        }
+    }
+}
+
+/// `resumed` : l'identifiant d'un agent permanent que le maître recrée à son redémarrage.
+async fn spawn_agent(node: &Arc<Node>, input: &Value, resumed: Option<&str>) -> Result<String, String> {
     let policy = node.caps.spawn.as_ref().ok_or("cet agent n'a pas le droit de créer des enfants")?;
+    let permanent = input["permanent"].as_bool().unwrap_or(false);
+    if permanent && node.providers.is_none() {
+        return Err("seul le maître crée des agents permanents".into());
+    }
+    let resumed = resumed.filter(|id| permanent && id.len() == 22 && id.starts_with("a-") && id[2..].bytes().all(|b| b.is_ascii_hexdigit()));
     let name = text(input, "name")?.trim().to_string();
     let valid = !name.is_empty() && name.len() <= 40 && name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_');
     if !valid {
@@ -764,7 +788,8 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
     let parent_cert = node.cert.get().cloned().ok_or("cet agent n'accepte pas de connexion d'enfants")?;
 
     let boot = Bootstrap {
-        agent_id: format!("a-{}", &random_hex(1)[..20]),
+        // un agent permanent garde son identifiant, donc sa mémoire, d'une vie à l'autre
+        agent_id: resumed.map(str::to_string).unwrap_or_else(|| format!("a-{}", &random_hex(1)[..20])),
         name: name.clone(),
         role: role.clone(),
         instructions: text(input, "instructions")?.to_string(),
@@ -874,13 +899,24 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
             return Err(e);
         }
     }
-    let mission = format!("Mission : {objective}\n\nCritère de réussite mesurable : {criteria}");
+    let mut mission = format!("Mission : {objective}\n\nCritère de réussite mesurable : {criteria}");
+    if permanent {
+        mission.push_str(if resumed.is_some() {
+            "\n\nTu es un agent permanent et tu viens d'être relancé après un redémarrage du maître : ta conversation précédente est perdue, pas ta mémoire. Commence par la relire (memory_read) et reprends où tu en étais, sans refaire ce qui est déjà fait."
+        } else {
+            "\n\nTu es un agent permanent : tu seras relancé après un redémarrage, sans ta conversation mais avec ta mémoire. Note-y au fur et à mesure (memory_write) où tu en es et ce qui reste à faire."
+        });
+        // la demande est gardée telle quelle : elle repassera par les mêmes contrôles
+        if let Err(e) = node.store.permanent_save(&boot.agent_id, &name, &input.to_string()) {
+            node.emit("error", format!("agent {name} : permanence non enregistrée ({e})"));
+        }
+    }
     if node.providers.is_some() {
         // le répertoire des rôles est tenu par le maître seul
         node.store.role_brief(&boot.agent_id, &name, &boot.role, &boot.instructions, objective, criteria);
     }
     node.send_child(&boot.agent_id, Msg::Instruction { text: mission }, true)?;
-    node.emit("spawn", format!("agent {name} ({}) créé — rôle : {}", boot.agent_id, boot.role));
+    node.emit("spawn", format!("agent {name} ({}) créé — rôle : {}{}", boot.agent_id, boot.role, if permanent { " — permanent" } else { "" }));
     node.tree_dirty.notify_one();
     Ok(format!(
         "agent « {name} » créé (identifiant {}). Sa mission lui est transmise ; son compte rendu arrivera dans un prochain message.",

@@ -163,6 +163,48 @@ fn is_root() -> bool {
     false
 }
 
+/// Unité du système : systemd, en root, lira ces chemins à chaque démarrage. Aucun ne doit pouvoir
+/// être remplacé par un autre compte que root ou celui du service ; le fichier d'environnement,
+/// lu par root lui-même, par personne d'autre que root.
+#[cfg(unix)]
+fn system_paths_are_safe(spec: &talixio_agent::service::Spec) -> Result<()> {
+    use std::os::unix::fs::MetadataExt;
+    let Some(user) = spec.user.as_deref() else { return Ok(()) };
+    let name = std::ffi::CString::new(user)?;
+    // SAFETY: chaîne terminée par un zéro ; le résultat, lu aussitôt, n'est pas gardé.
+    let uid = unsafe {
+        let entry = libc::getpwnam(name.as_ptr());
+        if entry.is_null() {
+            bail!("compte « {user} » inconnu sur cette machine");
+        }
+        (*entry).pw_uid
+    };
+    if uid == 0 {
+        bail!("le compte « {user} » a les droits de root : le maître ne tourne jamais en root");
+    }
+    let check = |path: &Path, what: &str, owners: &[u32]| -> Result<()> {
+        for part in path.ancestors() {
+            let meta = std::fs::metadata(part).with_context(|| format!("{}", part.display()))?;
+            if !owners.contains(&meta.uid()) || meta.mode() & 0o022 != 0 {
+                bail!(
+                    "{what} : {} peut être modifié par un autre compte ({}). Pour un service du système, placez-le dans un dossier que seuls root{} peuvent modifier.",
+                    part.display(),
+                    if owners.contains(&meta.uid()) { "droits d'écriture du groupe ou de tous" } else { "propriétaire inattendu" },
+                    if owners.len() > 1 { format!(" ou {user}") } else { String::new() }
+                );
+            }
+        }
+        Ok(())
+    };
+    check(&spec.exe, "exécutable", &[0, uid])?;
+    check(&spec.config, "configuration", &[0, uid])?;
+    check(&spec.workdir, "dossier de travail", &[0, uid])?;
+    if let Some(env) = &spec.env_file {
+        check(env, "fichier d'environnement", &[0])?;
+    }
+    Ok(())
+}
+
 fn service(action: ServiceAction) -> Result<()> {
     use talixio_agent::service::{self, Spec};
     let kind = service::kind_here(is_root()).map_err(anyhow::Error::msg)?;
@@ -187,6 +229,10 @@ fn service(action: ServiceAction) -> Result<()> {
                 spec.env_file = Some(env.canonicalize()?);
             }
             spec.user = user;
+            #[cfg(unix)]
+            if kind == service::Kind::SystemdSystem {
+                system_paths_are_safe(&spec)?;
+            }
             let plan = service::install_plan(&spec).map_err(anyhow::Error::msg)?;
             let from_env: Vec<&str> = cfg.models.values().filter_map(|m| m.api_key_env.as_deref()).filter(|name| !name.is_empty()).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
             if !from_env.is_empty() && spec.env_file.is_none() {
@@ -285,6 +331,11 @@ async fn run_root(config: &Path) -> Result<()> {
     tokio::spawn(spawn::keep_logs_small(node.state_dir.join("logs"), node.log_max_bytes));
     tokio::spawn(print_activity(node.clone()));
     tokio::spawn(agent::run_agent(node.clone(), inbox));
+    // les agents permanents reviennent, avec leur mémoire et des droits revérifiés
+    tokio::spawn({
+        let node = node.clone();
+        async move { talixio_agent::tools::restore_permanent(&node).await }
+    });
     shutdown_signal().await;
     node.terminate("arrêt du maître", 0).await
 }
@@ -331,7 +382,12 @@ async fn run_child(state_dir: PathBuf, log_file: Option<PathBuf>) -> Result<()> 
 
 /// Le jeton de l'API : celui de l'environnement, sinon un jeton créé une fois et gardé dans le dossier d'état.
 fn api_token(state_dir: &Path) -> Result<String> {
-    if let Some(token) = std::env::var("TALIXIO_API_TOKEN").ok().filter(|t| t.len() >= 16) {
+    if let Ok(token) = std::env::var("TALIXIO_API_TOKEN") {
+        // un jeton donné mais faible est refusé, pas remplacé en silence : un exemple recopié ne doit pas ouvrir le maître
+        let distinct = token.chars().collect::<std::collections::BTreeSet<_>>().len();
+        if token.len() < 16 || distinct < 10 || token.contains("votre-choix") {
+            bail!("TALIXIO_API_TOKEN est trop faible ou recopié d'un exemple : donnez un jeton tiré au hasard (par exemple `openssl rand -hex 32`), ou retirez la variable pour que le maître en crée un");
+        }
         return Ok(token);
     }
     let path = state_dir.join("api-token");

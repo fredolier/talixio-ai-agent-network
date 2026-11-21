@@ -704,6 +704,8 @@ impl Node {
                 .ok_or("agent introuvable ou déjà arrêté")?
         };
         if via == target {
+            // un arrêt demandé vaut pour de bon : l'agent ne sera pas recréé au redémarrage
+            self.store.permanent_delete(&via);
             self.stop_child(&via, "arrêt demandé");
             Ok(())
         } else {

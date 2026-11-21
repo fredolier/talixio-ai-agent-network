@@ -10,7 +10,7 @@
 version = "0.11.0"
 date = "2026-11-21"
 title = "Le maître en service"
-summary = "Le maître s'installe en service du système : il repart seul au démarrage de la machine et après une panne."
+summary = "Le maître s'installe en service du système et retrouve ses agents permanents : la grappe survit au redémarrage de la machine."
 
 [[release.changes]]
 kind = "nouveau"
@@ -18,15 +18,19 @@ text = "« talixio-agent service install » inscrit le maître auprès du systè
 
 [[release.changes]]
 kind = "nouveau"
+text = "Agents permanents : le maître peut créer un agent « permanent », qu'il recrée à chaque redémarrage sous le même identifiant, avec sa mémoire et des droits revérifiés. Arrêté à la demande, il ne revient plus."
+
+[[release.changes]]
+kind = "nouveau"
 text = "Une image Docker minimale pour essayer le maître sans risque : l'exécutable seul, sans système ni shell, sous un compte sans droit. Voir « Dans Docker » dans le README."
 
 [[release.changes]]
 kind = "sécurité"
-text = "Le service ne tourne jamais en root et sa définition ne contient aucun secret. Sous Linux, il ne peut pas gagner de privilèges."
+text = "Le service ne tourne jamais en root et sa définition ne contient aucun secret. Sous Linux, il ne peut pas gagner de privilèges. Revue de sécurité indépendante du service, de l'image et de la publication : huit constats, traités ou notés."
 
 [[release.changes]]
 kind = "attention"
-text = "Au redémarrage reviennent le maître, son journal, sa mémoire, les fournisseurs connectés et les modèles activés. Ses enfants et les missions en cours ne reviennent pas encore. Un service n'hérite pas des variables de votre terminal : donnez les clés par fichier ou depuis l'interface."
+text = "Un jeton TALIXIO_API_TOKEN trop faible, ou recopié d'un exemple, arrête désormais le démarrage. Les agents ordinaires ne reviennent pas après un redémarrage, et un agent permanent reprend d'après sa mémoire, pas sa conversation. Un service n'hérite pas des variables de votre terminal : donnez les clés par fichier ou depuis l'interface."
 
 [[release]]
 version = "0.10.0"

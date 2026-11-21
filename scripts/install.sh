@@ -45,7 +45,7 @@ main() {
     mkdir -p "$dir"
     chmod 755 "$tmp/$name"
     mv "$tmp/$name" "$dir/talixio-agent"
-    echo "Installé : $dir/talixio-agent ($("$dir/talixio-agent" --version 2>/dev/null || echo "version inconnue"))"
+    echo "Installé : $dir/talixio-agent"
     case ":$PATH:" in
         *":$dir:"*) ;;
         *) echo "Ajoutez $dir à votre PATH pour l'appeler par son nom." ;;

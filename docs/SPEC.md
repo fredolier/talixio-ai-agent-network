@@ -49,7 +49,7 @@ Exemples visés :
 | A2 | Tourne sur Linux, macOS et Windows. | 🟢 Les trois compilent et passent les tests en intégration continue (`ubuntu-latest`, `macos-latest`, `windows-latest`), test de bout en bout compris. Les protections sont écrites deux fois, dans `src/os.rs`, parce qu'elles reposent sur des mécanismes propres à chaque système. **Windows** : fichiers secrets fermés par une liste de droits protégée (le compte, SYSTEM, Administrateurs) et vérifiés à l'ouverture (propriétaire, chaque entrée) ; ouverture sans suivre les liens ni les points d'analyse ; chaque commande lancée dans un Job Object qui tue toute sa descendance avec elle, et l'agent lui-même dans un Job qui emporte tout s'il meurt ; process fermé aux autres comptes. **macOS** : code Unix commun, `PT_DENY_ATTACH` ; pas de PDEATHSIG, la descendance est tuée par groupe de process. **Restes** : (1) sous Windows, le propriétaire d'un process peut réécrire ses droits : la fermeture du process y est un frein, pas une garantie ; (2) le déploiement SSH suppose une cible POSIX, un agent Windows ne peut pas encore être une cible ; (3) `tests/deploy.rs` (faux `ssh` en script shell) et un test d'outils ne tournent que sous Unix ; (4) essais faits sur les machines de l'intégration continue, jamais sur un poste réel. |
 | A3 | Se connecte à n'importe quel modèle : Anthropic, et tout serveur compatible OpenAI (OpenAI, Gemini, Mistral, Ollama, vLLM, OpenRouter), comme dans Talixio AI Assistant. | ✅ |
 | A4 | Exécutable de petite taille. | ✅ profil de compilation optimisé en taille |
-| A5 | Peut être installé en service ou en démon sur une machine. | 🟡 `talixio-agent service install` (décision 28, v0.11.0) : le maître repart au démarrage de la machine et après une panne. Linux : unité systemd, vérifiée par `systemd-analyze`, pas encore essayée sur une machine qui redémarre. macOS (launchd) et Windows (tâche planifiée à l'ouverture de session, sans relance) : écrits, non essayés. Les enfants ne sont pas encore recréés au redémarrage (agents permanents : à faire). |
+| A5 | Peut être installé en service ou en démon sur une machine. | 🟡 `talixio-agent service install` (décision 28, v0.11.0) : le maître repart au démarrage de la machine et après une panne. Linux : unité systemd, vérifiée par `systemd-analyze`, pas encore essayée sur une machine qui redémarre. macOS (launchd) et Windows (tâche planifiée à l'ouverture de session, sans relance) : écrits, non essayés. Les agents déclarés permanents sont recréés au redémarrage (décision 30). |
 | A6 | Le premier agent installé sur une machine peut y tourner en service et servir de relais pour lancer les autres. | ❓ |
 
 ### Droits et cloisonnement
@@ -133,8 +133,8 @@ Demandé le 2026-11-20. Rien n'est codé.
 | N° | Exigence | État |
 |---|---|---|
 | S1 | Chaque agent a un endroit à lui pour travailler et déposer ses fichiers. | ❓ voir Q7 |
-| S2 | Chaque agent a une petite mémoire qui dure : ses consignes, ce qu'il a appris, où il en est. Elle survit à un redémarrage. | 🟡 chaque agent a sa base SQLite et y tient ses notes (`memory_write`, `memory_read`), relues dans son prompt au démarrage. Celle du maître survit aux redémarrages ; celle d'un enfant dure le temps de sa vie, tant que les agents permanents n'existent pas |
-| S3 | Le journal et l'état de la grappe survivent à un redémarrage du maître. | 🟡 journal sur disque (SQLite), repris au démarrage ; l'arbre et les conversations ne le sont pas encore |
+| S2 | Chaque agent a une petite mémoire qui dure : ses consignes, ce qu'il a appris, où il en est. Elle survit à un redémarrage. | 🟡 chaque agent a sa base SQLite et y tient ses notes (`memory_write`, `memory_read`), relues dans son prompt au démarrage. Celle du maître survit aux redémarrages ; celle d'un enfant ordinaire dure le temps de sa vie ; celle d'un agent permanent le suit d'une vie à l'autre (décision 30, test de bout en bout) |
+| S3 | Le journal et l'état de la grappe survivent à un redémarrage du maître. | 🟡 journal sur disque (SQLite), repris au démarrage ; les agents permanents du maître sont recréés (décision 30) ; les agents ordinaires et les conversations ne le sont pas |
 
 ### Pilotage
 
@@ -345,9 +345,18 @@ Demandé le 2026-11-20. Rien n'est codé.
       l'installation : un service ne démarre pas en boucle sur une configuration fausse.
     - Les chemins entrent dans la définition tels quels : un chemin relatif, ou portant un
       guillemet, un retour à la ligne, `%`, `$`, `<`, `>`, `&`, `;` ou `|` est refusé.
+    - En unité du système, systemd relit ces chemins en root à chaque démarrage : l'exécutable,
+      la configuration, le dossier de travail et tous leurs dossiers parents doivent
+      appartenir à root ou au compte du service, sans écriture pour le groupe ni les autres ;
+      le fichier d'environnement, à root seul. Le compte ne doit pas avoir l'uid 0. L'unité du
+      système retire toutes les capacités et ferme le noyau, les groupes de contrôle, l'horloge
+      et le nom de machine.
     - **Ce qui revient au redémarrage** : le maître, son journal, sa mémoire, le répertoire
-      des rôles, les fournisseurs connectés et les modèles activés. **Ce qui ne revient pas
-      encore** : ses enfants et les missions en cours.
+      des rôles, les fournisseurs connectés, les modèles activés, et ses agents permanents
+      (décision 30). **Ce qui ne revient pas** : les agents ordinaires et les conversations.
+    - Le journal d'activité des agents suit la sortie du maître : journald sous Linux,
+      `~/Library/Logs` sous macOS. Il ne porte ni clé ni jeton, mais ce que les agents
+      traitent s'y lit : le protéger comme le reste.
 29. **Une image Docker minimale pour le maître** (`Dockerfile`). L'image finale part de rien
     (`FROM scratch`) et ne contient que l'exécutable statique (6,5 Mo) et une configuration par
     défaut (`docker/talixio.toml`) : ni système, ni shell, ni bibliothèque. Le maître y tourne
@@ -360,6 +369,23 @@ Demandé le 2026-11-20. Rien n'est codé.
     client dans l'image). Essayé : l'exécutable seul dans une racine vide, sous le compte 65532
     (démarrage, TLS, interface, API, arrêt propre). L'image elle-même n'a pas pu être
     construite dans l'environnement de développement (pas de démon Docker).
+30. **Les agents permanents reviennent après un redémarrage du maître.** `spawn_agent` accepte
+    `permanent: true`, chez le maître seulement. Le maître garde alors la demande de création
+    dans sa base (table `permanent`). À son démarrage, il rejoue chaque demande par le chemin
+    d'une création ordinaire : tous les contrôles sont refaits avec les droits qu'il a à ce
+    moment-là, rien n'est repris tel quel. Une demande qui ne passe plus est signalée au
+    journal et gardée pour le démarrage suivant.
+    - L'agent garde son **identifiant**, donc sa base et sa **mémoire** (cible locale). Sa
+      conversation, elle, est perdue : sa mission lui est redonnée avec la consigne de relire
+      sa mémoire et de reprendre où il en était ; à sa création, on lui demande d'y noter son
+      avancement. La reprise repose donc sur ce que l'agent a noté.
+    - Un agent arrêté à la demande (interface, `stop_agent`) n'est plus permanent. Un agent
+      perdu (process mort, lien coupé) le reste : il revient au prochain démarrage du maître.
+    - Limites : seuls les enfants directs du maître ; un agent déployé ailleurs (SSH, Docker)
+      est redéployé, sans sa mémoire restée là-bas ; le compteur de tokens repart de zéro à
+      chaque vie, donc un maître qui redémarre en boucle refait dépenser ses agents permanents
+      (sous systemd, dix démarrages en cinq minutes au plus) ; l'interface ne montre pas
+      encore qu'un agent est permanent ; 64 agents permanents au plus.
 20. **Les notes de version ont une source unique**, `releases.toml`, embarquée dans l'exécutable.
     Chaque version y ajoute une entrée ; un test refuse une version sans note.
 
@@ -640,3 +666,23 @@ droit en plus pour un enfant. Deux défauts moyens, traités et rejoués dans `t
 
 Non vérifié par la revue : exécution sous Windows, comportement réel d'OpenRouter, effet d'un
 proxy du système sur les appels du maître.
+
+### Sixième passe (2026-11-21) : service, image Docker, publication et installation
+
+Revue indépendante, à la lecture, avec un essai sous `systemd-analyze`. Aucun constat critique
+exploitable sans erreur ou complicité de l'administrateur.
+
+| N° | Gravité | Constat | Traitement |
+|---|---|---|---|
+| I1 | Moyenne | Un chemin finissant par `\` joignait deux lignes de l'unité systemd : avec `--env-file`, la ligne `User=` était avalée et le maître tournait en root, sans message. | ✅ `\` refusé dans tout chemin hors Windows ; `User=` écrit en premier, avant toute ligne portant un chemin. Tests. |
+| I2 | Moyenne | Le jeton d'exemple de la commande Docker était accepté tel quel : recopié puis exposé, il ouvrait le maître à qui a lu le README. | ✅ Un jeton donné mais faible ou recopié de l'exemple arrête le démarrage ; la documentation tire le jeton au hasard. Essayé. |
+| I3 | Moyenne à basse | Installée en root, l'unité du système pointait vers des chemins qu'un autre compte pouvait remplacer (fichier d'environnement relu par root, exécutable, configuration). | ✅ Propriétaires et droits vérifiés sur chaque chemin et ses parents ; compte d'uid 0 refusé. Essayé. |
+| I4 | Basse à moyenne | La publication à la main pouvait partir de n'importe quelle branche et devenir « la dernière version » ; une étiquette existante pouvait être reprise avec d'autres exécutables. | ✅ Seulement depuis une étiquette ou la branche principale ; refus si l'étiquette existe. 🟡 Protection des étiquettes et approbation d'un environnement : réglages du dépôt, à faire par son propriétaire. |
+| I5 | Basse | `.dockerignore` excluait une liste : une clé ou une configuration posée dans le dossier entrait dans l'étage de construction. | ✅ Liste d'inclusion : seuls les fichiers que la compilation lit. |
+| I6 | Basse | Actions et image de base désignées par étiquette mobile ; jeton laissé au dépôt cloné pendant la compilation. | 🟡 Jeton retiré du clone (`persist-credentials: false`). Épinglage par empreinte : à faire. |
+| I7 | Basse | Durcissement systemd possible sans gêner les enfants. | 🟡 Ajouté à l'unité du système (capacités, noyau, horloge, groupes de contrôle). Unité du compte : seulement ce qui ne dépend pas des espaces de noms. Non essayé sur un service réel. |
+| I8 | Basse | `--user` ne refusait que le mot « root » ; sans `HOME`, l'unité du compte s'écrivait dans le dossier courant ; `install.sh` lançait l'exécutable installé pour afficher sa version. | ✅ Uid vérifié ; dossier personnel absolu exigé ; plus aucun lancement. |
+
+Non vérifié par la revue : tout Windows (guillemets de `schtasks`, création de la tâche sans
+élévation), `launchctl`, la construction de l'image, l'exécution du flux de publication.
+

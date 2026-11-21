@@ -1,12 +1,10 @@
-# Seul ce que la compilation lit entre dans l'image de construction.
-.git
-.github
-target
-docs
-tests
-scripts
-web/node_modules
-web/src
-*.bundle
-talixio.toml
-.talixio
+# Seul ce que la compilation lit entre dans l'image de construction : tout le reste est exclu,
+# clés, configurations et dossiers d'état compris, où qu'ils soient.
+*
+!Cargo.toml
+!Cargo.lock
+!catalog.toml
+!releases.toml
+!src
+!web/dist
+!docker/talixio.toml
