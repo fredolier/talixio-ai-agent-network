@@ -69,7 +69,8 @@ pub async fn start_listener(
             .route("/api/providers/{id}/oauth", post(oauth_start))
             .route("/api/providers/{id}/oauth/finish", post(oauth_finish))
             .route("/api/models/activate", post(model_activate))
-            .route("/api/models/{alias}/deactivate", post(model_deactivate));
+            .route("/api/models/{alias}/deactivate", post(model_deactivate))
+            .route("/api/models/{alias}/default", post(model_default));
     }
     let router = router.layer(axum::middleware::map_response(harden));
     let app = router.with_state(App {
@@ -127,7 +128,9 @@ async fn models(State(app): State<App>, headers: HeaderMap) -> Response {
     }
     let catalog = app.node.providers.as_ref().map(|p| p.catalog()).unwrap_or_default();
     let mut body = crate::catalog::view(&catalog, &crate::connect::linked(&app.node.state_dir));
-    body["default"] = json!(app.node.model);
+    body["default"] = json!(app.node.model());
+    // le modèle du maître vient de sa configuration : il ne se change pas d'ici
+    body["default_fixed"] = json!(app.node.model_fixed);
     body["models"] = json!(catalog);
     // les alias activés depuis l'interface : eux seuls se désactivent d'ici
     body["activated"] = json!(crate::connect::activated());
@@ -307,4 +310,12 @@ async fn model_deactivate(State(app): State<App>, headers: HeaderMap, Path(alias
         return denied;
     }
     changed(crate::connect::deactivate(&app.node, &alias).await)
+}
+
+/// Donne au maître son modèle, parmi ceux qu'il peut appeler. Sans effet si sa configuration le fixe.
+async fn model_default(State(app): State<App>, headers: HeaderMap, Path(alias): Path<String>) -> Response {
+    if let Err(denied) = authorize(&app, &headers) {
+        return denied;
+    }
+    changed(crate::connect::choose(&app.node, &alias).await)
 }

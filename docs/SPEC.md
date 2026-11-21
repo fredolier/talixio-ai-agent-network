@@ -386,6 +386,21 @@ Demandé le 2026-11-20. Rien n'est codé.
       chaque vie, donc un maître qui redémarre en boucle refait dépenser ses agents permanents
       (sous systemd, dix démarrages en cinq minutes au plus) ; l'interface ne montre pas
       encore qu'un agent est permanent ; 64 agents permanents au plus.
+31. **Le maître reçoit son modèle comme un autre agent.** Le maître est un agent comme les
+    autres, avec plus de moyens, jamais moins : ce qui se fait pour un enfant depuis
+    l'interface se fait aussi pour lui. `model` et `[models]` sont facultatifs dans la
+    configuration. Sans `model`, le maître démarre sans modèle ni clé ; son interface répond,
+    et un message qu'on lui envoie reçoit pour toute réponse la marche à suivre, sans aucun
+    appel. Le premier modèle de conversation activé depuis l'interface devient le sien ;
+    `POST /api/models/{alias}/default` lui en donne un autre, parmi ceux qu'il peut déjà
+    appeler et qui tiennent une conversation (activés d'ici ou déclarés dans la
+    configuration). Le choix est gardé dans `connections.json` et repris au démarrage s'il
+    est encore dans ses droits ; sinon le maître repart sans modèle, il ne retombe jamais sur
+    un autre de lui-même. Désactiver son modèle, ou déconnecter son fournisseur, le laisse
+    sans modèle, et le journal le dit.
+    - La configuration garde le dernier mot : un `model` écrit là ne se change pas d'ici.
+    - Changer de modèle en cours de conversation envoie la conversation en cours (résultats
+      d'outils compris) au nouveau fournisseur : c'est le geste de la personne qui a le jeton.
 20. **Les notes de version ont une source unique**, `releases.toml`, embarquée dans l'exécutable.
     Chaque version y ajoute une entrée ; un test refuse une version sans note.
 
@@ -460,13 +475,14 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 | POST | `/api/messages` `{ "text": … }` | Un message au maître. |
 | POST | `/api/agents/{id}/stop` | Arrête un agent et sa descendance. |
 | GET | `/api/releases` | La version qui tourne et les notes de version. |
-| GET | `/api/models` | Les modèles du maître avec leur nature (`models`, `default`) et le catalogue : fournisseurs connus, connectés ou non (`providers`, avec `linked` et `connect`), modèles, activés ou non (`catalog`) ; `activated` : les alias activés depuis l'interface. Jamais de clé. |
+| GET | `/api/models` | Les modèles du maître avec leur nature (`models` ; `default` : celui du maître, vide s'il n'en a pas ; `default_fixed` : fixé par la configuration) et le catalogue : fournisseurs connus, connectés ou non (`providers`, avec `linked` et `connect`), modèles, activés ou non (`catalog`) ; `activated` : les alias activés depuis l'interface. Jamais de clé. |
 | POST | `/api/providers/{id}/connect` `{ "key": … }` | Essaie la clé chez le fournisseur du catalogue, puis la range chez le maître. Rend `{ connected, verified }`. |
 | POST | `/api/providers/{id}/disconnect` | Retire les modèles activés d'ici et efface la clé. Refusé tant qu'un agent détient un de ces modèles. |
 | POST | `/api/providers/{id}/oauth` `{ "callback": … }` | Commence une autorisation dans le navigateur ; rend `{ url }`. Le retour doit être la page du maître d'où vient la demande. |
 | POST | `/api/providers/{id}/oauth/finish` `{ "code": … }` | Échange le code contre une clé, que seul le maître voit. |
-| POST | `/api/models/activate` `{ "provider", "model", "alias"?, "calls"? }` | Active un modèle d'un fournisseur connecté d'ici ; rend `{ alias, nature, max_calls }`. |
-| POST | `/api/models/{alias}/deactivate` | Désactive un modèle activé d'ici. Refusé tant qu'un agent le détient. |
+| POST | `/api/models/activate` `{ "provider", "model", "alias"?, "calls"? }` | Active un modèle d'un fournisseur connecté d'ici ; rend `{ alias, nature, default, max_calls }` (`default` : il est devenu le modèle du maître, qui n'en avait pas). |
+| POST | `/api/models/{alias}/deactivate` | Désactive un modèle activé d'ici. Refusé tant qu'un agent le détient. Si c'était le modèle du maître, il n'en a plus. |
+| POST | `/api/models/{alias}/default` | Donne au maître ce modèle pour réfléchir (décision 31). Refusé si la configuration fixe `model`, si l'alias n'est pas dans ses droits ou ne tient pas une conversation. |
 | GET | `/api/roles` | Le répertoire des rôles (500 fiches au plus). |
 
 ## 6. Questions ouvertes
@@ -538,7 +554,13 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 16. **OAuth sans `state`** (H3) : l'autorisation dans le navigateur repose sur PKCE seul. Ne pas
     ouvrir de lien vers la page du maître pendant une autorisation en cours.
 17. **Le fournisseur « local » est un port de la machine du maître** : ne le connecter que si un
-    serveur de modèles y tourne bien, sous un compte de confiance.
+    serveur de modèles y tourne bien, sous un compte de confiance. Depuis la décision 31, un
+    modèle local peut devenir celui du maître : qui tient ce port dicte alors ses appels
+    d'outils, avec tous ses droits. Il n'est donc jamais donné d'office au maître, seulement
+    par « Donner au maître ».
+18. **Changer le modèle du maître déplace sa conversation** : le fil en cours (consignes,
+    résultats d'outils, contenus de fichiers lus) part chez le nouveau fournisseur au message
+    suivant. La page le dit avant de le faire ; le journal le note.
 13. **Le quota de service compte des appels, pas de l'argent** : un appel d'image coûte plus
     qu'un appel de plongements. Régler `max_calls` nature par nature, au plus juste (B4 à venir).
 10. Un agent déployé qui ne répond plus (machine éteinte, réseau coupé) s'éteint seul, mais sa
@@ -683,6 +705,24 @@ exploitable sans erreur ou complicité de l'administrateur.
 | I7 | Basse | Durcissement systemd possible sans gêner les enfants. | 🟡 Ajouté à l'unité du système (capacités, noyau, horloge, groupes de contrôle). Unité du compte : seulement ce qui ne dépend pas des espaces de noms. Non essayé sur un service réel. |
 | I8 | Basse | `--user` ne refusait que le mot « root » ; sans `HOME`, l'unité du compte s'écrivait dans le dossier courant ; `install.sh` lançait l'exécutable installé pour afficher sa version. | ✅ Uid vérifié ; dossier personnel absolu exigé ; plus aucun lancement. |
 
-Non vérifié par la revue : tout Windows (guillemets de `schtasks`, création de la tâche sans
+### Septième passe (2026-11-21) : le maître reçoit son modèle depuis l'interface
+
+Revue indépendante, à la lecture. Aucun constat haut : la route ne donne au maître ni droit en
+plus, ni modèle de service, et ne contourne pas un `model` fixé par la configuration ; un
+enfant n'a aucune voie vers le modèle du maître ; un maître sans modèle n'ouvre rien de plus.
+
+| N° | Gravité | Constat | Traitement |
+|---|---|---|---|
+| J1 | Moyenne | Le don d'office (« le premier modèle activé devient celui du maître ») valait aussi pour un maître qui avait perdu son modèle : sa conversation partait chez un autre fournisseur sans geste. | ✅ D'office seulement si le maître n'a jamais eu de modèle depuis son démarrage. Test. |
+| J2 | Moyenne à basse | « Donner au maître » ne disait pas que la conversation en cours change de fournisseur. | ✅ Confirmation dans la page, ligne au journal, limite 18. |
+| J3 | Moyenne à basse | Un modèle du fournisseur local, que tout programme de la machine peut imiter, pouvait devenir d'office le modèle du maître. | ✅ Jamais d'office pour un fournisseur local ; limite 17 complétée. |
+| J4 | Basse | Un alias donné au maître puis repris par la configuration (autre fournisseur) était suivi en silence au redémarrage ; `master` survivait à la déconnexion d'un fournisseur dont le modèle n'était plus actif. | ✅ `master` effacé dans les deux cas. |
+| J5 | Basse | Un agent permanent créé sans `model` suivait le modèle du maître à chaque redémarrage. | ✅ Le modèle résolu est écrit dans la demande gardée. |
+| J6 | Basse | Un alias de la configuration hors du format des alias de l'interface ne pouvait pas être donné au maître ; `[models.""]` était accepté. | ✅ Seule l'appartenance aux droits compte ; alias vide refusé au chargement. |
+
+Non vérifié par la revue : un fil mêlant les blocs d'outils de deux fournisseurs (essayé
+seulement entre deux modèles du même faux fournisseur).
+
+Non vérifié par la revue de la sixième passe : tout Windows (guillemets de `schtasks`, création de la tâche sans
 élévation), `launchctl`, la construction de l'image, l'exécution du flux de publication.
 

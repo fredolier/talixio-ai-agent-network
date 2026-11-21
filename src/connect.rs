@@ -8,6 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -31,6 +32,8 @@ pub struct Saved {
     /// Par alias.
     pub models: BTreeMap<String, SavedModel>,
     pub max_calls: BTreeMap<String, u64>,
+    /// L'alias du modèle donné au maître depuis l'interface, quand sa configuration n'en fixe pas.
+    pub master: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -173,14 +176,21 @@ pub fn merge(cfg: &mut RootConfig) -> (Vec<(String, &'static str)>, Vec<String>)
     let mut saved = load(&cfg.state_dir);
     let (mut restored, mut notes) = (Vec::new(), Vec::new());
     let before = saved.models.len();
+    let mut struck = Vec::new();
     saved.models.retain(|alias, _| {
         let free = alias_name(alias) && !cfg.models.contains_key(alias);
         if !free {
+            struck.push(alias.clone());
             notes.push(format!("modèle « {} » : alias pris par la configuration ou illisible, activation oubliée", crate::clean(alias, 40, false)));
         }
         free
     });
-    if saved.models.len() != before {
+    // un alias repris par la configuration n'est plus celui qu'on avait donné au maître
+    let stale = saved.master.as_ref().is_some_and(|alias| struck.contains(alias));
+    if stale {
+        saved.master = None;
+    }
+    if saved.models.len() != before || stale {
         let _ = save(&cfg.state_dir, &saved);
     }
     for (alias, model) in &saved.models {
@@ -211,6 +221,52 @@ pub fn restore(node: &Node, restored: &[(String, &'static str)]) {
         if crate::policy::counted_nature(nature) && restored.iter().any(|(_, n)| n == nature) {
             node.set_calls(nature, (*calls).min(MAX_CALLS));
         }
+    }
+    // le modèle donné au maître depuis l'interface, s'il est toujours dans ses droits
+    if let Some(alias) = load(&node.state_dir).master.filter(|alias| thinks(node, alias)) {
+        seat_master(node, &alias);
+    }
+}
+
+/// Le maître a eu un modèle depuis son démarrage : plus aucun ne lui est donné d'office.
+static SEATED: AtomicBool = AtomicBool::new(false);
+
+fn seat_master(node: &Node, alias: &str) {
+    SEATED.store(true, Ordering::Relaxed);
+    node.set_model(alias);
+}
+
+/// Ce modèle peut-il être celui du maître ? Il est dans ses droits et tient une conversation.
+fn thinks(node: &Node, alias: &str) -> bool {
+    node.rights().models.iter().any(|m| m == alias) && node.natures().get(alias).is_some_and(|nature| nature == "llm" || nature == "vision")
+}
+
+/// Donne au maître le modèle avec lequel il réfléchit, parmi ceux qu'il peut déjà appeler.
+/// Refusé si sa configuration en fixe un : elle garde le dernier mot.
+pub async fn choose(node: &Node, alias: &str) -> Result<Value, String> {
+    let _guard = CHANGES.lock().await;
+    if node.model_fixed {
+        return Err("le modèle du maître est fixé par sa configuration (`model`) : c'est là qu'il se change".into());
+    }
+    if !thinks(node, alias) {
+        return Err("le maître ne peut prendre qu'un modèle activé qui tient une conversation".into());
+    }
+    let mut saved = load(&node.state_dir);
+    saved.master = Some(alias.to_string());
+    save(&node.state_dir, &saved)?;
+    seat_master(node, alias);
+    node.emit("status", format!("modèle du maître choisi depuis l'interface : « {} » ; la conversation en cours du maître ira désormais à ce modèle", crate::clean(alias, 40, false)));
+    Ok(json!({ "default": alias }))
+}
+
+/// Le maître perd son modèle si c'est celui-ci qui s'en va.
+fn unseat(node: &Node, saved: &mut Saved, alias: &str) {
+    if saved.master.as_deref() == Some(alias) {
+        saved.master = None;
+    }
+    if !node.model_fixed && node.model() == alias {
+        node.set_model("");
+        node.emit("status", "le maître n'a plus de modèle : donnez-lui en un autre dans « Modèles »".to_string());
     }
 }
 
@@ -328,6 +384,10 @@ pub async fn disconnect(node: &Node, id: &str) -> Result<Value, String> {
         // seulement ce qui a été activé d'ici : jamais un modèle de la configuration
         if ACTIVE.lock().unwrap().remove(alias) {
             drop_model(node, alias);
+            unseat(node, &mut saved, alias);
+        }
+        if saved.master.as_deref() == Some(alias.as_str()) {
+            saved.master = None;
         }
         saved.models.remove(alias);
     }
@@ -378,9 +438,20 @@ pub async fn activate(node: &Node, id: &str, model: &str, alias: Option<&str>, c
     if let Some(calls) = calls {
         saved.max_calls.insert(nature.to_string(), calls);
     }
+    // un maître sans modèle prend le premier qui tient une conversation
+    // seulement s'il n'en a jamais eu depuis son démarrage : sinon sa conversation partirait chez un
+    // autre fournisseur sans qu'on l'ait demandé. Jamais d'office un serveur local, que tout
+    // programme de la machine peut imiter : celui-là se donne par un geste.
+    let seat = !node.model_fixed && node.model().is_empty() && !SEATED.load(Ordering::Relaxed) && provider.trust != "L" && matches!(nature, "llm" | "vision");
+    if seat {
+        saved.master = Some(alias.clone());
+    }
     save(&node.state_dir, &saved)?;
     if let Err(e) = providers.add(&alias, &declared, key) {
         saved.models.remove(&alias);
+        if seat {
+            saved.master = None;
+        }
         prune_calls(node, &mut saved);
         let _ = save(&node.state_dir, &saved);
         return Err(format!("{e:#}"));
@@ -390,8 +461,11 @@ pub async fn activate(node: &Node, id: &str, model: &str, alias: Option<&str>, c
     if let Some(calls) = calls {
         node.set_calls(nature, calls);
     }
-    node.emit("status", format!("modèle activé depuis l'interface : « {alias} » ({}, {nature})", provider.name));
-    Ok(json!({ "alias": alias, "nature": nature, "max_calls": node.rights().max_calls.get(nature) }))
+    if seat {
+        seat_master(node, &alias);
+    }
+    node.emit("status", format!("modèle activé depuis l'interface : « {alias} » ({}, {nature}){}", provider.name, if seat { " ; il devient le modèle du maître" } else { "" }));
+    Ok(json!({ "alias": alias, "nature": nature, "default": seat, "max_calls": node.rights().max_calls.get(nature) }))
 }
 
 /// Désactive un modèle activé depuis l'interface.
@@ -404,6 +478,7 @@ pub async fn deactivate(node: &Node, alias: &str) -> Result<Value, String> {
     check_free(node, alias)?;
     ACTIVE.lock().unwrap().remove(alias);
     drop_model(node, alias);
+    unseat(node, &mut saved, alias);
     saved.models.remove(alias);
     prune_calls(node, &mut saved);
     save(&node.state_dir, &saved)?;

@@ -65,6 +65,7 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 - [ ] Conversations longues : résumé ou compaction (M4)
 - [x] Le maître en service du système : `service install`, `uninstall`, `status` (A5, décision 28, D122)
 - [x] Image Docker minimale du maître, configuration par défaut (décision 29, D123)
+- [x] Le maître démarre sans modèle ni clé et reçoit son modèle depuis l'interface (décision 31, D124)
 - [ ] Image Docker, suite : la construire et la publier avec chaque version ; essai réel
 - [ ] Service, suite : essai sur une machine qui redémarre (Linux, macOS, Windows) ; vrai service Windows
 - [x] Agents permanents du maître recréés à son redémarrage, avec leur mémoire et des droits revérifiés (décision 30, D122)
@@ -111,3 +112,4 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 | 2026-11-21 | Versions téléchargeables : publication par étiquette (cinq exécutables, empreintes), scripts d'installation en une ligne pour Linux, macOS et Windows (décision 27, D121). |
 | 2026-11-21 | v0.9.1 : revue de sécurité indépendante des modèles de service rendue : un constat haut (quota contournable par des appels échoués après envoi), un moyen (redirections suivies), six bas ; tous traités et rejoués en test (SPEC §7, quatrième passe). |
 | 2026-11-21 | CI Windows rouge sur les tests du service : ils employaient des chemins d'Unix, qui ne sont pas absolus sous Windows. Tests d'Unix réservés à Unix ; un test propre à Windows (tâche planifiée, chemins refusés) ajouté. Aucun changement du code livré. |
+| 2026-11-21 | v0.12.0 : le maître démarre sans modèle ni clé et reçoit son modèle depuis l'interface (décision 31, D124) : `model` et `[models]` facultatifs, route `/api/models/{alias}/default`, bouton « Donner au maître », image Docker sans clé au lancement. Défaut trouvé par le test : `[models]` restait obligatoire. Revue de sécurité indépendante : deux constats moyens (conversation déplacée sans geste après la perte du modèle, fournisseur local donné d'office), quatre bas ; tous traités (SPEC §7, septième passe). Non essayé : Docker, vrai fournisseur. |

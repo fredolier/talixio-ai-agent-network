@@ -270,11 +270,11 @@ async fn connect_and_activate_from_the_interface() {
     // un modèle de service s'active avec son nombre d'appels, borné
     assert!(api.refused("/api/models/activate", json!({ "provider": "faux", "model": "sens-1", "calls": 5_000_000 })).await.contains("au plus"));
     let done = api.ok("/api/models/activate", json!({ "provider": "faux", "model": "sens-1", "alias": "sens", "calls": 3 })).await;
-    assert_eq!(done, json!({ "alias": "sens", "nature": "embedding", "max_calls": 3 }));
+    assert_eq!(done, json!({ "alias": "sens", "nature": "embedding", "default": false, "max_calls": 3 }));
 
     // un nombre d'appels fixé par la configuration ne se change pas d'ici, ni en plus ni en moins
     let done = api.ok("/api/models/activate", json!({ "provider": "faux", "model": "peint-1", "alias": "peintre", "calls": 1000 })).await;
-    assert_eq!(done, json!({ "alias": "peintre", "nature": "image", "max_calls": 4 }));
+    assert_eq!(done, json!({ "alias": "peintre", "nature": "image", "default": false, "max_calls": 4 }));
     api.ok("/api/models/peintre/deactivate", json!({})).await;
     api.ok("/api/models/activate", json!({ "provider": "faux", "model": "peint-1", "alias": "peintre", "calls": 0 })).await;
     api.ok("/api/models/peintre/deactivate", json!({})).await;
@@ -391,5 +391,110 @@ async fn connect_and_activate_from_the_interface() {
     assert!(api.refused("/api/providers/faux/disconnect", json!({})).await.contains("pas été connecté depuis l'interface"));
     assert!(api.refused("/api/models/activate", json!({ "provider": "faux", "model": "grand-1" })).await.contains("connectez d'abord"));
 
+    root.kill().await.unwrap();
+}
+
+/// Le maître démarre sans modèle ni clé, et reçoit son modèle depuis l'interface, comme un enfant
+/// reçoit le sien de son parent.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_master_gets_its_model_from_the_interface() {
+    let tmp_guard = tempfile::tempdir().unwrap();
+    let tmp = tmp_guard.path().canonicalize().unwrap();
+    let state = tmp.join("state");
+    let fake = Arc::new(Fake::default());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let fp = listener.local_addr().unwrap().port();
+    let app = Router::new().fallback(fake_provider).with_state(fake.clone());
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let catalog = tmp.join("catalogue.toml");
+    std::fs::write(
+        &catalog,
+        format!(
+            "[[provider]]\nid = \"faux\"\nname = \"Fournisseur faux\"\ncountry = \"France\"\neurope = true\ntrust = \"4\"\nkind = \"Essai\"\n\
+             billing = \"usage\"\napis = [\"openai\"]\nendpoint = \"http://127.0.0.1:{fp}/v1\"\nhosts = [\"127.0.0.1\"]\n\
+             [[model]]\nname = \"Grand\"\nid = \"grand-1\"\nprovider = \"faux\"\nnature = \"LLM\"\nrank = 7\n\
+             [[model]]\nname = \"Petit\"\nid = \"petit-1\"\nprovider = \"faux\"\nnature = \"LLM\"\nrank = 3\n\
+             [[model]]\nname = \"Sens\"\nid = \"sens-1\"\nprovider = \"faux\"\nnature = \"Embedding\"\nrank = 5\n"
+        ),
+    )
+    .unwrap();
+    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let config = tmp.join("talixio.toml");
+    // ni `model`, ni [models] : rien à fournir pour démarrer
+    std::fs::write(&config, format!("listen = \"127.0.0.1:{port}\"\nstate_dir = {state:?}\ncatalog_file = {catalog:?}\n")).unwrap();
+    let (mut root, api) = start_root(&config, &state, port).await;
+    let say = |text: &'static str| api.http.post(format!("{}/api/messages", api.base)).bearer_auth(TOKEN).json(&json!({ "text": text })).send();
+
+    let models = api.get("/api/models").await;
+    assert_eq!(models["default"], "");
+    assert_eq!(models["default_fixed"], false);
+    // sans modèle, le maître le dit et n'appelle personne
+    say("bonjour").await.unwrap();
+    api.wait_event("l'absence de modèle", |e| e["kind"] == "error" && e["text"].as_str().unwrap().contains("pas encore de modèle")).await;
+    assert!(!fake.seen.lock().unwrap().iter().any(|(path, ..)| path.contains("chat")));
+
+    // sans jeton, rien ; un alias inconnu ou mal formé, rien
+    let denied = api.http.post(format!("{}/api/models/grand-1/default", api.base)).send().await.unwrap();
+    assert_eq!(denied.status(), 401);
+    assert!(api.refused("/api/models/grand-1/default", json!({})).await.contains("modèle activé"));
+
+    // un modèle de service ne fait pas réfléchir le maître ; le premier modèle de texte activé devient le sien
+    api.ok("/api/providers/faux/connect", json!({ "key": KEY })).await;
+    assert_eq!(api.ok("/api/models/activate", json!({ "provider": "faux", "model": "sens-1", "calls": 5 })).await["default"], false);
+    assert!(api.refused("/api/models/sens-1/default", json!({})).await.contains("tient une conversation"));
+    assert_eq!(api.get("/api/models").await["default"], "");
+    assert_eq!(api.ok("/api/models/activate", json!({ "provider": "faux", "model": "grand-1" })).await["default"], true);
+    assert_eq!(api.get("/api/models").await["default"], "grand-1");
+    say("bonjour encore").await.unwrap();
+    api.wait_event("la réponse du maître", |e| e["text"].as_str().is_some_and(|t| t.contains("C'est noté."))).await;
+    assert!(fake.seen.lock().unwrap().iter().any(|(path, _, model)| path.contains("chat") && model == "grand-1"));
+
+    // un deuxième modèle ne prend pas la place ; on la lui donne
+    assert_eq!(api.ok("/api/models/activate", json!({ "provider": "faux", "model": "petit-1" })).await["default"], false);
+    assert_eq!(api.ok("/api/models/petit-1/default", json!({})).await, json!({ "default": "petit-1" }));
+    say("et maintenant").await.unwrap();
+    let start = Instant::now();
+    while !fake.seen.lock().unwrap().iter().any(|(path, _, model)| path.contains("chat") && model == "petit-1") {
+        assert!(start.elapsed() < Duration::from_secs(20), "le maître n'a pas changé de modèle");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    // le choix tient après un redémarrage
+    root.kill().await.unwrap();
+    let (mut root, api) = start_root(&config, &state, port).await;
+    assert_eq!(api.get("/api/models").await["default"], "petit-1");
+
+    // désactiver le modèle du maître : il n'en a plus, et le dit ; il ne retombe pas sur un autre en silence
+    api.ok("/api/models/petit-1/deactivate", json!({})).await;
+    assert_eq!(api.get("/api/models").await["default"], "");
+    // il a déjà eu un modèle : un modèle activé ensuite ne reçoit pas sa conversation d'office
+    assert_eq!(api.ok("/api/models/activate", json!({ "provider": "faux", "model": "petit-1" })).await["default"], false);
+    assert_eq!(api.get("/api/models").await["default"], "");
+    root.kill().await.unwrap();
+    let (mut root, api) = start_root(&config, &state, port).await;
+    assert_eq!(api.get("/api/models").await["default"], "");
+    api.ok("/api/models/grand-1/default", json!({})).await;
+
+    // déconnecter le fournisseur emporte le modèle du maître
+    api.ok("/api/providers/faux/disconnect", json!({})).await;
+    assert_eq!(api.get("/api/models").await["default"], "");
+    root.kill().await.unwrap();
+
+    // une configuration qui fixe le modèle garde le dernier mot
+    std::env::set_var("TALIXIO_TEST_CLE_FIXE", KEY);
+    std::fs::write(
+        &config,
+        format!(
+            "model = \"main\"\nlisten = \"127.0.0.1:{port}\"\nstate_dir = {state:?}\ncatalog_file = {catalog:?}\n\
+             [models.main]\nprovider = \"openai\"\nbase_url = \"http://127.0.0.1:{fp}/v1\"\nmodel = \"principal\"\napi_key_env = \"TALIXIO_TEST_CLE_FIXE\"\n\
+             [models.autre]\nprovider = \"openai\"\nbase_url = \"http://127.0.0.1:{fp}/v1\"\nmodel = \"second\"\napi_key_env = \"TALIXIO_TEST_CLE_FIXE\"\n"
+        ),
+    )
+    .unwrap();
+    let (mut root, api) = start_root(&config, &state, port).await;
+    assert_eq!(api.get("/api/models").await["default_fixed"], true);
+    assert!(api.refused("/api/models/autre/default", json!({})).await.contains("fixé par sa configuration"));
+    assert_eq!(api.get("/api/models").await["default"], "main");
     root.kill().await.unwrap();
 }

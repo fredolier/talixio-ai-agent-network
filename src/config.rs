@@ -19,7 +19,9 @@ pub struct RootConfig {
     pub role: String,
     #[serde(default)]
     pub instructions: String,
-    /// Alias du modèle du maître, parmi `models`.
+    /// Alias du modèle du maître, parmi `models`. Absent : le maître démarre sans modèle et
+    /// reçoit le sien depuis l'interface.
+    #[serde(default)]
     pub model: String,
     /// Adresse d'écoute : l'API et le lien des enfants, en TLS. Par défaut, la machine seule.
     #[serde(default = "default_listen")]
@@ -40,6 +42,8 @@ pub struct RootConfig {
     /// Un catalogue de fournisseurs et de modèles à la place de celui de l'exécutable. Il fixe
     /// les adresses où vont les clés saisies dans l'interface : à protéger comme ce fichier-ci.
     pub catalog_file: Option<PathBuf>,
+    /// Peut être vide : les modèles s'activent alors depuis l'interface.
+    #[serde(default)]
     pub models: BTreeMap<String, ModelConfig>,
     #[serde(default)]
     pub capabilities: Capabilities,
@@ -266,14 +270,20 @@ impl RootConfig {
         let text = std::fs::read_to_string(path).with_context(|| format!("lecture de {}", path.display()))?;
         let mut cfg: RootConfig =
             toml::from_str(&text).with_context(|| format!("{} n'est pas une configuration valide", path.display()))?;
-        if !cfg.models.contains_key(&cfg.model) {
-            bail!("le modèle « {} » n'est pas défini dans [models]", cfg.model);
-        }
-        if cfg.models[&cfg.model].nature.as_deref().is_some_and(|n| n != "llm") {
-            bail!("le modèle du maître, « {} », doit tenir une conversation (nature llm)", cfg.model);
+        // sans `model`, le maître reçoit le sien depuis l'interface
+        if !cfg.model.is_empty() {
+            let Some(model) = cfg.models.get(&cfg.model) else {
+                bail!("le modèle « {} » n'est pas défini dans [models]", cfg.model);
+            };
+            if model.nature.as_deref().is_some_and(|n| n != "llm") {
+                bail!("le modèle du maître, « {} », doit tenir une conversation (nature llm)", cfg.model);
+            }
         }
         if cfg.capabilities.models.is_empty() {
             cfg.capabilities.models = cfg.models.keys().cloned().collect();
+        }
+        if cfg.models.contains_key("") {
+            bail!("[models] : un modèle a besoin d'un alias");
         }
         if let Some(unknown) = cfg.capabilities.models.iter().find(|m| !cfg.models.contains_key(*m)) {
             bail!("capabilities.models cite un modèle non défini : « {unknown} »");

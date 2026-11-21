@@ -40,25 +40,22 @@ docker build -t talixio-agent .
 ```
 
 ```bash
-export ANTHROPIC_API_KEY=...
-```
-
-```bash
 export TALIXIO_API_TOKEN="$(openssl rand -hex 32)"; echo "$TALIXIO_API_TOKEN"
 ```
 
 ```bash
-docker run -d --name talixio -p 127.0.0.1:7700:7700 -v talixio-data:/data --cap-drop ALL --security-opt no-new-privileges --pids-limit 256 --memory 1g -e ANTHROPIC_API_KEY -e TALIXIO_API_TOKEN talixio-agent
+docker run -d --name talixio -p 127.0.0.1:7700:7700 -v talixio-data:/data --cap-drop ALL --security-opt no-new-privileges --pids-limit 256 --memory 1g -e TALIXIO_API_TOKEN talixio-agent
 ```
 
 La deuxième commande tire le jeton de l'interface au hasard et l'affiche : gardez-le. Un jeton
-faible ou recopié d'un exemple est refusé.
+faible ou recopié d'un exemple est refusé. Aucune clé de modèle n'est demandée pour démarrer.
 
 Puis ouvrez `https://127.0.0.1:7700` (le certificat est fabriqué par le maître : le navigateur
-demande confirmation) et entrez votre jeton. Les agents ne lisent et n'écrivent que dans
-`/data/work`, et aucune commande ne leur est permise. Pour un autre modèle que Claude, montez
-votre configuration : `-v /chemin/talixio.toml:/config/talixio.toml:ro` (modèle :
-`docker/talixio.toml`). D'autres fournisseurs se connectent ensuite depuis l'interface.
+demande confirmation) et entrez votre jeton. Dans « Fournisseurs », connectez le vôtre ; dans
+« Modèles », activez un modèle de texte : le premier activé devient celui du maître, et
+« Donner au maître » en change. Les agents ne lisent et n'écrivent que dans `/data/work`, et
+aucune commande ne leur est permise. Pour d'autres droits, montez votre configuration :
+`-v /chemin/talixio.toml:/config/talixio.toml:ro` (modèle : `docker/talixio.toml`).
 
 ```bash
 docker logs talixio
@@ -148,8 +145,10 @@ On se connecte depuis la page : dans « Fournisseurs », choisissez un fournisse
 fichier que seul son compte peut lire (`<state_dir>/keys/`), et ne la rend plus jamais. Dans
 « Modèles », « Activer » rend un modèle utilisable aussitôt, sans redémarrage. OpenRouter se
 connecte par autorisation dans le navigateur ; les autres (OpenAI, Anthropic, Gemini, Mistral,
-OVHcloud, AKI.IO, Scaleway, ElevenLabs, DeepSeek) par clé. Déclarer un modèle dans
-`talixio.toml` reste possible, et nécessaire pour le modèle du maître lui-même.
+OVHcloud, AKI.IO, Scaleway, ElevenLabs, DeepSeek) par clé. Le maître lui-même reçoit son
+modèle de la même façon : sans `model` dans `talixio.toml`, il démarre sans modèle ni clé, prend
+le premier modèle de texte activé, et « Donner au maître » lui en donne un autre. Déclarer les
+modèles dans `talixio.toml` reste possible ; un `model` écrit là ne se change pas depuis la page.
 
 ![Les fournisseurs](docs/images/interface-fournisseurs.png)
 

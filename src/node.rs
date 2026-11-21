@@ -38,7 +38,12 @@ pub struct Node {
     pub parent_id: Option<String>,
     pub parent_name: Option<String>,
     pub instructions: String,
-    pub model: String,
+    /// Le modèle avec lequel l'agent réfléchit : lire `model()`. Vide chez un maître qui n'en a
+    /// pas encore reçu.
+    model: RwLock<String>,
+    /// Le modèle ne se change pas pendant que l'agent tourne : il vient de la configuration du
+    /// maître, ou du parent.
+    pub model_fixed: bool,
     /// Les droits reçus au démarrage. Pour les modèles et les quotas d'appels, lire `rights()` :
     /// chez le maître, ils peuvent s'étendre pendant qu'il tourne.
     pub caps: Capabilities,
@@ -318,7 +323,8 @@ impl Node {
             parent_id: None,
             parent_name: None,
             instructions: cfg.instructions.clone(),
-            model: cfg.model.clone(),
+            model: RwLock::new(cfg.model.clone()),
+            model_fixed: !cfg.model.is_empty(),
             nature_table: RwLock::new(providers.natures().into_iter().filter(|(alias, _)| cfg.capabilities.models.contains(alias)).collect()),
             live: RwLock::default(),
             caps: cfg.capabilities.clone(),
@@ -363,7 +369,8 @@ impl Node {
             parent_id: Some(boot.parent_id.clone()),
             parent_name: Some(boot.parent_name.clone()),
             instructions: boot.instructions.clone(),
-            model: boot.model.clone(),
+            model: RwLock::new(boot.model.clone()),
+            model_fixed: true,
             nature_table: RwLock::new(boot.natures.iter().filter(|(alias, _)| boot.capabilities.models.contains(alias)).map(|(a, n)| (crate::clean(a, 80, false), crate::clean(n, 20, false))).collect()),
             live: RwLock::default(),
             caps: boot.capabilities.clone(),
@@ -405,7 +412,7 @@ impl Node {
             parent_id: self.parent_id.clone(),
             depth: self.depth,
             status: *self.status.lock().unwrap(),
-            model: self.model.clone(),
+            model: self.model(),
             target: self.target.clone(),
             host: self.host.host.clone(),
             os: self.host.os.clone(),
@@ -509,6 +516,20 @@ impl Node {
             rights.max_calls.entry(nature.clone()).or_insert(*calls);
         }
         rights
+    }
+
+    /// Le modèle avec lequel l'agent réfléchit ; vide : aucun encore.
+    pub fn model(&self) -> String {
+        self.model.read().unwrap().clone()
+    }
+
+    /// Chez le maître dont la configuration ne fixe pas le modèle : celui-ci le devient
+    /// (vide : plus aucun). À l'appelant de vérifier qu'il est dans les droits et tient une conversation.
+    pub fn set_model(&self, alias: &str) {
+        if !self.model_fixed {
+            *self.model.write().unwrap() = alias.to_string();
+            self.tree_dirty.notify_one();
+        }
     }
 
     pub fn natures(&self) -> BTreeMap<String, String> {

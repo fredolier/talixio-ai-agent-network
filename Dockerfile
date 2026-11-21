@@ -5,7 +5,7 @@
 #   export TALIXIO_API_TOKEN="$(openssl rand -hex 32)"      # le jeton de l'interface : gardez-le
 #   docker run -d --name talixio -p 127.0.0.1:7700:7700 -v talixio-data:/data \
 #     --cap-drop ALL --security-opt no-new-privileges --pids-limit 256 --memory 1g \
-#     -e ANTHROPIC_API_KEY -e TALIXIO_API_TOKEN talixio-agent
+#     -e TALIXIO_API_TOKEN talixio-agent
 #   puis https://127.0.0.1:7700 (certificat fabriqué par le maître : le navigateur demande confirmation)
 #
 # /config/talixio.toml : la configuration (docker/talixio.toml par défaut ; montez la vôtre par-dessus).

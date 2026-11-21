@@ -145,7 +145,10 @@ export interface CatalogModel {
 }
 
 export interface ModelsData {
+  /** L'alias du modèle du maître ; vide : il n'en a pas encore. */
   default: string
+  /** Le modèle du maître vient de sa configuration : il ne se change pas d'ici. */
+  default_fixed?: boolean
   models: ModelInfo[]
   providers: CatalogProvider[]
   catalog: CatalogModel[]

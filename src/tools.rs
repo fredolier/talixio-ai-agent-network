@@ -726,7 +726,7 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value, resumed: Option<&str>) -> 
         Value::Null => Capabilities::default(),
         value => serde_json::from_value(value.clone()).map_err(|e| format!("droits invalides : {e}"))?,
     };
-    let model = input["model"].as_str().unwrap_or(&node.model).to_string();
+    let model = input["model"].as_str().map(str::to_string).unwrap_or_else(|| node.model());
     if node.natures().get(&model).is_some_and(|nature| nature != "llm" && nature != "vision") {
         return Err(format!("le modèle d'un agent doit tenir une conversation : « {model} » est de nature « {} »", node.natures()[&model]));
     }
@@ -819,7 +819,7 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value, resumed: Option<&str>) -> 
         parent_id: Some(node.id.clone()),
         depth: boot.depth,
         status: Status::Starting,
-        model,
+        model: model.clone(),
         target: boot.target.clone(),
         host: node.host.host.clone(),
         os: node.host.os.clone(),
@@ -907,7 +907,10 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value, resumed: Option<&str>) -> 
             "\n\nTu es un agent permanent : tu seras relancé après un redémarrage, sans ta conversation mais avec ta mémoire. Note-y au fur et à mesure (memory_write) où tu en es et ce qui reste à faire."
         });
         // la demande est gardée telle quelle : elle repassera par les mêmes contrôles
-        if let Err(e) = node.store.permanent_save(&boot.agent_id, &name, &input.to_string()) {
+        // avec son modèle écrit : il ne suit pas celui du maître d'un démarrage à l'autre
+        let mut kept = input.clone();
+        kept["model"] = Value::String(model.clone());
+        if let Err(e) = node.store.permanent_save(&boot.agent_id, &name, &kept.to_string()) {
             node.emit("error", format!("agent {name} : permanence non enregistrée ({e})"));
         }
     }

@@ -7,6 +7,24 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.12.0"
+date = "2026-11-21"
+title = "Le maître reçoit son modèle depuis l'interface"
+summary = "Le maître démarre sans modèle ni clé : on connecte un fournisseur et on lui donne son modèle depuis la page, comme à n'importe quel agent."
+
+[[release.changes]]
+kind = "nouveau"
+text = "`model` et `[models]` deviennent facultatifs dans la configuration. Sans eux, le maître démarre, ouvre son interface et attend : le premier modèle de texte activé dans « Modèles » devient le sien, et « Donner au maître » lui en donne un autre, sans redémarrage. Le choix est gardé d'un démarrage à l'autre."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Image Docker : plus aucune clé à fournir au lancement, seulement le jeton de l'interface."
+
+[[release.changes]]
+kind = "attention"
+text = "Un `model` écrit dans la configuration garde le dernier mot : il ne se change pas depuis la page. Retirez la ligne pour choisir depuis l'interface. Changer le modèle du maître en cours de conversation envoie la conversation en cours au nouveau fournisseur."
+
+[[release]]
 version = "0.11.0"
 date = "2026-11-21"
 title = "Le maître en service"

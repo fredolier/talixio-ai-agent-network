@@ -57,6 +57,13 @@ export function ModelsView({ cluster }: { cluster: Cluster }) {
         <Input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Chercher un modèle, un alias…" aria-label="Chercher un modèle" className="w-full sm:w-64" />
       </PageHeader>
 
+      {!data.default && (
+        <p role="status" className="rounded-lg border border-st-off/40 bg-card px-4 py-3 text-sm">
+          <span className="font-medium">Le maître n'a pas encore de modèle.</span>{' '}
+          Connectez un fournisseur dans la page <a href="#fournisseurs" className="underline underline-offset-4">Fournisseurs</a>, puis activez ici un modèle de texte : le premier activé devient le sien (un serveur local se donne par « Donner au maître »).
+        </p>
+      )}
+
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
         <div className="flex flex-wrap gap-1" role="group" aria-label="Nature des modèles">
           {['', ...NATURES].map((n) => (
@@ -164,6 +171,13 @@ function ModelRow({ model, provider, data, agents, cluster }: { model: CatalogMo
             {model.aliases.map((alias) => (
               <span key={alias} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
                 <Activation alias={alias} data={data} agents={agents} />
+                {!data.default_fixed && alias !== data.default && talks(data, alias) && (
+                  <Button size="sm" variant={data.default ? 'outline' : 'default'} disabled={busy} title="Le maître réfléchira avec ce modèle" onClick={() => {
+                    if (!data.default || confirm(`Donner « ${alias} » (${provider.name}) au maître ? Sa conversation en cours, résultats d'outils compris, sera envoyée à ce fournisseur.`)) run(() => cluster.change(`/api/models/${encodeURIComponent(alias)}/default`, {}))
+                  }}>
+                    Donner au maître
+                  </Button>
+                )}
                 {data.activated?.includes(alias) && (
                   <Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => cluster.change(`/api/models/${encodeURIComponent(alias)}/deactivate`, {}))}>
                     Désactiver
@@ -247,6 +261,12 @@ function Activation({ alias, data, agents }: { alias: string; data: ModelsData; 
       <span className="block text-muted-foreground">{granted.length ? `Accordé à ${granted.map((a) => a.name).join(', ')}.` : 'Accordé à aucun enfant.'}</span>
     </span>
   )
+}
+
+/** Ce modèle tient une conversation : le maître peut réfléchir avec lui. */
+const talks = (data: ModelsData, alias: string) => {
+  const nature = data.models.find((m) => m.alias === alias)?.nature
+  return !nature || nature === 'llm' || nature === 'vision'
 }
 
 /** Une machine locale se passe de clé ; partout ailleurs, son absence mérite d'être dite. */

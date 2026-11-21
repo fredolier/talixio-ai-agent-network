@@ -124,8 +124,12 @@ async fn turn(node: &Arc<Node>, system: &str, history: &mut Vec<Message>) -> Res
     let specs = tools::specs(node);
     for _ in 0..MAX_STEPS {
         gate(node).await;
+        let model = node.model();
+        if model.is_empty() {
+            return Err("Je n'ai pas encore de modèle pour réfléchir. Dans l'interface : « Fournisseurs » pour en connecter un, puis « Modèles » pour en activer un.".into());
+        }
         let request = ModelRequest {
-            model: node.model.clone(),
+            model,
             system: system.to_string(),
             messages: history.clone(),
             tools: specs.clone(),
