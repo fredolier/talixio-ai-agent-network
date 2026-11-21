@@ -279,6 +279,8 @@ fn system_prompt(node: &Node) -> String {
              - Il te manque une information, un droit ou une décision : ask_parent.\n\
              - Le critère est atteint et tu l'as vérifié, ou tu as établi que la mission est impossible en l'état : \
              finish_mission, avec la mesure à l'appui. Tu es alors en pause jusqu'aux prochaines consignes.\n\
+             - Tu ne peux pas conclure tant qu'un de tes enfants travaille encore : attends son compte rendu, ou \
+             arrête-le d'abord (stop_agent). Conclure, c'est répondre aussi de leur travail.\n\
              Seuls ask_parent et finish_mission parviennent à ton parent : il ne lit pas le reste de ce que tu écris.\n",
         )),
         None => prompt.push_str(

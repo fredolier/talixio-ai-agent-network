@@ -793,6 +793,13 @@ impl Node {
         self.children.lock().unwrap().values().any(|c| !c.stopped && c.mission_open)
     }
 
+    /// Les enfants en vie dont on attend encore le compte rendu, par leur nom.
+    pub fn busy_children(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.children.lock().unwrap().values().filter(|c| !c.stopped && c.mission_open).map(|c| c.name.clone()).collect();
+        names.sort();
+        names
+    }
+
     /// Éteint toute la descendance, puis ce process.
     pub async fn terminate(&self, reason: &str, code: i32) -> ! {
         eprintln!("[{}] extinction : {reason}", self.name);

@@ -7,6 +7,16 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.13.3"
+date = "2026-11-21"
+title = "Un parent attend ses enfants"
+summary = "Un agent ne peut plus conclure sa mission pendant que ses enfants travaillent encore."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Un agent qui a délégué ne peut plus conclure sa mission tant qu'un de ses enfants travaille : il attend son compte rendu, ou l'arrête lui-même d'abord. Avant, un parent pouvait se croire arrivé, conclure, et faire arrêter toute sa branche en plein travail."
+
+[[release]]
 version = "0.13.2"
 date = "2026-11-21"
 title = "Un dialogue qui dit ce qui se passe"

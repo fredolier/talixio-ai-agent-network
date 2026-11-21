@@ -299,7 +299,7 @@ pub fn specs(node: &Node) -> Vec<ToolSpec> {
         ));
         tools.push(spec(
             "finish_mission",
-            "Conclut ta mission et te met en pause jusqu'aux prochaines consignes de ton parent. À appeler seulement quand le critère de réussite est atteint et vérifié, ou quand tu as établi que la mission est impossible en l'état.".into(),
+            "Conclut ta mission et te met en pause jusqu'aux prochaines consignes de ton parent. À appeler seulement quand le critère de réussite est atteint et vérifié, ou quand tu as établi que la mission est impossible en l'état. Refusé tant qu'un de tes enfants travaille encore : attends son compte rendu, ou arrête-le d'abord.".into(),
             json!({
                 "outcome": { "type": "string", "enum": ["achieved", "impossible"] },
                 "summary": { "type": "string", "description": "Ce qui a été fait, ou ce qui bloque et ce qu'il faudrait pour débloquer." },
@@ -527,6 +527,17 @@ pub async fn execute(node: &Arc<Node>, name: &str, input: &Value) -> Result<Stri
                 "impossible" => ReportKind::Impossible,
                 other => return Err(format!("outcome inconnu : {other} (achieved ou impossible)")),
             };
+            // conclure pendant que ses enfants travaillent, c'est rendre un résultat qu'on n'a pas :
+            // le parent, croyant le travail fini, arrêterait la branche en plein effort
+            let busy = node.busy_children();
+            if !busy.is_empty() {
+                return Err(format!(
+                    "mission non conclue : {} encore au travail ({}). Attends leur compte rendu (termine ton tour : il arrivera dans un message), \
+                     ou arrête avec stop_agent ceux dont tu n'as plus besoin, puis conclus.",
+                    if busy.len() == 1 { "un de tes enfants est" } else { "des enfants sont" },
+                    busy.join(", ")
+                ));
+            }
             let report = format!("{}\n\nPreuves : {}", text(input, "summary")?, text(input, "evidence")?);
             uplink.send_reliable(Msg::Report { kind, text: report.clone() });
             *node.mission.lock().unwrap() = Default::default();

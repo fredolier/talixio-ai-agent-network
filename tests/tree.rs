@@ -58,6 +58,9 @@ async fn fake_model(State(ctx): State<Arc<Ctx>>, Json(body): Json<Value>) -> Jso
         })),
         ("chef", "user") if child && text.contains("type=\"question\"") => call("send_to_agent", json!({ "agent": "lecteur", "message": format!("REPONSE-CHEMIN {file}") })),
         ("chef", "user") if child && text.contains("SECRET-42") => finish("Contenu : SECRET-42"),
+        // le chef veut conclure dès qu'il a délégué : refusé tant que le lecteur travaille
+        ("chef", "tool") if text.contains("« lecteur » créé") => finish("TROP-TOT"),
+        ("chef", "tool") if text.contains("encore au travail") => say("j'attends le lecteur"),
         ("chef", _) => say("ok"),
         ("lecteur", "user") if parent && text.contains("REPONSE-CHEMIN") => call("read_file", json!({ "path": file })),
         ("lecteur", "user") if parent && text.contains("Mission") => call("ask_parent", json!({ "question": "QUESTION-CHEMIN ?" })),
@@ -166,6 +169,11 @@ max_depth = 2
     // 1. trois niveaux, question au parent, compte rendu en cascade
     api.say("demarre").await;
     api.wait_event("fin", |e| e["agent_name"] == "maître" && e["kind"] == "message" && e["text"] == "FINI SECRET-42").await;
+    // un parent ne conclut pas pendant que son enfant travaille : refusé, et rien n'est remonté au maître
+    let refused = api.wait_event("conclusion prématurée refusée", |e| e["agent_name"] == "chef" && e["kind"] == "tool_error" && e["text"].as_str().unwrap().contains("encore au travail (lecteur)")).await;
+    assert!(refused["text"].as_str().unwrap().contains("stop_agent"));
+    let journal = api.get("/api/activity?after=0&limit=5000").await;
+    assert!(!journal["events"].as_array().unwrap().iter().any(|e| e["text"].as_str().unwrap().contains("TROP-TOT") && e["kind"] != "tool" && e["kind"] != "tool_error"), "{journal:#}");
     api.wait_event("lecture du lecteur", |e| e["agent_name"] == "lecteur" && e["kind"] == "tool").await;
     // rien de ce qu'a fait le petit-enfant ne manque au journal du maître, dès son premier geste
     let journal = api.get("/api/activity?after=0&limit=5000").await;

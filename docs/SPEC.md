@@ -85,6 +85,7 @@ Exemples visés :
 | G9 | Un parent peut arrêter un enfant. | ✅ |
 | G10 | Un parent peut désinstaller un enfant de la machine où il l'a déployé. | ✅ à l'arrêt de l'enfant ou du maître : exécutable, base et journal retirés de la cible ; conteneur supprimé |
 | G11 | Chaque agent a un nom et un rôle, et déclare sa machine, son OS et son adresse IP. | ✅ |
+| G12 | Un parent ne conclut pas sa mission tant qu'un de ses enfants travaille encore : il attend son compte rendu, ou l'arrête d'abord. Sinon il rendrait un résultat qu'il n'a pas, et son propre parent arrêterait la branche en plein travail. | ✅ `finish_mission` refusé avec le nom des enfants au travail ; test dans `tests/tree.rs` |
 
 ### Autonomie
 

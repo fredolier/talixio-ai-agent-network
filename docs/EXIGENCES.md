@@ -220,3 +220,4 @@ Relevés à la relecture : la dictée ou la formulation laisse un doute.
 4. **D82** : la parité de sécurité est demandée pour Windows ; compris comme valant aussi pour macOS.
 5. **D69, apprentissage** : au-delà du répertoire de rôles, rien n'est défini.
 6. **D5** : compris comme « l'adresse IP de chaque agent est connue du maître et affichée ».
+| D126 | Un parent ne s'arrête pas (ne conclut pas) tant que ses enfants n'ont pas terminé, sauf s'il les arrête lui-même. | « un parent ne peut pas s'éteindre tant que ses enfants n'ont pas terminé leur tâche ? Il faudrait que ça bloque […] C'est seulement si le parent dit aux enfants de s'arrêter, ok » | G12 | 1. Un agent qui appelle `finish_mission` pendant qu'un enfant a une mission en cours est refusé, et rien ne remonte à son parent. 2. Après le compte rendu de l'enfant, ou son arrêt par `stop_agent`, il peut conclure. ✅ `tests/tree.rs`. |
