@@ -14,6 +14,9 @@
 # maître sait l'appeler (`anthropic` ; `openai` pour toute API compatible : texte, transcription,
 # voix, image, plongements ; `elevenlabs` : voix ; `timesfm` : prévision ; `systemone` : décision).
 # Vide : pas encore appelable.
+# `keys_url` : la page où créer une clé chez ce fournisseur. `oauth_authorize`, `oauth_exchange` :
+# le fournisseur sait remettre une clé par autorisation dans le navigateur (OAuth avec PKCE), sans
+# application à enregistrer ; à ce jour, seul OpenRouter.
 # `hosts` : machines qui servent ce fournisseur (un nom qui commence par un point vaut pour ses
 # sous-domaines) ; c'est ainsi qu'un modèle configuré est rattaché à son fournisseur.
 
@@ -28,6 +31,7 @@ billing = "usage"
 apis = ["openai"]
 endpoint = "https://api.mistral.ai/v1"
 hosts = ["api.mistral.ai"]
+keys_url = "https://console.mistral.ai/api-keys"
 
 [[provider]]
 id = "anthropic"
@@ -40,6 +44,7 @@ billing = "usage"
 apis = ["anthropic"]
 endpoint = "https://api.anthropic.com"
 hosts = ["api.anthropic.com"]
+keys_url = "https://console.anthropic.com/settings/keys"
 
 [[provider]]
 id = "openai"
@@ -52,6 +57,7 @@ billing = "usage"
 apis = ["openai"]
 endpoint = "https://api.openai.com/v1"
 hosts = ["api.openai.com"]
+keys_url = "https://platform.openai.com/api-keys"
 
 [[provider]]
 id = "google"
@@ -64,6 +70,7 @@ billing = "usage"
 apis = ["openai"]
 endpoint = "https://generativelanguage.googleapis.com/v1beta/openai"
 hosts = ["generativelanguage.googleapis.com"]
+keys_url = "https://aistudio.google.com/apikey"
 
 [[provider]]
 id = "scaleway"
@@ -76,6 +83,7 @@ billing = "usage"
 apis = ["openai"]
 endpoint = "https://api.scaleway.ai/v1"
 hosts = ["api.scaleway.ai"]
+keys_url = "https://console.scaleway.com/iam/api-keys"
 
 [[provider]]
 id = "ovhcloud"
@@ -88,6 +96,7 @@ billing = "usage"
 apis = ["openai"]
 endpoint = "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1"
 hosts = [".endpoints.kepler.ai.cloud.ovh.net"]
+keys_url = "https://www.ovh.com/manager/#/public-cloud/"
 
 [[provider]]
 id = "infomaniak"
@@ -100,6 +109,7 @@ billing = "usage"
 apis = ["openai"]
 endpoint = ""
 hosts = ["api.infomaniak.com"]
+keys_url = "https://manager.infomaniak.com/"
 
 [[provider]]
 id = "aki"
@@ -112,6 +122,7 @@ billing = "usage"
 apis = ["openai"]
 endpoint = "https://aki.io/openai/v1"
 hosts = ["aki.io"]
+keys_url = "https://aki.io/login"
 
 [[provider]]
 id = "elevenlabs"
@@ -122,8 +133,9 @@ trust = "3"
 kind = "Professionnel"
 billing = "usage"
 apis = ["elevenlabs"]
-endpoint = ""
+endpoint = "https://api.elevenlabs.io"
 hosts = ["api.elevenlabs.io"]
+keys_url = "https://elevenlabs.io/app/settings/api-keys"
 
 [[provider]]
 id = "deepseek"
@@ -136,6 +148,22 @@ billing = "usage"
 apis = ["openai"]
 endpoint = "https://api.deepseek.com"
 hosts = ["api.deepseek.com"]
+keys_url = "https://platform.deepseek.com/api_keys"
+
+[[provider]]
+id = "openrouter"
+name = "OpenRouter"
+country = "États-Unis"
+europe = false
+trust = "3"
+kind = "Intermédiaire (revend d'autres fournisseurs)"
+billing = "usage"
+apis = ["openai"]
+endpoint = "https://openrouter.ai/api/v1"
+hosts = ["openrouter.ai"]
+keys_url = "https://openrouter.ai/keys"
+oauth_authorize = "https://openrouter.ai/auth"
+oauth_exchange = "https://openrouter.ai/api/v1/auth/keys"
 
 [[provider]]
 id = "local"

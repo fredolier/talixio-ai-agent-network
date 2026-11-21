@@ -1,0 +1,73 @@
+# Une version téléchargeable par système : à chaque étiquette `vX.Y.Z`, un exécutable par
+# système et par processeur, leurs empreintes, et les scripts d'installation, publiés ensemble.
+name: version
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  executables:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { name: linux-x86_64, os: ubuntu-latest, target: x86_64-unknown-linux-musl, ext: "" }
+          - { name: linux-aarch64, os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl, ext: "" }
+          - { name: macos-aarch64, os: macos-latest, target: aarch64-apple-darwin, ext: "" }
+          - { name: macos-x86_64, os: macos-latest, target: x86_64-apple-darwin, ext: "" }
+          - { name: windows-x86_64, os: windows-latest, target: x86_64-pc-windows-msvc, ext: ".exe" }
+    steps:
+      - uses: actions/checkout@v4
+      - name: L'étiquette est la version du code
+        shell: bash
+        run: test "v$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" = "$GITHUB_REF_NAME"
+      - name: Compilateur C pour musl
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Outils Rust
+        run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }} && rustup default stable
+      - name: Compilation
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Linux, aucune dépendance au système
+        if: contains(matrix.target, 'musl')
+        run: file target/${{ matrix.target }}/release/talixio-agent | grep -q "static"
+      - name: Nom de l'exécutable publié
+        shell: bash
+        run: cp "target/${{ matrix.target }}/release/talixio-agent${{ matrix.ext }}" "talixio-agent-${{ matrix.name }}${{ matrix.ext }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: talixio-agent-${{ matrix.name }}${{ matrix.ext }}
+          if-no-files-found: error
+
+  publication:
+    name: publication
+    needs: executables
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: sortie
+          merge-multiple: true
+      - name: Empreintes
+        run: |
+          cp scripts/install.sh scripts/install.ps1 talixio.example.toml sortie/
+          cd sortie && sha256sum talixio-agent-* > SHA256SUMS && cat SHA256SUMS
+      - name: Publier
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" sortie/* \
+            --title "Talixio Agent Network $GITHUB_REF_NAME" \
+            --notes "Notes de version : commande talixio-agent releases, ou écran Nouveautés de l'interface. Empreintes des fichiers : SHA256SUMS."

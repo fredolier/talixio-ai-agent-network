@@ -3,6 +3,8 @@ import { api, forgetToken, keepToken, savedToken, Unauthorized } from './api'
 import type { ActivityEvent, Agent, ModelsData, Release, RoleEntry } from './types'
 
 const KEPT = 5000
+/** Le fournisseur dont l'autorisation dans le navigateur est en cours, le temps de l'aller-retour. */
+const OAUTH = 'talixio-oauth'
 
 export interface Cluster {
   token: string
@@ -13,6 +15,12 @@ export interface Cluster {
   roles: RoleEntry[] | null
   releases: { version: string; releases: Release[] } | null
   refresh: () => void
+  /** Ce que le retour d'une autorisation dans le navigateur a donné. */
+  notice: string | null
+  /** Demande un changement au maître (connexion, activation…), puis relit les modèles. */
+  change: <T>(path: string, body: unknown) => Promise<T>
+  /** Part chez le fournisseur pour autoriser le maître ; le retour se fait sur cette page. */
+  authorize: (provider: string) => Promise<void>
   send: (text: string) => Promise<void>
   stop: (id: string) => Promise<void>
 }
@@ -27,6 +35,7 @@ export function useCluster() {
   const [models, setModels] = useState<Cluster['models']>(null)
   const [roles, setRoles] = useState<RoleEntry[] | null>(null)
   const [releases, setReleases] = useState<Cluster['releases']>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const after = useRef(0)
   const busy = useRef(false)
   const round = useRef(0)
@@ -71,7 +80,18 @@ export function useCluster() {
     if (!token) return
     round.current = 0
     refresh()
-    api<Cluster['models']>(token, '/api/models').then(setModels).catch(() => {})
+    const reload = () => api<Cluster['models']>(token, '/api/models').then(setModels).catch(() => {})
+    // retour d'une autorisation commencée ici : le code part chez le maître et quitte l'adresse
+    const code = new URLSearchParams(location.search).get('code')
+    const pending = sessionStorage.getItem(OAUTH)
+    if (code && pending) {
+      sessionStorage.removeItem(OAUTH)
+      history.replaceState(null, '', `${location.pathname}#fournisseurs`)
+      api(token, `/api/providers/${encodeURIComponent(pending)}/oauth/finish`, { code })
+        .then(() => setNotice('Fournisseur connecté. Vous pouvez activer ses modèles.'))
+        .catch((error: Error) => setNotice(`Autorisation non aboutie : ${error.message}`))
+        .finally(reload)
+    } else reload()
     api<Cluster['releases']>(token, '/api/releases').then(setReleases).catch(() => {})
     const timer = setInterval(refresh, 1500)
     const onVisible = () => !document.hidden && refresh()
@@ -104,6 +124,21 @@ export function useCluster() {
           roles,
           releases,
           refresh,
+          notice,
+          change: async <T,>(path: string, body: unknown) => {
+            setNotice(null)
+            try {
+              return await api<T>(token, path, body)
+            } finally {
+              api<Cluster['models']>(token, '/api/models').then(setModels).catch(() => {})
+              refresh()
+            }
+          },
+          authorize: async (provider) => {
+            const { url } = await api<{ url: string }>(token, `/api/providers/${encodeURIComponent(provider)}/oauth`, { callback: `${location.origin}/` })
+            sessionStorage.setItem(OAUTH, provider)
+            location.assign(url)
+          },
           send: async (text) => {
             await api(token, '/api/messages', { text })
             refresh()

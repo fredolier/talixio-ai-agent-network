@@ -31,6 +31,14 @@ pub struct Provider {
     /// Adresse publique à donner dans la configuration ; vide si elle dépend du compte.
     pub endpoint: String,
     pub hosts: Vec<String>,
+    /// La page où créer une clé chez ce fournisseur.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub keys_url: String,
+    /// OAuth avec PKCE : la page d'autorisation, et l'adresse où échanger le code contre une clé.
+    #[serde(default, skip_serializing)]
+    pub oauth_authorize: String,
+    #[serde(default, skip_serializing)]
+    pub oauth_exchange: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -70,9 +78,31 @@ struct Catalog {
     model: Vec<Model>,
 }
 
+static CATALOG: OnceLock<Catalog> = OnceLock::new();
+
 fn catalog() -> &'static Catalog {
-    static CATALOG: OnceLock<Catalog> = OnceLock::new();
     CATALOG.get_or_init(|| toml::from_str(SOURCE).expect("catalog.toml illisible (vérifié par un test)"))
+}
+
+/// Remplace le catalogue embarqué par celui d'un fichier (`catalog_file` dans la configuration du
+/// maître), avant tout usage. Qui écrit ce fichier choisit les adresses où iront les clés : il
+/// se protège comme la configuration elle-même.
+pub fn install(text: &str) -> Result<(), String> {
+    let parsed: Catalog = toml::from_str(text).map_err(|e| format!("catalogue illisible : {e}"))?;
+    CATALOG.set(parsed).map_err(|_| "catalogue déjà chargé".to_string())
+}
+
+pub fn provider(id: &str) -> Option<&'static Provider> {
+    catalog().provider.iter().find(|p| p.id == id)
+}
+
+/// Comment déclarer ce modèle de ce fournisseur : `(famille d'API, nature, lit les images)`.
+/// Un modèle absent du catalogue est tenu pour un modèle de texte, si le fournisseur en sert.
+pub fn declaration(provider: &Provider, model_id: &str) -> Option<(&'static str, &'static str, bool)> {
+    match catalog().model.iter().find(|m| m.provider == provider.id && m.id == model_id) {
+        Some(model) => declared(model, &provider.apis).map(|(api, nature)| (api, nature, model.nature == "Vision")),
+        None => ["anthropic", "openai"].into_iter().find(|api| provider.apis.iter().any(|a| a == api)).map(|api| (api, "llm", false)),
+    }
 }
 
 /// Comment déclarer ce modèle dans la configuration du maître : `(provider, nature)`, si le
@@ -125,7 +155,7 @@ impl Provider {
 
 /// Ce que l'interface montre : les fournisseurs (connectés ou non) et les modèles (activés ou
 /// non), à partir du catalogue et de ce que la configuration du maître déclare. Jamais de clé.
-pub fn view(configured: &[ModelInfo]) -> Value {
+pub fn view(configured: &[ModelInfo], linked: &[String]) -> Value {
     let catalog = catalog();
     // le fournisseur du catalogue auquel chaque modèle configuré se rattache, par sa machine
     let owner: Vec<Option<&Provider>> = configured.iter().map(|m| catalog.provider.iter().find(|p| p.serves(&m.host))).collect();
@@ -136,7 +166,16 @@ pub fn view(configured: &[ModelInfo]) -> Value {
             let mine: Vec<&ModelInfo> = configured.iter().zip(&owner).filter(|(_, o)| o.is_some_and(|o| o.id == p.id)).map(|(m, _)| m).collect();
             let mut value = serde_json::to_value(p).unwrap_or_default();
             // connecté : au moins un modèle configuré chez lui, avec sa clé (une machine locale n'en demande pas)
-            value["connected"] = json!(mine.iter().any(|m| m.has_key || p.trust == "L"));
+            value["connected"] = json!(linked.contains(&p.id) || mine.iter().any(|m| m.has_key || p.trust == "L"));
+            // connecté depuis l'interface : on peut alors activer ses modèles et le déconnecter d'ici
+            value["linked"] = json!(linked.contains(&p.id));
+            // ce que la page propose : une clé à coller, une autorisation dans le navigateur, ou rien
+            value["connect"] = json!(match () {
+                _ if p.endpoint.is_empty() || p.apis.is_empty() => "config",
+                _ if !p.oauth_authorize.is_empty() => "oauth",
+                _ if p.trust == "L" => "local",
+                _ => "key",
+            });
             value["configured"] = json!(mine.len());
             value["listed"] = json!(true);
             value
@@ -215,7 +254,7 @@ mod tests {
     #[test]
     fn le_catalogue_est_lisible_et_coherent() {
         let catalog = catalog();
-        assert!(catalog.provider.len() >= 13 && catalog.model.len() >= 60);
+        assert!(catalog.provider.len() >= 14 && catalog.model.len() >= 60);
         for nature in ["Forecast", "Decision"] {
             assert!(catalog.model.iter().any(|m| m.nature == nature), "{nature}");
         }
@@ -244,12 +283,17 @@ mod tests {
             // un nom qui finit comme celui d'un fournisseur n'est pas ce fournisseur
             configured("faux", "mistral-large-latest", "api.mistral.ai.exemple.fr", true),
             configured("faux2", "gpt-oss-120b", "evilendpoints.kepler.ai.cloud.ovh.net", true),
-        ]);
+        ], &["scaleway".to_string()]);
         let provider = |id: &str| view["providers"].as_array().unwrap().iter().find(|p| p["id"] == id).unwrap().clone();
         assert_eq!((provider("mistral")["connected"].clone(), provider("mistral")["configured"].clone()), (json!(true), json!(1)));
         assert_eq!(provider("ovhcloud")["connected"], false, "sans clé, pas connecté");
         assert_eq!(provider("local")["connected"], true, "une machine locale n'a pas besoin de clé");
         assert_eq!(provider("anthropic")["connected"], false);
+        assert_eq!((provider("scaleway")["connected"].clone(), provider("scaleway")["linked"].clone()), (json!(true), json!(true)));
+        assert_eq!(provider("openrouter")["connect"], "oauth");
+        assert_eq!(provider("mistral")["connect"], "key");
+        assert_eq!(provider("infomaniak")["connect"], "config");
+        assert!(!view.to_string().contains("oauth_exchange"));
         assert_eq!(provider("autre:modeles.exemple.fr:8443")["listed"], false);
         assert_eq!(provider("autre:api.mistral.ai.exemple.fr")["connected"], true);
         assert_eq!(provider("autre:evilendpoints.kepler.ai.cloud.ovh.net")["configured"], 1);
@@ -269,6 +313,7 @@ mod tests {
         assert_eq!(callable("TimesFM 2.5 (local)"), true);
         assert_eq!(callable("TimeGPT"), false, "annoncé, et aucun connecteur");
         assert_eq!(callable("TimesFM (BigQuery AI.FORECAST)"), false);
-        assert!(!view.to_string().contains("api_key"));
+        let text = view.to_string();
+        assert!(!text.contains("api_key_file") && !text.contains("api_key_env"));
     }
 }

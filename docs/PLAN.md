@@ -46,8 +46,9 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 - [x] Catalogue de fournisseurs et de modèles, embarqué, visible dans l'interface (F1)
 - [x] Modèles de service appelables par les agents : transcription, voix, image, vision, plongements, prévision, décision ; quota en appels par nature ; outils ; tests avec faux fournisseurs (F2, F4, décision 25)
 - [x] Revue de sécurité indépendante des modèles de service : 8 constats et une note, tous traités (SPEC §7, quatrième passe)
-- [ ] Modèles de service, suite : essai chez de vrais fournisseurs ; comptage en argent (B4) ; effort et contexte par enfant (F3) ; fournisseur déclaré une seule fois (`[providers.<nom>]`)
-- [ ] Se connecter à un fournisseur et activer un modèle depuis l'interface (Q10 : à trancher par l'utilisateur)
+- [ ] Modèles de service, suite : essai chez de vrais fournisseurs ; comptage en argent (B4) ; effort et contexte par enfant (F3) ; fournisseur déclaré une seule fois dans la configuration (`[providers.<nom>]` ; depuis l'interface, c'est fait)
+- [x] Se connecter à un fournisseur et activer un modèle depuis l'interface, à chaud : clé collée, ou OAuth là où il existe sans préparation (décision 26, D120)
+- [ ] Connexion depuis l'interface, suite : essai chez de vrais fournisseurs ; fournisseurs dont l'adresse dépend du compte (Infomaniak) ; changer le nombre d'appels sans réactiver ; mise à jour du catalogue
 - [x] Interface web embarquée : arbre en direct, détail et arrêt d'un agent, dialogue avec le maître, journal, nouveautés ; téléphone et manifeste d'application (P2, P4, décision 22) — essayée dans un navigateur, bureau et téléphone
 - [ ] Interface, suite : budgets, validations, réglages ; notifications ; hors ligne
 - [x] Passe de sécurité indépendante sur le déploiement et le TLS : 10 constats, 9 traités (SPEC §7, deuxième passe)
@@ -68,6 +69,8 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 - [x] macOS : compilé et testé en intégration continue (A2)
 - [ ] macOS : essai sur un poste réel (A2)
 - [x] Toutes les plateformes en intégration continue (Linux, Linux statique, Windows, macOS)
+- [x] Une version téléchargeable par système et une installation en une ligne (décision 27, D121)
+- [ ] Versions, suite : signature des exécutables (macOS, Windows) et des empreintes
 
 ## Étape 4 — nouveaux usages
 
@@ -96,4 +99,6 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 | 2026-11-21 | v0.8.0 : catalogue des fournisseurs et des modèles repris de l'assistant, embarqué ; écrans « Fournisseurs » (table : pays, Europe, confiance, connecté) et « Modèles » (par fournisseur, qualité, prix, activé ou non). D116, D117 inscrites. À décider : se connecter et activer depuis la page (saisie de clé, droits du maître modifiés à chaud). |
 | 2026-11-21 | v0.8.1 : modèles de prévision et de décision ajoutés au catalogue (10 modèles ; fournisseurs TypeSafe AI et Nixtla), listés pour comparer. |
 | 2026-11-21 | v0.9.0 : les agents appellent les modèles de service (transcription, voix, image, vision, plongements, prévision, décision) par le maître, comptés en appels par nature (`max_calls`). Sept outils, un message du lien (`service_request`), quatre familles d'API. Tests : `tests/services.rs` (faux fournisseur), scénario de prévision par un vrai enfant dans `tests/e2e.rs`. Revue de sécurité indépendante lancée, rapport attendu. D119 inscrite. Pas d'essai réel, faute de clés. |
+| 2026-11-21 | v0.10.0 : se connecter à un fournisseur et activer ses modèles depuis l'interface, à chaud (décision 26, D120) : `src/connect.rs`, six routes, table des modèles et droits du maître modifiables pendant qu'il tourne, OAuth PKCE pour OpenRouter, clé collée pour les autres, `catalog_file`. Tests : `tests/connect.rs` (vrai maître, vrai enfant, faux fournisseur). Défaut trouvé par le test et corrigé avant livraison : après redémarrage, un modèle déconnecté restait dans les droits du maître. Revue de sécurité indépendante : SPEC §7, cinquième passe. Pas d'essai réel, faute de clés. |
+| 2026-11-21 | Versions téléchargeables : publication par étiquette (cinq exécutables, empreintes), scripts d'installation en une ligne pour Linux, macOS et Windows (décision 27, D121). |
 | 2026-11-21 | v0.9.1 : revue de sécurité indépendante des modèles de service rendue : un constat haut (quota contournable par des appels échoués après envoi), un moyen (redirections suivies), six bas ; tous traités et rejoués en test (SPEC §7, quatrième passe). |

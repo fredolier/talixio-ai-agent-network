@@ -7,6 +7,29 @@ un enfant ne parle qu'à son parent et n'a jamais plus de droits que lui.
 - Spécification : [docs/SPEC.md](docs/SPEC.md)
 - Planning et avancement : [docs/PLAN.md](docs/PLAN.md)
 
+## Installer
+
+Un exécutable par système est publié à chaque version (Linux et macOS, x86_64 et ARM ; Windows
+x86_64), avec ses empreintes. Une ligne suffit ; rien n'est lancé et rien ne demande root.
+
+Linux et macOS :
+
+```bash
+curl -fsSL https://github.com/fredolier/talixio-ai-agent-network/releases/latest/download/install.sh | sh
+```
+
+Windows (PowerShell) :
+
+```powershell
+irm https://github.com/fredolier/talixio-ai-agent-network/releases/latest/download/install.ps1 | iex
+```
+
+Le script télécharge l'exécutable de la machine, vérifie son empreinte SHA-256 et le pose dans
+`~/.local/bin` (Windows : `%LOCALAPPDATA%\Talixio`). `TALIXIO_VERSION=0.10.0` choisit une version,
+`TALIXIO_INSTALL_DIR` un autre dossier. On peut aussi télécharger le fichier à la main depuis la
+page des versions du dépôt. L'empreinte vient du même endroit que l'exécutable : elle protège
+d'un téléchargement abîmé, pas d'un dépôt compromis.
+
 ## Compiler
 
 ```bash
@@ -62,6 +85,14 @@ L'écran « Commandes » montre ce que le maître a le droit d'exécuter et à q
 « Fournisseurs » liste tous les fournisseurs du catalogue embarqué (`catalog.toml`) : pays,
 Europe ou non, niveau de confiance, connecté ou non. « Modèles » liste leurs modèles avec leur
 qualité et leur prix indicatif, et dit lesquels sont activés chez le maître.
+
+On se connecte depuis la page : dans « Fournisseurs », choisissez un fournisseur, collez votre clé
+(un lien mène à la page où la créer), « Connecter ». Le maître essaie la clé, la range dans un
+fichier que seul son compte peut lire (`<state_dir>/keys/`), et ne la rend plus jamais. Dans
+« Modèles », « Activer » rend un modèle utilisable aussitôt, sans redémarrage. OpenRouter se
+connecte par autorisation dans le navigateur ; les autres (OpenAI, Anthropic, Gemini, Mistral,
+OVHcloud, AKI.IO, Scaleway, ElevenLabs, DeepSeek) par clé. Déclarer un modèle dans
+`talixio.toml` reste possible, et nécessaire pour le modèle du maître lui-même.
 
 ![Les fournisseurs](docs/images/interface-fournisseurs.png)
 

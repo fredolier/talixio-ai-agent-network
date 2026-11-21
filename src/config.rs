@@ -37,6 +37,9 @@ pub struct RootConfig {
     /// est gardé une fois, puis jeté. La limite descend de parent en enfant.
     #[serde(default = "default_log_max")]
     pub log_max_bytes: u64,
+    /// Un catalogue de fournisseurs et de modèles à la place de celui de l'exécutable. Il fixe
+    /// les adresses où vont les clés saisies dans l'interface : à protéger comme ce fichier-ci.
+    pub catalog_file: Option<PathBuf>,
     pub models: BTreeMap<String, ModelConfig>,
     #[serde(default)]
     pub capabilities: Capabilities,
@@ -184,7 +187,7 @@ pub struct TlsFiles {
     pub key_file: PathBuf,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelConfig {
     /// `anthropic`, ou `openai` pour OpenAI et tout serveur compatible.

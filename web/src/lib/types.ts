@@ -111,6 +111,12 @@ export interface CatalogProvider {
   connected: boolean
   configured: number
   listed: boolean
+  /** Connecté depuis cette interface : ses modèles s'activent et il se déconnecte d'ici. */
+  linked?: boolean
+  /** Ce que la page propose : une clé à coller, une autorisation dans le navigateur, rien pour une machine locale, ou la configuration. */
+  connect?: 'key' | 'oauth' | 'local' | 'config'
+  /** La page du fournisseur où l'on crée une clé. */
+  keys_url?: string
 }
 
 export interface CatalogModel {
@@ -143,4 +149,6 @@ export interface ModelsData {
   models: ModelInfo[]
   providers: CatalogProvider[]
   catalog: CatalogModel[]
+  /** Les alias activés depuis l'interface : eux seuls se désactivent d'ici. */
+  activated?: string[]
 }

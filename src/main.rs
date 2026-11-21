@@ -146,9 +146,19 @@ async fn run_root(config: &Path) -> Result<()> {
     talixio_agent::os::harden_process();
     let mut cfg = RootConfig::load(config)?;
     cfg.state_dir = prepare_state_dir(&cfg.state_dir)?;
+    if let Some(path) = &cfg.catalog_file {
+        let text = std::fs::read_to_string(path).with_context(|| format!("lecture de {}", path.display()))?;
+        talixio_agent::catalog::install(&text).map_err(anyhow::Error::msg)?;
+    }
+    // ce qui a été connecté et activé depuis l'interface rejoint la configuration
+    let (restored, notes) = talixio_agent::connect::merge(&mut cfg);
+    for note in notes {
+        eprintln!("[{}] {note}", cfg.name);
+    }
     let providers = Providers::from_config(&cfg.models)?;
     let token = api_token(&cfg.state_dir)?;
     let (node, inbox) = Node::new_root(&cfg, providers).map_err(anyhow::Error::msg)?;
+    talixio_agent::connect::restore(&node, &restored);
     let identity = match &cfg.tls {
         Some(files) => tls::from_files(&files.cert_file, &files.key_file)?,
         None => tls::load_or_create(&cfg.state_dir)?,

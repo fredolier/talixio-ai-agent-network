@@ -7,6 +7,36 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.10.0"
+date = "2026-11-21"
+title = "Se connecter depuis la page"
+summary = "On se connecte à un fournisseur et on active ses modèles depuis l'interface, sans toucher à la configuration ni redémarrer le maître."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Écran « Fournisseurs » : collez votre clé, le maître l'essaie chez le fournisseur puis la garde. OpenAI, Anthropic, Google Gemini, Mistral, OVHcloud, AKI.IO, Scaleway, ElevenLabs, DeepSeek, OpenRouter, machine locale. Un lien mène à la page où créer la clé."
+
+[[release.changes]]
+kind = "nouveau"
+text = "OpenRouter se connecte par autorisation dans le navigateur, sans copier de clé. C'est le seul fournisseur qui l'offre aujourd'hui à un outil tiers sans enregistrement préalable ; les autres demandent une clé, collée une fois."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Écran « Modèles » : « Activer » rend un modèle utilisable aussitôt par les agents ; pour un modèle de service, on donne son nombre d'appels. « Désactiver » et « Déconnecter » défont ce qui a été fait d'ici, et effacent la clé."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Une clé saisie ne part qu'à l'adresse du catalogue, reste dans un fichier fermé au compte du maître, et n'est plus jamais rendue : ni par l'API, ni au journal, ni à un agent. Revue de sécurité indépendante des nouvelles routes."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Un exécutable par système (Linux, macOS, Windows) est publié à chaque version, avec une installation en une ligne : voir « Installer » dans le README."
+
+[[release.changes]]
+kind = "attention"
+text = "Le jeton de l'API permet désormais de connecter un fournisseur, donc d'engager une dépense : gardez-le comme une clé. Infomaniak, TypeSafe AI et Nixtla se déclarent encore dans la configuration. Rien n'a été essayé chez un vrai fournisseur."
+
+[[release]]
 version = "0.9.1"
 date = "2026-11-21"
 title = "Revue de sécurité des modèles de service"

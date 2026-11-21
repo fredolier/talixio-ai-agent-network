@@ -27,20 +27,21 @@ const MAX_IMAGE: u64 = 4 * 1024 * 1024;
 const SEARCH_RESULTS: usize = 5;
 
 /// Les modèles de cette nature que l'agent détient (`vision` : un modèle de texte qui lit les images).
-fn models_of<'a>(node: &'a Node, nature: &str) -> Vec<&'a str> {
-    node.caps.models.iter().filter(|alias| node.natures.get(*alias).is_some_and(|n| n == nature)).map(String::as_str).collect()
+fn models_of(node: &Node, nature: &str) -> Vec<String> {
+    let natures = node.natures();
+    node.rights().models.into_iter().filter(|alias| natures.get(alias).is_some_and(|n| n == nature)).collect()
 }
 
 /// L'agent peut-il rendre ce service : un modèle de cette nature, et des appels accordés ?
 fn can_call(node: &Node, nature: &str) -> bool {
-    !models_of(node, nature).is_empty() && node.caps.max_calls.get(nature).copied().unwrap_or(0) > 0
+    !models_of(node, nature).is_empty() && node.rights().max_calls.get(nature).copied().unwrap_or(0) > 0
 }
 
 /// Le modèle demandé, s'il est de cette nature et accordé ; sinon le premier qui convient.
 fn model_for(node: &Node, input: &Value, nature: &str) -> Result<String, String> {
     let held = models_of(node, nature);
     match input["model"].as_str() {
-        Some(asked) if held.contains(&asked) => Ok(asked.to_string()),
+        Some(asked) if held.iter().any(|alias| alias == asked) => Ok(asked.to_string()),
         Some(asked) => Err(format!("modèle « {} » : pas un modèle de nature « {nature} » qui te soit accordé ({})", crate::clean(asked, 80, false), held.join(", "))),
         None => held.first().map(|alias| alias.to_string()).ok_or_else(|| format!("aucun modèle de nature « {nature} » ne t'est accordé")),
     }
@@ -64,7 +65,7 @@ fn paths(list: &[PathBuf]) -> String {
 
 /// Les outils que cet agent peut utiliser, d'après ses droits.
 pub fn specs(node: &Node) -> Vec<ToolSpec> {
-    let caps = &node.caps;
+    let caps = &node.rights();
     let mut tools = Vec::new();
     let path = json!({ "path": { "type": "string", "description": "Chemin absolu." } });
     if !caps.fs_read.is_empty() {
@@ -125,7 +126,7 @@ pub fn specs(node: &Node) -> Vec<ToolSpec> {
                 "success_criteria": { "type": "string", "description": "Critère de réussite mesurable : ce qui, vérifié, prouve que la mission est accomplie." },
                 "model": { "type": "string", "description": format!(
                     "Alias de son modèle de conversation, parmi : {}. Par défaut : le tien.",
-                    caps.models.iter().filter(|a| node.natures.get(*a).is_none_or(|n| n == "llm" || n == "vision")).cloned().collect::<Vec<_>>().join(", ")
+                    caps.models.iter().filter(|a| node.natures().get(*a).is_none_or(|n| n == "llm" || n == "vision")).cloned().collect::<Vec<_>>().join(", ")
                 ) },
                 "target": { "type": "string", "description": format!(
                     "Où le créer. « local » : sur ta machine, dans la limite de tes propres droits.{} Par défaut : local.",
@@ -159,7 +160,7 @@ pub fn specs(node: &Node) -> Vec<ToolSpec> {
                         "max_tokens": { "type": "integer", "description": "Budget de tokens, descendance comprise." },
                         "models": { "type": "array", "items": { "type": "string" }, "description": format!(
                             "Modèles de service confiés en plus de son modèle de conversation (alias : nature) : {}. Omis : aucun.",
-                            node.natures.iter().filter(|(_, n)| *n != "llm").map(|(a, n)| format!("{a} : {n}")).collect::<Vec<_>>().join(", ")
+                            node.natures().iter().filter(|(_, n)| *n != "llm").map(|(a, n)| format!("{a} : {n}")).collect::<Vec<_>>().join(", ")
                         ) },
                         "max_calls": { "type": "object", "additionalProperties": { "type": "integer" }, "description": format!(
                             "Appels permis aux modèles de service, par nature, descendance comprise, pris sur les tiens ({}). Une nature omise : aucun appel.",
@@ -702,14 +703,14 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
         value => serde_json::from_value(value.clone()).map_err(|e| format!("droits invalides : {e}"))?,
     };
     let model = input["model"].as_str().unwrap_or(&node.model).to_string();
-    if node.natures.get(&model).is_some_and(|nature| nature != "llm" && nature != "vision") {
-        return Err(format!("le modèle d'un agent doit tenir une conversation : « {model} » est de nature « {} »", node.natures[&model]));
+    if node.natures().get(&model).is_some_and(|nature| nature != "llm" && nature != "vision") {
+        return Err(format!("le modèle d'un agent doit tenir une conversation : « {model} » est de nature « {} »", node.natures()[&model]));
     }
     // son modèle de conversation, plus les modèles de service qu'on lui confie nommément
     let mut models = vec![model.clone()];
     for alias in std::mem::take(&mut caps.models).into_iter().filter(|alias| *alias != model) {
         // un seul modèle de conversation par agent : celui que son parent lui choisit
-        if node.natures.get(&alias).is_none_or(|nature| nature == "llm") {
+        if node.natures().get(&alias).is_none_or(|nature| nature == "llm") {
             return Err(format!("capabilities.models : « {} » n'est pas un modèle de service que vous détenez", crate::clean(&alias, 80, false)));
         }
         models.push(alias);
@@ -731,7 +732,7 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
         None => {
             // les dossiers sont accordés par leur chemin réel : un lien ne peut pas élargir les droits
             caps.canonicalize()?;
-            node.caps.check_grant(&caps)?;
+            node.rights().check_grant(&caps)?;
             None
         }
         Some(target) => {
@@ -741,7 +742,7 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
                 fs_read: target.capabilities.fs_read.clone(),
                 fs_write: target.capabilities.fs_write.clone(),
                 exec: target.capabilities.exec.clone(),
-                ..node.caps.clone()
+                ..node.rights()
             };
             // là-bas, « local » désigne sa machine à lui : le seul endroit où il pourra créer
             if let Some(spawn) = &mut limit.spawn {
@@ -781,7 +782,7 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value) -> Result<String, String> 
         deny: if target.is_none() { node.deny.iter().filter(|p| **p != node.state_dir).cloned().collect() } else { Vec::new() },
         ceiling,
         log_max_bytes: node.log_max_bytes,
-        natures: node.natures.iter().filter(|(alias, _)| caps.models.contains(alias)).map(|(a, n)| (a.clone(), n.clone())).collect(),
+        natures: node.natures().iter().filter(|(alias, _)| caps.models.contains(alias)).map(|(a, n)| (a.clone(), n.clone())).collect(),
     };
     // sa configuration part scellée : il ne l'ouvrira qu'avec la clé que ce parent lui remettra
     let seal_key = crate::config::Envelope::new_key().map_err(|e| e.to_string())?;

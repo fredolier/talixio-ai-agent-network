@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useMemo, useState, type FormEvent } from 'react'
 import { X } from 'lucide-react'
 import { Connection, natureLabel, NATURES, Origin, Price, Quality, Trust } from '@/components/catalog'
 import { PageHeader } from '@/components/bits'
@@ -108,7 +108,7 @@ export function ModelsView({ cluster }: { cluster: Cluster }) {
                   </TableCell>
                 </TableRow>
                 {models.map((model) => (
-                  <ModelRow key={`${model.id}\u0000${model.name}`} model={model} provider={provider} data={data} agents={agents} />
+                  <ModelRow key={`${model.id}\u0000${model.name}`} model={model} provider={provider} data={data} agents={agents} cluster={cluster} />
                 ))}
               </Fragment>
             ))}
@@ -123,14 +123,27 @@ export function ModelsView({ cluster }: { cluster: Cluster }) {
 
       <p className="text-[13px] text-muted-foreground">
         Qualité : de 1 (élémentaire) à 10 (le meilleur), relative. Prix en dollars par million de tokens, indicatifs (relevé d'octobre 2026) ; « ≈ » : estimation, à vérifier chez le fournisseur.
-        Activer un modèle se fait dans la configuration du maître : la page <a href="#fournisseurs" className="underline underline-offset-4">Fournisseurs</a> donne les lignes à écrire.
+        Pour activer un modèle, connectez d'abord son fournisseur dans la page <a href="#fournisseurs" className="underline underline-offset-4">Fournisseurs</a>. Un modèle de service se compte en appels : le nombre donné à l'activation vaut pour toute la grappe.
       </p>
     </div>
   )
 }
 
-function ModelRow({ model, provider, data, agents }: { model: CatalogModel; provider: CatalogProvider; data: ModelsData; agents: Agent[] }) {
+function ModelRow({ model, provider, data, agents, cluster }: { model: CatalogModel; provider: CatalogProvider; data: ModelsData; agents: Agent[]; cluster: Cluster }) {
   const on = model.aliases.length > 0
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const run = async (action: () => Promise<unknown>) => {
+    setBusy(true)
+    setError(null)
+    try {
+      await action()
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Demande non aboutie.')
+    } finally {
+      setBusy(false)
+    }
+  }
   return (
     <TableRow className={cn(!on && 'text-muted-foreground')}>
       <TableCell className="px-4 py-2.5">
@@ -148,17 +161,57 @@ function ModelRow({ model, provider, data, agents }: { model: CatalogModel; prov
       <TableCell className="px-4 whitespace-normal">
         {on ? (
           <span className="flex flex-col gap-1.5 py-0.5">
-            {model.aliases.map((alias) => <Activation key={alias} alias={alias} data={data} agents={agents} />)}
+            {model.aliases.map((alias) => (
+              <span key={alias} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+                <Activation alias={alias} data={data} agents={agents} />
+                {data.activated?.includes(alias) && (
+                  <Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => cluster.change(`/api/models/${encodeURIComponent(alias)}/deactivate`, {}))}>
+                    Désactiver
+                  </Button>
+                )}
+              </span>
+            ))}
+            {error && <span role="alert" className="text-[13px] text-destructive">{error}</span>}
           </span>
         ) : !model.callable ? (
           <span title={model.soon ? 'Annoncé par le fournisseur, pas encore proposé' : "Le maître n'a pas de connecteur pour ce modèle chez ce fournisseur : il est listé pour comparer"}>Pas encore appelable</span>
+        ) : provider.linked ? (
+          <Activate model={model} provider={provider} agents={agents} busy={busy} error={error} run={run} cluster={cluster} />
         ) : provider.connected ? (
-          <span>Disponible, non activé</span>
+          <span title="Ce fournisseur est connecté par la configuration du maître : ses modèles s'y déclarent">Disponible, non activé</span>
         ) : (
           <span>Fournisseur non connecté</span>
         )}
       </TableCell>
     </TableRow>
+  )
+}
+
+/** Activer un modèle d'un fournisseur connecté d'ici ; pour un modèle de service, avec son nombre d'appels. */
+function Activate({ model, provider, agents, busy, error, run, cluster }: {
+  model: CatalogModel; provider: CatalogProvider; agents: Agent[]; busy: boolean; error: string | null
+  run: (action: () => Promise<unknown>) => Promise<void>; cluster: Cluster
+}) {
+  const service = model.declare && model.declare.nature !== 'llm' && !model.declare.vision ? model.declare.nature : null
+  const current = service ? pick(agents.find((a) => a.depth === 0)?.capabilities.max_calls ?? {}, service) ?? 0 : 0
+  const [calls, setCalls] = useState(String(current || 100))
+  const submit = (event: FormEvent) => {
+    event.preventDefault()
+    run(() => cluster.change('/api/models/activate', { provider: provider.id, model: model.id, ...(service ? { calls: Math.max(0, Math.floor(Number(calls) || 0)) } : {}) }))
+  }
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-1.5 py-0.5">
+      <span className="flex flex-wrap items-center gap-2">
+        <Button type="submit" size="sm" disabled={busy}>Activer</Button>
+        {service && (
+          <Label className="font-normal text-[13px]">
+            <Input type="number" min={0} max={1000000} value={calls} onChange={(e) => setCalls(e.target.value)} className="num h-8 w-24" aria-label={`Appels « ${service} » permis à la grappe`} />
+            appels permis
+          </Label>
+        )}
+      </span>
+      {error && <span role="alert" className="text-[13px] text-destructive">{error}</span>}
+    </form>
   )
 }
 

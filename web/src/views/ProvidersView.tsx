@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import { Connection, Origin, Trust, TRUST_LEVELS } from '@/components/catalog'
 import { PageHeader } from '@/components/bits'
+import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -31,7 +33,7 @@ export function ProvidersView({ cluster }: { cluster: Cluster }) {
       <PageHeader
         eyebrow="Maîtrise · Fournisseurs"
         title="Fournisseurs"
-        lead="Tous les fournisseurs que le maître connaît, d'où qu'ils soient. Un fournisseur est connecté quand un de ses modèles est déclaré chez le maître avec sa clé. La clé reste chez le maître : aucun agent ne la reçoit."
+        lead="Tous les fournisseurs que le maître connaît, d'où qu'ils soient. Choisissez-en un pour vous y connecter d'ici, avec votre clé. La clé reste chez le maître : aucun agent ne la reçoit, et cette page ne la relit jamais."
       />
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
         <p className="text-[13px] text-muted-foreground">
@@ -101,7 +103,9 @@ export function ProvidersView({ cluster }: { cluster: Cluster }) {
         </Table>
       </div>
 
-      {selected ? <ProviderDetail provider={selected} data={data} /> : <p className="text-[13px] text-muted-foreground">Choisissez un fournisseur pour voir comment s'y connecter.</p>}
+      {cluster.notice && <p role="status" className="rounded-md border bg-card px-4 py-3 text-[13px]">{cluster.notice}</p>}
+
+      {selected ? <ProviderDetail key={selected.id} provider={selected} data={data} cluster={cluster} /> : <p className="text-[13px] text-muted-foreground">Choisissez un fournisseur pour voir comment s'y connecter.</p>}
 
       <p className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-4 text-[13px] text-muted-foreground">
         <span className="eyebrow">Confiance</span>
@@ -113,12 +117,52 @@ export function ProvidersView({ cluster }: { cluster: Cluster }) {
   )
 }
 
-function ProviderDetail({ provider, data }: { provider: CatalogProvider; data: ModelsData }) {
+function ProviderDetail({ provider, data, cluster }: { provider: CatalogProvider; data: ModelsData; cluster: Cluster }) {
   const models = data.catalog.filter((m) => m.provider === provider.id)
   const active = models.filter((m) => m.aliases.length > 0)
   // le catalogue ne connaît pas toujours le nom exact attendu par l'API : ne jamais en inventer un
   const example = models.find((m) => m.callable && !m.deprecated && /^[a-z0-9][a-z0-9._:/-]*$/.test(m.id))
   const local = provider.trust === 'L'
+  const [key, setKey] = useState('')
+  const [other, setOther] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null)
+  const path = `/api/providers/${encodeURIComponent(provider.id)}`
+  const run = async (action: () => Promise<string>) => {
+    setBusy(true)
+    setMessage(null)
+    try {
+      setMessage({ ok: true, text: await action() })
+    } catch (error) {
+      setMessage({ ok: false, text: error instanceof Error ? error.message : 'Demande non aboutie.' })
+    } finally {
+      setBusy(false)
+    }
+  }
+  const connect = (event: FormEvent) => {
+    event.preventDefault()
+    run(async () => {
+      const done = await cluster.change<{ verified: boolean }>(`${path}/connect`, { key })
+      setKey('')
+      return done.verified ? 'Connecté : le fournisseur a accepté la clé.' : "Connecté. Le fournisseur n'a pas permis de vérifier la clé : elle le sera au premier appel."
+    })
+  }
+  const disconnect = () => {
+    if (!confirm(`Déconnecter ${provider.name} ? Sa clé est effacée du maître et ses modèles activés d'ici sont retirés.`)) return
+    run(async () => {
+      await cluster.change(`${path}/disconnect`, {})
+      return 'Déconnecté : la clé est effacée.'
+    })
+  }
+  const activate = (event: FormEvent) => {
+    event.preventDefault()
+    run(async () => {
+      const done = await cluster.change<{ alias: string }>('/api/models/activate', { provider: provider.id, model: other.trim() })
+      setOther('')
+      return `Modèle activé sous l'alias « ${done.alias} ».`
+    })
+  }
+  const feedback = message && <p role={message.ok ? 'status' : 'alert'} className={cn('text-[13px]', !message.ok && 'text-destructive')}>{message.text}</p>
   return (
     <section className="rounded-lg border bg-card p-5">
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
@@ -128,9 +172,66 @@ function ProviderDetail({ provider, data }: { provider: CatalogProvider; data: M
           Voir ses {plural(models.length, 'modèle')}
         </a>
       </div>
-      {provider.connected ? (
+      {provider.linked ? (
+        <div className="mt-3 flex flex-col gap-3 text-[13px]">
+          <p>
+            Connecté depuis cette page. {active.length > 0 ? 'Activés chez le maître : ' : "Aucun modèle activé pour l'instant : "}
+            {active.map((m, index) => (
+              <span key={m.id}>
+                {index > 0 && ', '}
+                {m.name} <span className="text-muted-foreground">(alias <span className="num">{m.aliases.join(', ')}</span>)</span>
+              </span>
+            ))}
+            {active.length === 0 && <a href={`#modeles?f=${encodeURIComponent(provider.id)}`} className="underline underline-offset-4">activez-en un dans la page Modèles</a>}
+            .
+          </p>
+          <form onSubmit={activate} className="flex flex-wrap items-end gap-3">
+            <div className="flex min-w-64 flex-1 flex-col gap-1.5">
+              <Label htmlFor="other-model">Un modèle absent du catalogue</Label>
+              <Input id="other-model" value={other} onChange={(e) => setOther(e.target.value)} placeholder="son nom exact chez le fournisseur" className="font-mono" autoComplete="off" spellCheck={false} />
+            </div>
+            <Button type="submit" variant="outline" disabled={busy || !other.trim()}>Activer</Button>
+            <Button type="button" variant="outline" disabled={busy} onClick={disconnect} className="ml-auto">Déconnecter</Button>
+          </form>
+          {feedback}
+        </div>
+      ) : provider.connect && provider.connect !== 'config' && !provider.connected ? (
+        <div className="mt-3 flex flex-col gap-3 text-[13px]">
+          {provider.connect === 'local' ? (
+            <>
+              <p>Une machine locale ne demande pas de clé. Le maître vérifie qu'un serveur de modèles répond à <span className="num">{provider.endpoint}</span>.</p>
+              <div><Button disabled={busy} onClick={() => run(async () => { await cluster.change(`${path}/connect`, { key: '' }); return 'Connecté.' })}>Connecter</Button></div>
+            </>
+          ) : (
+            <>
+              {provider.connect === 'oauth' && (
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button disabled={busy} onClick={() => run(async () => { await cluster.authorize(provider.id); return 'Ouverture de la page du fournisseur…' })}>
+                    Se connecter avec {provider.name}
+                  </Button>
+                  <span className="text-muted-foreground">Vous autorisez le maître chez le fournisseur, sans copier de clé. Sinon, collez une clé :</span>
+                </div>
+              )}
+              <form onSubmit={connect} className="flex flex-wrap items-end gap-3">
+                <div className="flex min-w-64 flex-1 flex-col gap-1.5">
+                  <Label htmlFor="provider-key">Clé d'API {provider.name}</Label>
+                  <Input id="provider-key" type="password" value={key} onChange={(e) => setKey(e.target.value)} className="font-mono" autoComplete="off" spellCheck={false} />
+                </div>
+                <Button type="submit" variant={provider.connect === 'oauth' ? 'outline' : 'default'} disabled={busy || key.trim().length < 8}>Connecter</Button>
+                {provider.keys_url && (
+                  <a href={provider.keys_url} target="_blank" rel="noopener noreferrer" className="pb-2 underline underline-offset-4">Obtenir une clé</a>
+                )}
+              </form>
+              <p className="text-muted-foreground">
+                Le maître essaie la clé chez le fournisseur, puis la range dans un fichier que seul son compte peut lire. Elle n'est plus jamais affichée, ni donnée à un agent.
+              </p>
+            </>
+          )}
+          {feedback}
+        </div>
+      ) : provider.connected ? (
         <p className="mt-3 text-[13px]">
-          Connecté. {active.length > 0 ? 'Activés chez le maître : ' : 'Déclaré chez le maître.'}
+          Connecté par la configuration du maître. {active.length > 0 ? 'Activés : ' : ''}
           {active.map((m, index) => (
             <span key={m.id}>
               {index > 0 && ', '}
@@ -145,7 +246,7 @@ function ProviderDetail({ provider, data }: { provider: CatalogProvider; data: M
       ) : (
         <div className="mt-3 flex flex-col gap-3 text-[13px]">
           <p>
-            La connexion se fait aujourd'hui dans la configuration du maître, pas depuis cette page.{' '}
+            Ce fournisseur se connecte dans la configuration du maître : son adresse dépend de votre compte.{' '}
             {local
               ? "Une machine locale ne demande pas de clé."
               : "La clé va dans un fichier que seul le compte du maître peut lire, jamais dans la configuration elle-même."}

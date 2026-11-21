@@ -260,7 +260,8 @@ max_depth = 1
     assert_eq!(models["default"], "main");
     assert_eq!(models["models"][0]["alias"], "main");
     assert!(models["models"][0]["host"].as_str().unwrap().starts_with("127.0.0.1:"));
-    assert!(!models.to_string().contains("api_key") && !models.to_string().contains("base_url"));
+    let shown = models.to_string();
+    assert!(!shown.contains("api_key_file") && !shown.contains("api_key_env") && !shown.contains("base_url") && !shown.contains("cle-"));
 
     // le répertoire des rôles : l'enfant créé y est, avec ce qu'on lui a demandé et accordé
     let start = Instant::now();

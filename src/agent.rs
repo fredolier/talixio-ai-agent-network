@@ -211,7 +211,7 @@ fn frame_message(nonce: &str, source: &str, text: &str) -> String {
 }
 
 fn system_prompt(node: &Node) -> String {
-    let caps = &node.caps;
+    let caps = &node.rights();
     let list = |paths: &[std::path::PathBuf]| {
         if paths.is_empty() {
             "aucun".to_string()

@@ -123,10 +123,18 @@ impl Provider {
 }
 
 /// Les modèles du maître, par alias. C'est ici, et seulement ici, que vivent les clés.
+/// La table peut changer pendant que le maître tourne (un modèle activé depuis l'interface) :
+/// un appel prend son connecteur sous le verrou, puis le relâche avant d'attendre le fournisseur.
 pub struct Providers {
-    by_alias: BTreeMap<String, Provider>,
+    http: reqwest::Client,
+    table: std::sync::RwLock<Table>,
+}
+
+#[derive(Default)]
+struct Table {
+    by_alias: BTreeMap<String, std::sync::Arc<Provider>>,
     /// Les modèles qui ne tiennent pas une conversation.
-    services: BTreeMap<String, Service>,
+    services: BTreeMap<String, std::sync::Arc<Service>>,
     /// Ce qu'on peut montrer de chaque modèle : jamais la clé, ni où elle est rangée.
     catalog: Vec<ModelInfo>,
 }
@@ -157,83 +165,109 @@ impl Providers {
             // jamais d'autre adresse que celle de la configuration : ni requête rejouée ailleurs, ni clé qui suit
             .redirect(reqwest::redirect::Policy::none())
             .build()?;
-        let mut by_alias = BTreeMap::new();
-        let mut services = BTreeMap::new();
-        let mut catalog = Vec::new();
+        let providers = Self { http, table: Default::default() };
         for (alias, cfg) in models {
-            let key = cfg.api_key()?;
-            let nature = match cfg.nature.as_deref() {
-                None => Nature::Llm,
-                Some(name) => Nature::parse(name).ok_or_else(|| anyhow!("modèle « {alias} » : nature inconnue « {name} »"))?,
-            };
-            if cfg.vision && nature != Nature::Llm {
-                bail!("modèle « {alias} » : `vision` ne vaut que pour un modèle de nature llm");
-            }
-            let default_url = match cfg.provider.as_str() {
-                "anthropic" => "https://api.anthropic.com",
-                "elevenlabs" => "https://api.elevenlabs.io",
-                _ => "https://api.openai.com",
-            };
-            let host = reqwest::Url::parse(cfg.base_url.as_deref().unwrap_or(default_url))
-                .ok()
-                .and_then(|u| u.host_str().map(|h| match u.port() { Some(p) => format!("{h}:{p}"), None => h.to_string() }))
-                .unwrap_or_default();
-            catalog.push(ModelInfo {
-                alias: alias.clone(),
-                provider: cfg.provider.clone(),
-                model: cfg.model.clone(),
-                host,
-                effort: cfg.effort.clone(),
-                max_tokens: cfg.max_tokens,
-                has_key: !key.is_empty(),
-                nature: nature.as_str().to_string(),
-                vision: cfg.vision,
-            });
-            if nature != Nature::Llm {
-                let service = Service::new(http.clone(), cfg, key, nature).with_context(|| format!("modèle « {alias} »"))?;
-                services.insert(alias.clone(), service);
-                continue;
-            }
-            let provider = match cfg.provider.as_str() {
-                "anthropic" => Provider::Anthropic(Anthropic::new(http.clone(), cfg, key)?),
-                // OpenAI, Gemini, Mistral, Ollama, vLLM, OpenRouter… : la même API, une autre adresse
-                "openai" => Provider::OpenAi(OpenAi::new(http.clone(), cfg, key)?),
-                other => bail!("modèle « {alias} » : fournisseur inconnu « {other} » (anthropic ou openai)"),
-            };
-            by_alias.insert(alias.clone(), provider);
+            providers.add(alias, cfg, cfg.api_key()?)?;
         }
-        Ok(Self { by_alias, services, catalog })
+        Ok(providers)
     }
 
-    pub fn catalog(&self) -> &[ModelInfo] {
-        &self.catalog
+    /// Ajoute un modèle. Refusé si l'alias existe déjà : on ne remplace pas un modèle en service.
+    pub fn add(&self, alias: &str, cfg: &ModelConfig, key: String) -> Result<()> {
+        let nature = match cfg.nature.as_deref() {
+            None => Nature::Llm,
+            Some(name) => Nature::parse(name).ok_or_else(|| anyhow!("modèle « {alias} » : nature inconnue « {name} »"))?,
+        };
+        if cfg.vision && nature != Nature::Llm {
+            bail!("modèle « {alias} » : `vision` ne vaut que pour un modèle de nature llm");
+        }
+        let default_url = match cfg.provider.as_str() {
+            "anthropic" => "https://api.anthropic.com",
+            "elevenlabs" => "https://api.elevenlabs.io",
+            _ => "https://api.openai.com",
+        };
+        let host = reqwest::Url::parse(cfg.base_url.as_deref().unwrap_or(default_url))
+            .ok()
+            .and_then(|u| u.host_str().map(|h| match u.port() { Some(p) => format!("{h}:{p}"), None => h.to_string() }))
+            .unwrap_or_default();
+        let info = ModelInfo {
+            alias: alias.to_string(),
+            provider: cfg.provider.clone(),
+            model: cfg.model.clone(),
+            host,
+            effort: cfg.effort.clone(),
+            max_tokens: cfg.max_tokens,
+            has_key: !key.is_empty(),
+            nature: nature.as_str().to_string(),
+            vision: cfg.vision,
+        };
+        enum Built {
+            Chat(Provider),
+            Service(Service),
+        }
+        let built = if nature != Nature::Llm {
+            Built::Service(Service::new(self.http.clone(), cfg, key, nature).with_context(|| format!("modèle « {alias} »"))?)
+        } else {
+            Built::Chat(match cfg.provider.as_str() {
+                "anthropic" => Provider::Anthropic(Anthropic::new(self.http.clone(), cfg, key)?),
+                // OpenAI, Gemini, Mistral, Ollama, vLLM, OpenRouter… : la même API, une autre adresse
+                "openai" => Provider::OpenAi(OpenAi::new(self.http.clone(), cfg, key)?),
+                other => bail!("modèle « {alias} » : fournisseur inconnu « {other} » (anthropic ou openai)"),
+            })
+        };
+        let mut table = self.table.write().unwrap();
+        if table.catalog.iter().any(|m| m.alias == alias) {
+            bail!("un modèle porte déjà l'alias « {alias} »");
+        }
+        match built {
+            Built::Chat(provider) => drop(table.by_alias.insert(alias.to_string(), std::sync::Arc::new(provider))),
+            Built::Service(service) => drop(table.services.insert(alias.to_string(), std::sync::Arc::new(service))),
+        }
+        table.catalog.push(info);
+        table.catalog.sort_by(|a, b| a.alias.cmp(&b.alias));
+        Ok(())
+    }
+
+    /// Retire un modèle : les appels en cours finissent, les suivants sont refusés.
+    pub fn remove(&self, alias: &str) -> bool {
+        let mut table = self.table.write().unwrap();
+        let known = table.catalog.iter().any(|m| m.alias == alias);
+        table.catalog.retain(|m| m.alias != alias);
+        table.by_alias.remove(alias);
+        table.services.remove(alias);
+        known
+    }
+
+    pub fn catalog(&self) -> Vec<ModelInfo> {
+        self.table.read().unwrap().catalog.clone()
     }
 
     pub fn aliases(&self) -> Vec<String> {
-        self.by_alias.keys().chain(self.services.keys()).cloned().collect()
+        self.table.read().unwrap().catalog.iter().map(|m| m.alias.clone()).collect()
     }
 
     /// La nature de chaque modèle, telle qu'on la dit aux agents (`vision` : un llm qui lit les images).
     pub fn natures(&self) -> BTreeMap<String, String> {
-        self.catalog.iter().map(|m| (m.alias.clone(), if m.vision { "vision".to_string() } else { m.nature.clone() })).collect()
+        self.table.read().unwrap().catalog.iter().map(|m| (m.alias.clone(), if m.vision { "vision".to_string() } else { m.nature.clone() })).collect()
     }
 
     /// Appelle un modèle de service. La nature demandée doit être celle du modèle.
     pub async fn service(&self, request: &ServiceRequest) -> Result<ServiceResponse, ServiceError> {
-        let service = self.services.get(&request.model).ok_or_else(|| {
-            ServiceError::Refused(match self.by_alias.contains_key(&request.model) {
-                true => "ce modèle tient une conversation : il ne rend pas ce service".to_string(),
-                false => "modèle inconnu".to_string(),
-            })
-        })?;
+        let service = {
+            let table = self.table.read().unwrap();
+            table.services.get(&request.model).cloned().ok_or_else(|| {
+                ServiceError::Refused(match table.by_alias.contains_key(&request.model) {
+                    true => "ce modèle tient une conversation : il ne rend pas ce service".to_string(),
+                    false => "modèle inconnu".to_string(),
+                })
+            })?
+        };
         service.call(&request.input).await
     }
 
     pub async fn complete(&self, request: &ModelRequest) -> Result<ModelResponse> {
-        let provider = self
-            .by_alias
-            .get(&request.model)
-            .ok_or_else(|| anyhow!("modèle inconnu : « {} »", request.model))?;
+        let provider = self.table.read().unwrap().by_alias.get(&request.model).cloned();
+        let provider = provider.ok_or_else(|| anyhow!("modèle inconnu : « {} »", request.model))?;
         provider.complete(request).await
     }
 }

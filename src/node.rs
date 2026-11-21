@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
 use tokio::sync::{broadcast, mpsc, Notify};
@@ -39,10 +39,14 @@ pub struct Node {
     pub parent_name: Option<String>,
     pub instructions: String,
     pub model: String,
+    /// Les droits reçus au démarrage. Pour les modèles et les quotas d'appels, lire `rights()` :
+    /// chez le maître, ils peuvent s'étendre pendant qu'il tourne.
     pub caps: Capabilities,
     /// La nature de chaque modèle accordé (`llm`, `vision`, `transcription`…). Indicatif
     /// hors du maître, qui seul la connaît vraiment et la revérifie à chaque appel.
-    pub natures: BTreeMap<String, String>,
+    nature_table: RwLock<BTreeMap<String, String>>,
+    /// Chez le maître : modèles activés et appels accordés depuis l'interface, en plus de `caps`.
+    live: RwLock<Live>,
     pub timing: Timing,
     pub target: String,
     pub state_dir: PathBuf,
@@ -166,6 +170,13 @@ pub const MAX_REPORTS: u32 = 20;
 /// Images jointes à une demande, au plus ; taille de chacune, une fois en base64 (4 Mio).
 const MAX_IMAGES: usize = 8;
 const MAX_IMAGE_B64: usize = (4 * 1024 * 1024usize).div_ceil(3) * 4;
+
+/// Ce que le maître a reçu en plus depuis son démarrage : des modèles, et des appels par nature.
+#[derive(Default)]
+struct Live {
+    models: Vec<String>,
+    max_calls: BTreeMap<String, u64>,
+}
 
 /// Appels de service simultanés au plus pour un enfant et sa descendance.
 const MAX_PARALLEL_SERVICES: u64 = 4;
@@ -308,7 +319,8 @@ impl Node {
             parent_name: None,
             instructions: cfg.instructions.clone(),
             model: cfg.model.clone(),
-            natures: providers.natures().into_iter().filter(|(alias, _)| cfg.capabilities.models.contains(alias)).collect(),
+            nature_table: RwLock::new(providers.natures().into_iter().filter(|(alias, _)| cfg.capabilities.models.contains(alias)).collect()),
+            live: RwLock::default(),
             caps: cfg.capabilities.clone(),
             timing: cfg.timing,
             target: "root".into(),
@@ -352,7 +364,8 @@ impl Node {
             parent_name: Some(boot.parent_name.clone()),
             instructions: boot.instructions.clone(),
             model: boot.model.clone(),
-            natures: boot.natures.iter().filter(|(alias, _)| boot.capabilities.models.contains(alias)).map(|(a, n)| (crate::clean(a, 80, false), crate::clean(n, 20, false))).collect(),
+            nature_table: RwLock::new(boot.natures.iter().filter(|(alias, _)| boot.capabilities.models.contains(alias)).map(|(a, n)| (crate::clean(a, 80, false), crate::clean(n, 20, false))).collect()),
+            live: RwLock::default(),
             caps: boot.capabilities.clone(),
             timing: boot.timing,
             target: boot.target.clone(),
@@ -402,7 +415,7 @@ impl Node {
             last_seen_ms: now_ms(),
             tokens_used: self.tokens_used.load(Ordering::Relaxed),
             calls_used: self.meter.lock().unwrap().calls.clone(),
-            capabilities: self.caps.clone(),
+            capabilities: self.rights(),
             unverified: false,
             children,
         }
@@ -486,16 +499,56 @@ impl Node {
         }
     }
 
+    /// Les droits de l'agent tels qu'ils valent maintenant.
+    pub fn rights(&self) -> Capabilities {
+        let live = self.live.read().unwrap();
+        let mut rights = self.caps.clone();
+        rights.models.extend(live.models.iter().filter(|alias| !self.caps.models.contains(alias)).cloned());
+        for (nature, calls) in &live.max_calls {
+            rights.max_calls.insert(nature.clone(), *calls);
+        }
+        rights
+    }
+
+    pub fn natures(&self) -> BTreeMap<String, String> {
+        self.nature_table.read().unwrap().clone()
+    }
+
+    /// Chez le maître : un modèle activé pendant qu'il tourne entre dans ses droits.
+    pub fn grant_model(&self, alias: &str, nature: &str) {
+        self.nature_table.write().unwrap().insert(alias.to_string(), nature.to_string());
+        let mut live = self.live.write().unwrap();
+        if !live.models.iter().any(|a| a == alias) {
+            live.models.push(alias.to_string());
+        }
+        drop(live);
+        self.tree_dirty.notify_one();
+    }
+
+    /// Chez le maître : un modèle désactivé sort de ses droits.
+    pub fn revoke_model(&self, alias: &str) {
+        self.live.write().unwrap().models.retain(|a| a != alias);
+        self.nature_table.write().unwrap().remove(alias);
+        self.tree_dirty.notify_one();
+    }
+
+    /// Chez le maître : le nombre d'appels permis pour une nature de service.
+    pub fn set_calls(&self, nature: &str, calls: u64) {
+        self.live.write().unwrap().max_calls.insert(nature.to_string(), calls);
+        self.tree_dirty.notify_one();
+    }
+
     /// Appelle un modèle de service : directement chez le maître, en remontant par le parent
     /// sinon. Le droit, la taille et le quota de cet agent (descendance comprise) sont vérifiés
     /// ici, à chaque niveau. Un appel parti chez le fournisseur est compté, abouti ou non.
     pub async fn service(&self, origin: &str, request: ServiceRequest) -> Result<ServiceResponse, ServiceFail> {
-        if !self.caps.models.contains(&request.model) {
+        let rights = self.rights();
+        if !rights.models.contains(&request.model) {
             return Err("modèle non autorisé pour cet agent".into());
         }
         request.input.validate()?;
         let nature = request.input.nature().as_str();
-        self.meter.lock().unwrap().reserve_call(&self.caps.max_calls, nature, u64::MAX)?;
+        self.meter.lock().unwrap().reserve_call(&rights.max_calls, nature, u64::MAX)?;
         let result = match (&self.providers, &self.uplink) {
             (Some(providers), _) => providers.service(&request).await.map_err(|e| match e {
                 ServiceError::Refused(reason) => ServiceFail::refused(reason),
@@ -557,7 +610,7 @@ impl Node {
                 return Err("image jointe illisible ou trop grosse (maximum 4 Mo)".into());
             }
         }
-        if images > 0 && self.natures.get(&request.model).is_none_or(|nature| nature != "vision") {
+        if images > 0 && self.natures().get(&request.model).is_none_or(|nature| nature != "vision") {
             return Err("ce modèle ne lit pas les images".into());
         }
         Ok(())

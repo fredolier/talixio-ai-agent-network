@@ -63,7 +63,13 @@ pub async fn start_listener(
             .route("/api/activity", get(activity))
             .route("/api/events", get(events))
             .route("/api/messages", post(message))
-            .route("/api/agents/{id}/stop", post(stop));
+            .route("/api/agents/{id}/stop", post(stop))
+            .route("/api/providers/{id}/connect", post(provider_connect))
+            .route("/api/providers/{id}/disconnect", post(provider_disconnect))
+            .route("/api/providers/{id}/oauth", post(oauth_start))
+            .route("/api/providers/{id}/oauth/finish", post(oauth_finish))
+            .route("/api/models/activate", post(model_activate))
+            .route("/api/models/{alias}/deactivate", post(model_deactivate));
     }
     let router = router.layer(axum::middleware::map_response(harden));
     let app = router.with_state(App {
@@ -119,10 +125,12 @@ async fn models(State(app): State<App>, headers: HeaderMap) -> Response {
     if let Err(response) = authorize(&app, &headers) {
         return response;
     }
-    let catalog = app.node.providers.as_ref().map(|p| p.catalog().to_vec()).unwrap_or_default();
-    let mut body = crate::catalog::view(&catalog);
+    let catalog = app.node.providers.as_ref().map(|p| p.catalog()).unwrap_or_default();
+    let mut body = crate::catalog::view(&catalog, &crate::connect::linked(&app.node.state_dir));
     body["default"] = json!(app.node.model);
     body["models"] = json!(catalog);
+    // les alias activés depuis l'interface : eux seuls se désactivent d'ici
+    body["activated"] = json!(crate::connect::load(&app.node.state_dir).models.keys().collect::<Vec<_>>());
     Json(body).into_response()
 }
 
@@ -243,4 +251,60 @@ async fn stop(State(app): State<App>, headers: HeaderMap, Path(id): Path<String>
         Ok(()) => Json(json!({ "stopping": id })).into_response(),
         Err(e) => error(StatusCode::NOT_FOUND, &e),
     }
+}
+
+/// Le résultat d'un changement demandé depuis l'interface : ce qui a été fait, ou pourquoi non.
+fn changed(result: Result<Value, String>) -> Response {
+    match result {
+        Ok(done) => Json(done).into_response(),
+        Err(reason) => error(StatusCode::BAD_REQUEST, &reason),
+    }
+}
+
+/// Connecte un fournisseur du catalogue avec la clé saisie. La clé n'est ni journalisée, ni rendue.
+async fn provider_connect(State(app): State<App>, headers: HeaderMap, Path(id): Path<String>, Json(body): Json<Value>) -> Response {
+    if let Err(denied) = authorize(&app, &headers) {
+        return denied;
+    }
+    changed(crate::connect::connect(&app.node, &id, body["key"].as_str().unwrap_or("")).await)
+}
+
+async fn provider_disconnect(State(app): State<App>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if let Err(denied) = authorize(&app, &headers) {
+        return denied;
+    }
+    changed(crate::connect::disconnect(&app.node, &id).await)
+}
+
+/// Commence une autorisation dans le navigateur ; le retour ne peut viser que cette page-ci.
+async fn oauth_start(State(app): State<App>, headers: HeaderMap, uri: axum::http::Uri, Path(id): Path<String>, Json(body): Json<Value>) -> Response {
+    if let Err(denied) = authorize(&app, &headers) {
+        return denied;
+    }
+    // en HTTP/2, l'hôte demandé est dans l'adresse de la requête, pas dans un en-tête
+    let host = headers.get(header::HOST).and_then(|v| v.to_str().ok()).or(uri.authority().map(|a| a.as_str())).unwrap_or("");
+    changed(crate::connect::oauth_start(&id, body["callback"].as_str().unwrap_or(""), host))
+}
+
+async fn oauth_finish(State(app): State<App>, headers: HeaderMap, Path(id): Path<String>, Json(body): Json<Value>) -> Response {
+    if let Err(denied) = authorize(&app, &headers) {
+        return denied;
+    }
+    changed(crate::connect::oauth_finish(&app.node, &id, body["code"].as_str().unwrap_or("")).await)
+}
+
+async fn model_activate(State(app): State<App>, headers: HeaderMap, Json(body): Json<Value>) -> Response {
+    if let Err(denied) = authorize(&app, &headers) {
+        return denied;
+    }
+    let text = |key: &str| body[key].as_str().unwrap_or("");
+    let alias = body["alias"].as_str().filter(|a| !a.is_empty());
+    changed(crate::connect::activate(&app.node, text("provider"), text("model"), alias, body["calls"].as_u64()).await)
+}
+
+async fn model_deactivate(State(app): State<App>, headers: HeaderMap, Path(alias): Path<String>) -> Response {
+    if let Err(denied) = authorize(&app, &headers) {
+        return denied;
+    }
+    changed(crate::connect::deactivate(&app.node, &alias).await)
 }

@@ -54,6 +54,11 @@ api_key_env = "ANTHROPIC_API_KEY"
 # base_url = "http://localhost:11434/v1"
 # model = "qwen3"
 
+# D'autres modèles se connectent et s'activent depuis l'interface (« Fournisseurs », « Modèles »),
+# sans toucher à ce fichier. Les clés saisies là vont dans <state_dir>/keys/.
+# catalog_file = "/etc/talixio/catalog.toml"   # un autre catalogue que celui de l'exécutable ;
+#                                               # il fixe où vont les clés : à protéger comme ce fichier
+
 # --- Modèles de service ---------------------------------------------------------------------
 # Un modèle qui ne tient pas une conversation dit sa nature. Les agents l'appellent par un outil,
 # toujours à travers le maître, et chaque appel est compté ([capabilities.max_calls] plus bas).
