@@ -7,6 +7,28 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.6.1"
+date = "2026-11-21"
+title = "Windows et macOS"
+summary = "Les mêmes protections sur les trois systèmes, vérifiées à chaque modification sur des machines Linux, macOS et Windows."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Windows : les fichiers de clés sont fermés aux autres comptes et vérifiés à chaque ouverture, les liens ne sont plus suivis, et tout ce qu'une commande a lancé est tué avec elle (Job Objects). Si l'agent meurt, sa descendance part avec lui."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Les tests tournent désormais sur Linux, macOS et Windows à chaque modification, ainsi que sur l'exécutable statique."
+
+[[release.changes]]
+kind = "correction"
+text = "Docker sous Windows : les dossiers à monter s'écrivent avec leur lettre de lecteur."
+
+[[release.changes]]
+kind = "attention"
+text = "Une machine Windows ne peut pas encore recevoir un agent par SSH : les cibles SSH restent des machines Linux ou macOS."
+
+[[release]]
 version = "0.6.0"
 date = "2026-11-21"
 title = "Configuration scellée"

@@ -59,9 +59,11 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 - [ ] Coffre des clés au niveau 0, clés sous un autre compte que celui des agents (D6, Q6)
 - [ ] Conversations longues : résumé ou compaction (M4)
 - [ ] Agents permanents ; installation en service ou démon, agent hôte par machine (A5, A6, Q4)
-- [ ] Windows : le code se compile ; restent les protections propres au système (Job Objects pour tuer la descendance, ACL des fichiers de clés, liens), un essai réel, et des agents Windows comme cibles de déploiement (A2)
-- [ ] macOS : compiler et essayer sur une vraie machine ; remplacer PDEATHSIG (A2)
-- [ ] Compilation de toutes les plateformes en intégration continue (Linux statique, Windows, macOS)
+- [x] Windows : protections propres au système (Job Objects, listes de droits, liens), tests verts en intégration continue (A2)
+- [ ] Windows : essai sur un poste réel ; agents Windows comme cibles de déploiement ; rejouer sous Windows les tests de déploiement (A2)
+- [x] macOS : compilé et testé en intégration continue (A2)
+- [ ] macOS : essai sur un poste réel (A2)
+- [x] Toutes les plateformes en intégration continue (Linux, Linux statique, Windows, macOS)
 
 ## Étape 4 — nouveaux usages
 
@@ -83,3 +85,4 @@ Les exigences citées (A1, D3…) sont celles de [SPEC.md](SPEC.md).
 | 2026-11-20 | Compilation croisée Windows réussie ; écarts de sécurité Windows et macOS inscrits (A2). |
 | 2026-11-21 | v0.6.0 : configuration scellée des enfants ; rotation des journaux. |
 | 2026-11-21 | `EXIGENCES.md` : les 109 demandes relevées dans la conversation, avec critères d'acceptation. Intégration continue : Linux, macOS et musl verts ; sous Windows, les protections système passent, deux tests écrits avec des chemins POSIX corrigés. |
+| 2026-11-21 | v0.6.1 : intégration continue verte sur Linux, macOS, Windows et musl ; Windows au niveau de Linux pour les protections système (A2, restes notés). Vérification indépendante des 109 demandes lancée. |

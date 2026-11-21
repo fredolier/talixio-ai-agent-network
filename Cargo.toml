@@ -1,6 +1,6 @@
 [package]
 name = "talixio-agent"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 description = "Agents IA autonomes en grappe : chaque agent est un petit process, aux droits limités, qui ne parle qu'à son parent"
 publish = false
