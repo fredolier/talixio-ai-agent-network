@@ -120,6 +120,8 @@ export interface CatalogModel {
   currency: string | null
   estimated: boolean
   deprecated: boolean
+  /** Annoncé, pas encore proposé. */
+  soon: boolean
   /** Les alias sous lesquels le maître l'a activé. */
   aliases: string[]
   /** Un agent peut l'appeler (texte et vision ; pas encore l'image ni la voix). */

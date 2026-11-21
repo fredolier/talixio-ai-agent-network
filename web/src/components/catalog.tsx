@@ -47,7 +47,7 @@ export function Quality({ rank }: { rank: number | null }) {
   )
 }
 
-const NATURE: Record<string, string> = { LLM: 'Texte', Vision: 'Vision', Voice: 'Voix', Image: 'Image', Embedding: 'Plongements' }
+const NATURE: Record<string, string> = { LLM: 'Texte', Vision: 'Vision', Voice: 'Voix', Image: 'Image', Embedding: 'Plongements', Forecast: 'Prévision', Decision: 'Décision' }
 export const natureLabel = (nature: string) => pick(NATURE, nature) ?? nature
 export const NATURES = Object.keys(NATURE)
 

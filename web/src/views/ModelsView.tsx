@@ -137,6 +137,7 @@ function ModelRow({ model, provider, data, agents }: { model: CatalogModel; prov
         <span className={cn('block', on && 'font-medium text-foreground')}>
           {model.name}
           {model.deprecated && <span className="ml-2 text-xs font-normal text-st-off">en fin de vie</span>}
+          {model.soon && <span className="ml-2 text-xs font-normal text-muted-foreground">annoncé</span>}
           {!model.listed && <span className="ml-2 text-xs font-normal text-muted-foreground">hors catalogue</span>}
         </span>
         {model.id !== model.name && <span className="num block text-xs text-muted-foreground">{model.id}</span>}
@@ -150,7 +151,7 @@ function ModelRow({ model, provider, data, agents }: { model: CatalogModel; prov
             {model.aliases.map((alias) => <Activation key={alias} alias={alias} data={data} agents={agents} />)}
           </span>
         ) : !model.callable ? (
-          <span title="Le maître ne sait pas encore appeler l'image, la voix ni les plongements pour un agent">Pas encore appelable</span>
+          <span title="Le maître ne sait appeler que le texte et la vision pour un agent : le reste est listé pour comparer">Pas encore appelable</span>
         ) : provider.connected ? (
           <span>Disponible, non activé</span>
         ) : (

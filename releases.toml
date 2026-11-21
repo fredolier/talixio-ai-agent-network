@@ -7,6 +7,20 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.8.1"
+date = "2026-11-21"
+title = "Prévision et décision au catalogue"
+summary = "Les modèles de prévision (séries temporelles) et de décision de l'assistant rejoignent le catalogue, avec leurs fournisseurs."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Dix modèles de prévision et de décision (TimesFM, Chronos-2, TimeGPT, Jev, Kev…) et deux fournisseurs (TypeSafe AI, Nixtla) dans les écrans « Fournisseurs » et « Modèles », avec un filtre par nature."
+
+[[release.changes]]
+kind = "attention"
+text = "Ces modèles sont listés pour comparer : aucun agent ne peut encore les appeler."
+
+[[release]]
 version = "0.8.0"
 date = "2026-11-21"
 title = "Fournisseurs et modèles"

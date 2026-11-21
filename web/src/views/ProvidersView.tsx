@@ -140,7 +140,7 @@ function ProviderDetail({ provider, data }: { provider: CatalogProvider; data: M
         </p>
       ) : !provider.api ? (
         <p className="mt-3 text-[13px] text-muted-foreground">
-          Ce fournisseur ne sert que de la voix ou de l'image : le maître ne sait pas encore appeler ces modèles pour un agent. Il est listé pour comparer.
+          Le maître ne sait pas encore appeler les modèles de ce fournisseur (voix, prévision ou décision) pour un agent. Il est listé pour comparer.
         </p>
       ) : (
         <div className="mt-3 flex flex-col gap-3 text-[13px]">

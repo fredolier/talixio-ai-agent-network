@@ -39,7 +39,7 @@ pub struct Model {
     /// Le nom exact attendu par l'API du fournisseur.
     pub id: String,
     pub provider: String,
-    /// `LLM`, `Vision`, `Voice`, `Image` ou `Embedding`.
+    /// `LLM`, `Vision`, `Voice`, `Image`, `Embedding`, `Forecast` (prévision) ou `Decision`.
     pub nature: String,
     /// Qualité relative, de 1 à 10.
     pub rank: u8,
@@ -54,6 +54,9 @@ pub struct Model {
     pub estimated: bool,
     #[serde(default)]
     pub deprecated: bool,
+    /// Annoncé, pas encore proposé par le fournisseur ou par la pile qui le sert.
+    #[serde(default)]
+    pub soon: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -156,7 +159,7 @@ pub fn view(configured: &[ModelInfo]) -> Value {
                 None => models.push(json!({
                     "name": model.model, "id": model.model, "provider": provider, "nature": "LLM", "rank": null,
                     "price_in": null, "price_out": null, "unit_price": null, "unit": null, "currency": null,
-                    "estimated": false, "deprecated": false, "aliases": [model.alias], "callable": true, "listed": false,
+                    "estimated": false, "deprecated": false, "soon": false, "aliases": [model.alias], "callable": true, "listed": false,
                 })),
             }
         }
@@ -175,18 +178,22 @@ mod tests {
     #[test]
     fn le_catalogue_est_lisible_et_coherent() {
         let catalog = catalog();
-        assert!(catalog.provider.len() >= 10 && catalog.model.len() >= 40);
+        assert!(catalog.provider.len() >= 13 && catalog.model.len() >= 60);
+        for nature in ["Forecast", "Decision"] {
+            assert!(catalog.model.iter().any(|m| m.nature == nature), "{nature}");
+        }
         for p in &catalog.provider {
             assert!(matches!(p.trust.as_str(), "1" | "2" | "3" | "4" | "5" | "L"), "{}", p.id);
             assert!(matches!(p.api.as_str(), "" | "anthropic" | "openai"), "{}", p.id);
-            assert!(!p.hosts.is_empty(), "{}", p.id);
+            // sans machine connue, rien ne peut s'y rattacher : permis seulement pour ce qu'on ne sait pas appeler
+            assert!(!p.hosts.is_empty() || p.api.is_empty(), "{}", p.id);
             // « européen » veut dire souverain : jamais accordé à un niveau de confiance moindre
             assert_eq!(p.europe, p.trust == "5", "{}", p.id);
         }
         for m in &catalog.model {
             assert!(catalog.provider.iter().any(|p| p.id == m.provider), "{} : fournisseur inconnu", m.name);
             assert!((1..=10).contains(&m.rank), "{}", m.name);
-            assert!(matches!(m.nature.as_str(), "LLM" | "Vision" | "Voice" | "Image" | "Embedding"), "{}", m.name);
+            assert!(matches!(m.nature.as_str(), "LLM" | "Vision" | "Voice" | "Image" | "Embedding" | "Forecast" | "Decision"), "{}", m.name);
         }
     }
 

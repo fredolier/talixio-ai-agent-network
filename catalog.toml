@@ -147,6 +147,30 @@ api = "openai"
 endpoint = "http://127.0.0.1:11434/v1"
 hosts = ["localhost", "127.0.0.1", "::1"]
 
+[[provider]]
+id = "typesafe"
+name = "TypeSafe AI"
+country = "États-Unis"
+europe = false
+trust = "2"
+kind = "Non évalué"
+billing = "usage"
+api = ""
+endpoint = ""
+hosts = ["api.typesafe.ai"]
+
+[[provider]]
+id = "nixtla"
+name = "Nixtla"
+country = "Non vérifié"
+europe = false
+trust = "2"
+kind = "Non évalué"
+billing = "usage"
+api = ""
+endpoint = ""
+hosts = []
+
 [[model]]
 name = "Haiku 5.5"
 id = "claude-haiku-5-5"
@@ -653,3 +677,108 @@ rank = 4
 unit_price = 0.0
 unit = "Mtok"
 currency = "$"
+
+# Prévision (séries temporelles) et décision (questions typées, réponses en probabilités).
+# Listés pour comparer : le maître ne sait pas encore les appeler pour un agent.
+# `soon` : dans l'assistant non plus, ce modèle ne peut pas encore être choisi.
+
+[[model]]
+name = "TimesFM 2.5 (local)"
+id = "timesfm-2.5"
+provider = "local"
+nature = "Forecast"
+rank = 7
+unit_price = 0.0
+unit = "min"
+currency = "$"
+
+[[model]]
+name = "Jev"
+id = "jev-latest"
+provider = "typesafe"
+nature = "Decision"
+rank = 8
+price_in = 0.042
+price_out = 0.0
+estimated = true
+
+[[model]]
+name = "Kev (own server)"
+id = "kev-latest"
+provider = "local"
+nature = "Decision"
+rank = 6
+unit_price = 0.0
+unit = "min"
+currency = "$"
+
+[[model]]
+name = "Rizzo Flow (own server)"
+id = "rizzo-flow"
+provider = "local"
+nature = "Decision"
+rank = 5
+unit_price = 0.0
+unit = "min"
+currency = "$"
+
+[[model]]
+name = "Chronos-2 (local)"
+id = "chronos-2"
+provider = "local"
+nature = "Forecast"
+rank = 7
+unit_price = 0.0
+unit = "min"
+currency = "$"
+
+[[model]]
+name = "Toto (own server)"
+id = "toto"
+provider = "local"
+nature = "Forecast"
+rank = 6
+unit_price = 0.0
+unit = "min"
+currency = "$"
+soon = true
+
+[[model]]
+name = "TiRex (own server)"
+id = "tirex"
+provider = "local"
+nature = "Forecast"
+rank = 7
+unit_price = 0.0
+unit = "min"
+currency = "$"
+soon = true
+
+[[model]]
+name = "Granite TTM-r2 (own server)"
+id = "granite-ttm-r2"
+provider = "local"
+nature = "Forecast"
+rank = 4
+unit_price = 0.0
+unit = "min"
+currency = "$"
+soon = true
+
+[[model]]
+name = "TimeGPT"
+id = "timegpt-1"
+provider = "nixtla"
+nature = "Forecast"
+rank = 7
+estimated = true
+soon = true
+
+[[model]]
+name = "TimesFM (BigQuery AI.FORECAST)"
+id = "bigquery-timesfm"
+provider = "google"
+nature = "Forecast"
+rank = 8
+estimated = true
+soon = true
