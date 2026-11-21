@@ -1,10 +1,13 @@
-# Une version téléchargeable par système : à chaque étiquette `vX.Y.Z`, un exécutable par
-# système et par processeur, leurs empreintes, et les scripts d'installation, publiés ensemble.
+# Une version téléchargeable par système : un exécutable par système et par processeur, leurs
+# empreintes, et les scripts d'installation, publiés ensemble. Se lance en poussant une étiquette
+# `vX.Y.Z`, ou à la main (onglet Actions, « version », « Run workflow ») : la version publiée est
+# alors celle de Cargo.toml, étiquetée sur le commit choisi.
 name: version
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -26,6 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: L'étiquette est la version du code
+        if: github.ref_type == 'tag'
         shell: bash
         run: test "v$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" = "$GITHUB_REF_NAME"
       - name: Compilateur C pour musl
@@ -68,6 +72,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" sortie/* \
-            --title "Talixio Agent Network $GITHUB_REF_NAME" \
+          version="v$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          gh release create "$version" sortie/* --target "$GITHUB_SHA" \
+            --title "Talixio Agent Network $version" \
             --notes "Notes de version : commande talixio-agent releases, ou écran Nouveautés de l'interface. Empreintes des fichiers : SHA256SUMS."
