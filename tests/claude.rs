@@ -106,6 +106,12 @@ async fn the_claude_command_serves_a_model_through_our_own_tools() {
     let models = api.get("/api/models").await;
     let provider = models["providers"].as_array().unwrap().iter().find(|p| p["id"] == "claude-abonnement").unwrap().clone();
     assert_eq!(provider["connect"], "cli");
+    // installée mais pas connectée à l'abonnement : on le dit tout de suite, avec le remède
+    let flag = PathBuf::from(format!("{}.deconnecte", journal.display()));
+    std::fs::write(&flag, "").unwrap();
+    let (status, refused) = api.post("/api/providers/claude-abonnement/connect", json!({ "key": "" })).await;
+    assert!(status != 200 && refused.to_string().contains("claude auth login"), "{status} {refused}");
+    std::fs::remove_file(&flag).unwrap();
     assert_eq!(api.post("/api/providers/claude-abonnement/connect", json!({ "key": "" })).await, (200, json!({ "connected": "claude-abonnement", "verified": true })));
     assert!(!state.join("keys").join("claude-abonnement.key").exists());
     let (status, activated) = api.post("/api/models/activate", json!({ "provider": "claude-abonnement", "model": "sonnet" })).await;

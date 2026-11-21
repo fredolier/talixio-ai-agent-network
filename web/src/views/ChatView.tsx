@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowUp } from 'lucide-react'
+import { ArrowUp, LoaderCircle } from 'lucide-react'
+import { Markdown } from '@/components/Markdown'
 import { Empty, PageHeader } from '@/components/bits'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -15,12 +16,21 @@ export function ChatView({ cluster }: { cluster: Cluster }) {
   const [sending, setSending] = useState(false)
   const end = useRef<HTMLDivElement>(null)
   const lines = cluster.events.filter(
-    (e) => e.agent_id === cluster.tree.id && (e.kind === 'message' || (e.kind === 'input' && e.text.startsWith(MINE))),
+    (e) =>
+      e.agent_id === cluster.tree.id &&
+      (e.kind === 'message' ||
+        (e.kind === 'input' && e.text.startsWith(MINE)) ||
+        // une erreur du maître se dit ici aussi : sans cela, une question resterait sans réponse ni raison.
+        // Celles des appels de ses enfants restent au journal.
+        (e.kind === 'error' && (!e.text.startsWith('appel du modèle') || e.text.includes(cluster.tree.id)))),
   )
+  const last = lines[lines.length - 1]
+  // il travaille : son état le dit, ou il vient de recevoir une question restée sans réponse
+  const waiting = cluster.tree.status === 'working' || (last?.kind === 'input' && Date.now() - last.ts_ms < 20 * 60 * 1000)
   useEffect(() => {
     // pas de valeur de retour : selon le navigateur, scrollIntoView renvoie une promesse
     void end.current?.scrollIntoView({ block: 'end' })
-  }, [lines.length])
+  }, [lines.length, waiting])
 
   const send = async () => {
     const message = text.trim()
@@ -44,15 +54,25 @@ export function ChatView({ cluster }: { cluster: Cluster }) {
         {lines.length === 0 && <Empty title="Rien encore">Écrivez une consigne : le maître décidera s'il la traite seul ou s'il crée des agents.</Empty>}
         {lines.map((event) => {
           const mine = event.kind === 'input'
+          const failed = event.kind === 'error'
           return (
             <div key={event.id} className={cn('flex max-w-[min(680px,90%)] flex-col gap-1', mine && 'self-end items-end')}>
               <span className="eyebrow">{mine ? 'vous' : cluster.tree.name} · {hour(event.ts_ms)}</span>
-              <p className={cn('rounded-lg border px-3.5 py-2.5 whitespace-pre-wrap [overflow-wrap:anywhere]', mine ? 'border-primary bg-primary text-primary-foreground' : 'bg-card')}>
-                {mine ? event.text.slice(MINE.length) : event.text}
-              </p>
+              <div
+                className={cn('rounded-lg border px-3.5 py-2.5', mine ? 'border-primary bg-primary text-primary-foreground' : failed ? 'border-destructive/40 bg-destructive/5 text-destructive' : 'bg-card')}
+                role={failed ? 'alert' : undefined}
+              >
+                {mine || failed ? <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{mine ? event.text.slice(MINE.length) : event.text}</p> : <Markdown text={event.text} />}
+              </div>
             </div>
           )
         })}
+        {waiting && (
+          <p className="eyebrow flex items-center gap-2" role="status">
+            <LoaderCircle className="size-3.5 animate-spin" aria-hidden />
+            {cluster.tree.name} travaille…
+          </p>
+        )}
         <div ref={end} />
       </div>
       <form

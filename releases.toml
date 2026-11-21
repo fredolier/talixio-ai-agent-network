@@ -7,6 +7,24 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.13.2"
+date = "2026-11-21"
+title = "Un dialogue qui dit ce qui se passe"
+summary = "Le dialogue avec le maître montre qu'il travaille, met en forme ses réponses et affiche ses erreurs."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Dialogue : un indicateur tourne tant que le maître travaille ; ses réponses sont mises en forme (titres, listes, gras, code) ; ses erreurs s'affichent au lieu de laisser la question sans suite."
+
+[[release.changes]]
+kind = "amélioration"
+text = "« Claude (abonnement) » : « Connecter » vérifie que la commande `claude` est bien connectée à l'abonnement et, sinon, dit quoi faire. Dans Docker, `claude` se connecte lui-même (`./tools.sh login`) et garde sa connexion dans le volume : plus de jeton à passer au lancement."
+
+[[release.changes]]
+kind = "correction"
+text = "Page des modèles : plus de « sans clé » en rouge pour les modèles de l'abonnement, qui n'en ont pas besoin."
+
+[[release]]
 version = "0.13.1"
 date = "2026-11-21"
 title = "L'abonnement Claude, revu"

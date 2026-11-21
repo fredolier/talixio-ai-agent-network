@@ -89,6 +89,15 @@ pub async fn probe() -> Result<String, String> {
     if !output.status.success() {
         return Err("la commande `claude` a échoué".into());
     }
+    // est-elle connectée ? Sans cela, chaque tour échouerait. Une version qui ne sait pas le dire ne bloque pas.
+    let mut status = tokio::process::Command::new(&setup.program);
+    apply_env(&mut status, setup);
+    status.args(["auth", "status", "--json"]).stdin(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
+    let said = tokio::time::timeout(Duration::from_secs(20), status.output()).await.ok().and_then(Result::ok);
+    let logged = said.and_then(|o| serde_json::from_slice::<Value>(&o.stdout).ok()).and_then(|v| v["loggedIn"].as_bool());
+    if logged == Some(false) {
+        return Err("la commande `claude` est installée mais pas connectée à votre abonnement. Sous le compte du maître : « claude auth login » (dans Docker : « ./tools.sh login »), puis « Connecter » de nouveau.".into());
+    }
     Ok(crate::clean(String::from_utf8_lossy(&output.stdout).trim(), 80, false))
 }
 
@@ -475,7 +484,7 @@ async fn listen(turn: &Arc<Turn>) -> Result<(Message, Usage, bool)> {
             }
             Event::Done { .. } => break false,
             Event::Gone if calls > 0 => break false,
-            Event::Gone => bail!("`claude` s'est arrêté sans répondre (est-il connecté ? détail dans la sortie d'erreur du maître)"),
+            Event::Gone => bail!("`claude` s'est arrêté sans répondre : est-il connecté à votre abonnement ? (« claude auth login » sous le compte du maître, « ./tools.sh login » dans Docker ; détail dans la sortie d'erreur du maître)"),
         }
     };
     let mut usage = Usage::default();

@@ -16,6 +16,11 @@ fn main() {
         println!("0.0.0 (faux claude)");
         return;
     }
+    // « auth status » : connectée, sauf si le test pose un fichier qui dit le contraire
+    if args.first().map(String::as_str) == Some("auth") {
+        println!("{}", json!({ "loggedIn": !std::env::var("FAUX_CLAUDE_JOURNAL").is_ok_and(|log| std::path::Path::new(&format!("{log}.deconnecte")).exists()) }));
+        return;
+    }
     let after = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
     // ce que le maître nous a passé : les tests le relisent
     if let Ok(log) = std::env::var("FAUX_CLAUDE_JOURNAL") {

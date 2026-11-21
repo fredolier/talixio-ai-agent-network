@@ -270,4 +270,4 @@ const talks = (data: ModelsData, alias: string) => {
 }
 
 /** Une machine locale se passe de clé ; partout ailleurs, son absence mérite d'être dite. */
-const needsKey = (host: string) => !/^(localhost|127\.0\.0\.1|\[?::1\]?)(:\d+)?$/.test(host)
+const needsKey = (host: string) => !/^(localhost|127\.0\.0\.1|\[?::1\]?)(:\d+)?$/.test(host) && !host.endsWith('.invalid')
