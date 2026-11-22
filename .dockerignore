@@ -1,0 +1,12 @@
+# Seul ce que la compilation lit entre dans l'image de construction : tout le reste est exclu,
+# clés, configurations et dossiers d'état compris, où qu'ils soient.
+*
+!Cargo.toml
+!Cargo.lock
+!catalog.toml
+!releases.toml
+!src
+!packs
+!web/dist
+!docker/talixio.toml
+!docker/chromium-seccomp.json

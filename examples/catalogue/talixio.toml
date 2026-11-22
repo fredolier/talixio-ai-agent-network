@@ -1,0 +1,75 @@
+# Exemple « catalogue » : une équipe d'agents tient à jour la liste des fournisseurs et des modèles.
+# Le maître dans Docker, ses agents à navigateur dans des conteneurs voisins :
+#   ./tools.sh build claude && ./tools.sh pack install catalogue && ./tools.sh build navigateur
+#   TALIXIO_DOCKER=1 TALIXIO_CONFIG=examples/catalogue/talixio.toml ./tools.sh run claude
+# Sans TALIXIO_DOCKER=1, le maître ne peut pas lancer de conteneur : le collecteur tourne alors à
+# côté de lui, sans navigateur (il n'y en a pas dans l'image du maître).
+# Voir examples/catalogue/README.md.
+
+name = "maître"
+role = "orchestrateur"
+instructions = """
+Tu pilotes une grappe d'agents pour le compte de la personne qui te parle.
+Délègue ce qui peut l'être à des agents spécialisés, avec le strict minimum de droits :
+chacun ne reçoit que les dossiers et les commandes dont son rôle a besoin.
+"""
+
+listen = "0.0.0.0:7700"
+state_dir = "/data/.talixio"
+# Le paquet « catalogue » (./tools.sh pack install catalogue) donne les commandes de lecture du
+# web et les trois rôles. Le maître ne peut ni l'installer ni le modifier.
+packs_dir = "/packs"
+
+[capabilities]
+fs_read = ["/data/work"]
+fs_write = ["/data/work"]
+# une passe complète avec un aller-retour de correction a épuisé 6 millions lors d'un essai
+max_tokens = 12000000
+
+# Le catalogue de cet exécutable, et le contrôle d'un catalogue candidat.
+[[capabilities.exec]]
+program = "/talixio-agent"
+args = ["catalog", "show"]
+
+[[capabilities.exec]]
+program = "/talixio-agent"
+args = ["catalog", "check", "{read}"]
+
+[capabilities.spawn]
+max_children = 4
+max_depth = 1
+targets = ["local", "navigateur"]
+
+# Le conteneur du collecteur : jetable, en lecture seule, sans capacité, dans le réseau du maître.
+# Il ne voit que les paquets installés (dans l'image, sous /packs) et son dossier de relevés (un sous-dossier du volume
+# du maître, que le maître crée avant de le lancer). Ni clé, ni le reste du volume.
+[targets.navigateur]
+kind = "docker"
+image = "talixio-navigateur"
+user = "65532:65532"
+memory = "2g"
+network = "talixio-net"
+agent_in_image = true
+seccomp = "/config/chromium-seccomp.json"
+mounts = [{ volume = "talixio-data", subpath = "work/catalogue/releves", container = "/releves", write = true }]
+
+[targets.navigateur.capabilities]
+fs_read = ["/releves"]
+fs_write = ["/releves"]
+
+[[targets.navigateur.capabilities.exec]]
+program = "/packs/catalogue/lire-web"
+args = ["*"]
+
+[[targets.navigateur.capabilities.exec]]
+program = "/packs/catalogue/lire-web"
+args = ["*", "*"]
+
+[[targets.navigateur.capabilities.exec]]
+program = "/packs/catalogue/lire-page"
+args = ["*"]
+
+[[targets.navigateur.capabilities.exec]]
+program = "/packs/catalogue/lire-page"
+args = ["*", "*"]
+

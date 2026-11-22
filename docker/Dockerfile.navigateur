@@ -1,0 +1,38 @@
+# Une image pour les AGENTS qui lisent le web avec un navigateur (Chromium, piloté par
+# Playwright) : le script `lire-page` de examples/catalogue. Pas pour le maître : il reste dans
+# son image, sans navigateur. L'agent qui en a besoin est lancé dans un conteneur de cette image
+# (cible `docker` de la configuration du maître), jetable et fermé, sans clé ni accès au maître
+# autre que son lien ; le navigateur y exécute les scripts des pages loin de tout le reste.
+#
+#   ./tools.sh build navigateur        (qui donne les paquets installés et le dossier de scripts : --build-context paquets=… outils=…)
+#
+# L'image porte aussi l'exécutable de l'agent (pris dans l'image `claude`, la même version que le
+# maître) et les scripts (`/outils`, immuables : le système du conteneur est en lecture seule).
+# Un maître en conteneur lance l'agent tel quel (`agent_in_image = true`) ; un maître installé
+# sur la machine monte son propre exécutable par-dessus. Le bac à sable de Chromium demande au
+# noyau de créer des espaces de noms, ce que le filtre ordinaire de Docker refuse : la cible donne
+# `seccomp = ".../chromium-seccomp.json"`, qui est ce filtre plus ces seuls appels.
+# Sur Debian, avec le Chromium que Playwright fournit et essaie (celui d'Alpine est arrêté par
+# son propre bac à sable sur les noyaux récents). Comptez 1,2 Go d'image.
+
+ARG BASE=talixio-agent:claude
+FROM ${BASE} AS maitre
+
+FROM debian:stable-slim
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+# Node, le pilote dans la version figée ici, son Chromium et les bibliothèques qu'il demande ;
+# bash et curl pour `lire-web`.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl bash nodejs npm \
+ && npm install --global playwright@1.63.0 \
+ && playwright install --with-deps --only-shell chromium \
+ && npm cache clean --force && rm -rf /var/lib/apt/lists/* \
+ && useradd --uid 65532 --create-home --home-dir /home/talixio talixio
+COPY --from=maitre /talixio-agent /talixio-agent
+# le dossier de scripts donné à la construction (--build-context outils=…)
+COPY --from=outils . /outils
+# les paquets installés (--build-context paquets=…), au même chemin que chez le maître
+COPY --from=paquets . /packs
+RUN chmod -R a+rX,go-w /outils /packs
+USER 65532:65532
+ENV HOME=/tmp PATH=/usr/local/bin:/usr/bin:/bin

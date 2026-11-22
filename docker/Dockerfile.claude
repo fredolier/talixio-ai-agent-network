@@ -1,0 +1,49 @@
+# L'agent maître avec la commande officielle `claude` à côté de lui, pour servir des modèles par
+# un abonnement Claude (Pro, Max). L'image ordinaire (Dockerfile) reste vide et suffit pour tout
+# le reste ; celle-ci ajoute ce que `claude` demande : un système minimal et un shell.
+#
+#   docker build -f docker/Dockerfile.claude -t talixio-agent:claude .
+#   export TALIXIO_API_TOKEN="$(openssl rand -hex 32)"      # le jeton de l'interface : gardez-le
+#   docker run -d --name talixio -p 127.0.0.1:7700:7700 -v talixio-data:/data \
+#     --cap-drop ALL --security-opt no-new-privileges --pids-limit 512 --memory 3g \
+#     -e TALIXIO_API_TOKEN talixio-agent:claude
+#   docker exec -it talixio claude auth login               # une fois : `claude` se connecte lui-même
+#                                                           # (lien à ouvrir, code à recoller) ; gardé dans /data/.claude
+#   (ou, sans cette étape : -e CLAUDE_CODE_OAUTH_TOKEN, le jeton tiré par `claude setup-token`)
+#   puis https://127.0.0.1:7700 : « Fournisseurs », « Claude (abonnement) », « Connecter ».
+#
+# Chaque tour d'un agent servi par `claude` est un process : comptez quelques centaines de Mo
+# par agent actif.
+
+FROM rust:1-alpine AS construction
+RUN apk add --no-cache build-base
+WORKDIR /src
+COPY Cargo.toml Cargo.lock catalog.toml releases.toml ./
+COPY src src
+COPY packs packs
+COPY web/dist web/dist
+RUN cargo build --release --locked && strip target/release/talixio-agent
+
+FROM alpine:3
+# ce que l'installation de `claude` demande sur Alpine, et un compte sans droit
+# (docker-cli : le client seul, sans démon. Il ne sert que si le maître reçoit le socket Docker de
+# la machine, ce que seul `TALIXIO_DOCKER=1 ./tools.sh` fait ; sans socket, il ne peut rien.)
+RUN apk add --no-cache bash curl ca-certificates libgcc libstdc++ ripgrep docker-cli \
+ && adduser -D -u 65532 -h /home/talixio talixio \
+ && mkdir -p /data/work && chown -R 65532:65532 /data && chmod -R 700 /data
+COPY --from=construction /src/target/release/talixio-agent /talixio-agent
+COPY docker/talixio.toml /config/talixio.toml
+# le filtre d'appels système des conteneurs d'agents à navigateur : lu par le client Docker, ici
+COPY docker/chromium-seccomp.json /config/chromium-seccomp.json
+USER 65532:65532
+ENV HOME=/home/talixio PATH=/home/talixio/.local/bin:/usr/local/bin:/usr/bin:/bin
+# la connexion de `claude` vit dans le volume : elle survit au remplacement du conteneur.
+# Hors de /data/work, et interdite d'office aux agents.
+ENV CLAUDE_CONFIG_DIR=/data/.claude
+# l'installation officielle, sous le compte du maître : rien n'est modifié dans ce qu'elle pose
+RUN curl -fsSL https://claude.ai/install.sh | bash && claude --version
+WORKDIR /data
+VOLUME /data
+EXPOSE 7700
+ENTRYPOINT ["/talixio-agent"]
+CMD ["root", "--config", "/config/talixio.toml"]

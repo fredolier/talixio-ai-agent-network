@@ -1,0 +1,60 @@
+import { useMemo, useState } from 'react'
+import { Empty, PageHeader } from '@/components/bits'
+import { Input } from '@/components/ui/input'
+import { hour, kindLabel } from '@/lib/format'
+import { t } from '@/lib/i18n'
+import type { Cluster } from '@/lib/store'
+import { cn, pick } from '@/lib/utils'
+
+const TONE: Record<string, string> = {
+  tool_error: 'text-st-off',
+  error: 'text-st-off',
+  spawn: 'text-st-working',
+  link: 'text-st-wait',
+  message: 'text-foreground',
+  report: 'text-foreground',
+}
+const SHOWN = 800
+
+export function JournalView({ cluster }: { cluster: Cluster }) {
+  const [filter, setFilter] = useState('')
+  const rows = useMemo(() => {
+    const wanted = filter.trim().toLowerCase()
+    const matching = wanted
+      ? cluster.events.filter((e) => `${e.agent_name} ${kindLabel(e.kind)} ${e.text}`.toLowerCase().includes(wanted))
+      : cluster.events
+    return matching.slice(-SHOWN).reverse()
+  }, [cluster.events, filter])
+
+  return (
+    <div className="flex flex-col gap-6">
+      <PageHeader eyebrow={t('Journal')} title={t('Everything that comes back up')} lead={t('Every action of every agent, from the most recent to the oldest.')}>
+        <Input
+          type="search"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder={t('Filter: agent, kind, text…')}
+          aria-label={t('Filter the journal')}
+          className="w-full sm:w-72"
+        />
+      </PageHeader>
+      {rows.length === 0 ? (
+        <Empty title={filter ? t('Nothing matches') : t('Empty journal')} />
+      ) : (
+        <ol className="overflow-hidden rounded-lg border bg-card">
+          {rows.map((event) => (
+            <li
+              key={event.id}
+              className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 gap-y-0.5 border-b px-4 py-2 last:border-b-0 hover:bg-muted/60 md:grid-cols-[4.5rem_8rem_5rem_minmax(0,1fr)] md:items-baseline"
+            >
+              <time className="num text-xs text-muted-foreground">{hour(event.ts_ms)}</time>
+              <span className="truncate text-[13px] font-medium">{event.agent_name}</span>
+              <span className={cn('eyebrow', pick(TONE, event.kind))}>{kindLabel(event.kind)}</span>
+              <span className="col-start-2 whitespace-pre-wrap [overflow-wrap:anywhere] md:col-start-4">{event.text}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  )
+}

@@ -1,0 +1,767 @@
+# Notes de version de Talixio Agent Network.
+#
+# Source unique : ce fichier est embarqué dans l'exécutable (`talixio-agent releases`) et servi
+# par l'API du maître (`GET /api/releases`), d'où l'interface web le lit.
+# La version la plus récente en premier ; elle doit être celle de Cargo.toml (un test le vérifie).
+# Genres d'un changement : nouveau, sécurité, amélioration, correction, attention.
+# « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
+
+[[release]]
+version = "0.22.0"
+date = "2026-11-22"
+title = "Interface en anglais et en français"
+summary = "L'interface web parle anglais par défaut et français au choix ; le dépôt public passe en anglais."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Interface web en deux langues : anglais et français. Elle suit la langue du navigateur ; le sélecteur en bas du menu (et sur la page d'entrée) en change, et le choix est gardé sur l'appareil."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Documentation publique en anglais : `README.md` (le français reste dans `README.fr.md`), `CONTRIBUTING.md`, `SECURITY.md`, et `docs/DESIGN.md` (architecture, modèle de sécurité, décisions, revues de sécurité, API)."
+
+[[release.changes]]
+kind = "attention"
+text = "Les messages du programme restent en français pour l'instant : journal, erreurs de l'API, ligne de commande, écran des paquets et ces notes de version."
+
+[[release]]
+version = "0.21.1"
+date = "2026-11-22"
+title = "Écran des paquets : corrections de la revue de sécurité"
+summary = "Tout le texte d'un paquet se lit à l'écran avant d'installer, et rien ne s'y cache."
+
+[[release.changes]]
+kind = "sécurité"
+text = "`pack tui` : le défilement atteint toujours la fin du texte et l'écran dit où en est la lecture ; les caractères larges ou invisibles deviennent « ? » ; le paquet installé est celui qui a été lu ; un texte collé ou une touche tapée d'avance ne confirme rien."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Les caractères invisibles (étiquettes, sélecteurs de variante, usage privé) sont refusés dans les paquets et retirés de tout texte nettoyé : des consignes ne peuvent plus s'y cacher."
+
+[[release]]
+version = "0.21.0"
+date = "2026-11-22"
+title = "Un écran pour parcourir les paquets"
+summary = "`talixio-agent pack tui` : la liste des paquets, ce que chacun donnerait, et l'installation au bout d'une touche."
+
+[[release.changes]]
+kind = "nouveau"
+text = "`talixio-agent pack tui` (ou `./tools.sh pack tui`) : parcourir les paquets, lire leurs commandes et leurs rôles, installer (i), retirer (r), vérifier (v). Rien ne se fait sans confirmation ; mêmes sources et mêmes contrôles que `pack install`."
+
+[[release]]
+version = "0.20.0"
+date = "2026-11-22"
+title = "Des paquets à télécharger, signés"
+summary = "Un dépôt de paquets est un dossier de fichiers derrière https, avec un index signé : rien n'en est installé sans vérification."
+
+[[release.changes]]
+kind = "nouveau"
+text = "`talixio-agent pack list|show|install --depot https://… --key <clé publique>` : lit un dépôt de paquets. L'index est signé (Ed25519) ; chaque fichier est vérifié contre l'empreinte de l'index, et l'hébergeur ne peut rien substituer."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Publier vos paquets : `pack keygen --out <fichier>` fabrique la clé, `pack publish --from <paquets> --out <dossier> --key-file <fichier>` écrit le dépôt, à déposer tel quel derrière https."
+
+[[release.changes]]
+kind = "sécurité"
+text = "`--depot` exige toujours une signature ; `--from` (dossier local, non signé) l'annonce. Un index plus ancien ne remplace pas un paquet plus récent du même dépôt sans `--allow-older`. Les messages d'erreur et `pack show --file` ne laissent plus passer de caractères de commande vers le terminal."
+
+[[release.changes]]
+kind = "attention"
+text = "Il n'y a pas encore de dépôt officiel Talixio : un dépôt ne se lit qu'avec la clé publique que son éditeur vous donne."
+
+[[release]]
+version = "0.19.1"
+date = "2026-11-22"
+title = "Compte dédié : corrections de la revue de sécurité"
+summary = "L'installation du compte dédié ne confie plus rien de root au compte du maître, et refuse un terrain préparé par un tiers."
+
+[[release.changes]]
+kind = "sécurité"
+text = "`service install` : la vérification de la configuration sous le compte du maître ne reçoit plus l'environnement, le terminal ni les fichiers ouverts de root. Si vous avez installé le compte dédié avec la 0.18.0 ou la 0.19.0, relancez `sudo talixio-agent service install`."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Un compte `talixio-agent` déjà présent est refusé s'il a un shell ou d'autres groupes ; /opt/talixio et /etc/talixio doivent être entièrement à root, sans lien ; tous les contrôles passent avant la première écriture. En root, `pack install` refuse un dossier tenu par un autre compte."
+
+[[release]]
+version = "0.19.0"
+date = "2026-11-22"
+title = "Les rôles installés dans l'interface"
+summary = "La page « Rôles » montre les rôles venus des paquets : d'où ils viennent et ce qu'ils donnent à un agent."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Page « Rôles » : les rôles installés (paquet, version, identifiant, description, commandes, consignes) avant les agents créés, avec le nombre d'agents qui en sont issus. Lecture seule : l'installation reste à `talixio-agent pack install`."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Le journal note, à la création d'un agent par un rôle installé, le paquet, sa version et son identifiant."
+
+[[release]]
+version = "0.18.0"
+date = "2026-11-22"
+title = "Un compte dédié, et des fichiers que le maître ne peut pas modifier"
+summary = "Sous Linux, `sudo talixio-agent service install` crée le compte du maître et pose son exécutable, sa configuration et ses paquets à root."
+
+[[release.changes]]
+kind = "sécurité"
+text = "`sudo talixio-agent service install --config talixio.toml`, sans `--user` : compte `talixio-agent` (sans mot de passe ni shell), exécutable et paquets dans /opt/talixio, configuration dans /etc/talixio, tous à root ; le maître ne possède que /var/lib/talixio (état et travail). L'unité systemd met en plus ces dossiers en lecture seule."
+
+[[release.changes]]
+kind = "nouveau"
+text = "`sudo talixio-agent pack install <nom>` installe dans /opt/talixio/packs sans option. `talixio-agent check --config f.toml` vérifie une configuration comme le maître à son démarrage, paquets compris, sans le lancer."
+
+[[release.changes]]
+kind = "attention"
+text = "Avec le compte dédié, la configuration se modifie avec sudo (/etc/talixio/talixio.toml), puis `sudo systemctl restart talixio-agent`. Le jeton de l'interface est dans /var/lib/talixio/.talixio/api-token (lisible avec sudo). `service install --user <compte>` garde l'ancien fonctionnement."
+
+[[release]]
+version = "0.17.2"
+date = "2026-11-22"
+title = "Un identifiant par paquet"
+summary = "Chaque paquet a un identifiant tiré de son contenu ; la configuration du maître peut n'accepter que ceux-là."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Un paquet a pour identifiant l'empreinte SHA-256 de tout son contenu (`pack show`, `pack verify`). Avec `[packs] nom = \"identifiant\"` dans sa configuration, le maître ne démarre qu'avec exactement ces paquets, à ce contenu : un paquet du même nom et d'un autre contenu est refusé."
+
+[[release]]
+version = "0.17.1"
+date = "2026-11-22"
+title = "Paquets : corrections de la revue de sécurité"
+summary = "La garde qui empêche le maître de modifier ses paquets ne se contourne plus, et un manifeste ne peut plus tromper ni le terminal ni le maître."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Le maître refuse de démarrer si le dossier des paquets, un de ses fichiers ou un dossier au-dessus lui appartient ou lui est inscriptible (retirer les droits d'écriture ne suffit plus) ; seul un montage en lecture seule en dispense."
+
+[[release.changes]]
+kind = "sécurité"
+text = "L'empreinte d'une commande vient toujours du parent, jamais de la demande d'un agent ; le plafond d'une cible la reçoit du paquet. Une règle écrite à la main sur un programme de paquet est refusée."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Manifeste d'un paquet : descriptions et arguments d'une ligne, bornés, sans caractère de commande. `pack show` montre aussi les consignes des rôles."
+
+[[release.changes]]
+kind = "attention"
+text = "Un rôle installé s'appelle « paquet/rôle » (`catalogue/collecteur`). Hors de Docker, le dossier des paquets et ses parents ne doivent pas appartenir au compte du maître : `/opt/talixio/packs` installé avec sudo, par exemple."
+
+[[release]]
+version = "0.17.0"
+date = "2026-11-22"
+title = "Des paquets de commandes et de rôles, installés par vous"
+summary = "Une commande à part liste, montre et installe des commandes et des rôles pour le maître, qui ne peut ni s'en ajouter ni les modifier."
+
+[[release.changes]]
+kind = "nouveau"
+text = "`talixio-agent pack list`, `show`, `install`, `remove`, `verify` (dans Docker : `./tools.sh pack …`). Un paquet donne des commandes (ses scripts, avec leurs arguments permis) et des rôles (consignes toutes faites). Le premier, « catalogue », est livré dans l'exécutable."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Le maître connaît les rôles installés : créer un agent avec le nom d'un de ces rôles lui donne ses consignes et ses commandes."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Le maître vérifie l'empreinte SHA-256 de chaque fichier de ses paquets au démarrage et refuse de démarrer si l'un a changé, ou s'il peut lui-même écrire leur dossier. Chaque commande de paquet est revérifiée avant chaque lancement, chez l'agent qui la lance."
+
+[[release.changes]]
+kind = "attention"
+text = "L'exemple « catalogue » passe par son paquet : `./tools.sh pack install catalogue`, puis `./tools.sh build navigateur`. Les scripts ne sont plus sous `/outils` mais sous `/packs/catalogue` ; `TALIXIO_TOOLS` n'est plus nécessaire pour cet exemple."
+
+[[release]]
+version = "0.16.1"
+date = "2026-11-22"
+title = "Conteneurs voisins : corrections de la revue de sécurité"
+summary = "Un agent en conteneur ne peut plus recevoir le volume entier du maître, et l'arrêt ne laisse plus de conteneur orphelin."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Montage d'un volume : `subpath` est obligatoire et vérifié partie par partie ; deux montages emboîtés du même volume sont refusés quand le parent est en écriture ; une cible ne peut monter ni le socket Docker, ni par-dessus `/talixio-agent` ou `/state`."
+
+[[release.changes]]
+kind = "correction"
+text = "`tools.sh` : relancer le maître retire d'abord les conteneurs d'agents de l'ancien ; `stop` les trouve aussi par le volume ; `purge` dit ce qui n'a pas pu être effacé."
+
+[[release.changes]]
+kind = "attention"
+text = "Avec `TALIXIO_DOCKER=1`, tout ce que le maître lance sous son compte peut ouvrir le socket Docker : ne lui donnez aucune commande à arguments libres."
+
+[[release]]
+version = "0.16.0"
+date = "2026-11-22"
+title = "Le maître dans Docker lance ses agents dans des conteneurs voisins"
+summary = "Sur option, le maître en conteneur crée lui-même les conteneurs de ses agents, chacun isolé, sans rien installer de plus sur la machine."
+
+[[release.changes]]
+kind = "nouveau"
+text = "`TALIXIO_DOCKER=1 ./tools.sh up claude` : le maître reçoit le socket Docker de la machine et lance les agents des cibles `docker` dans des conteneurs voisins, dans un réseau à part. `stop` et `purge` retirent aussi ces conteneurs."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Cible `docker` : `network` (l'agent rejoint le maître dans ce réseau), `agent_in_image` (l'exécutable de l'agent vient de l'image) et montages d'un sous-dossier de volume (`volume`, `subpath`), pour ne dépendre d'aucun chemin de la machine."
+
+[[release.changes]]
+kind = "nouveau"
+text = "L'image `talixio-navigateur` porte l'agent et les scripts du dossier d'outils ; l'exemple « catalogue » lance son collecteur dans un conteneur de cette image."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Le socket Docker est interdit d'office aux outils des agents, et n'est jamais monté dans le conteneur d'un agent."
+
+[[release.changes]]
+kind = "attention"
+text = "Avec `TALIXIO_DOCKER=1`, qui prend le maître commande Docker, donc la machine : à réserver à une machine d'essai ou dédiée. Sans cette option, rien ne change. L'image `talixio-navigateur` est à reconstruire (`./tools.sh build navigateur`) : elle contient maintenant l'agent."
+
+[[release]]
+version = "0.15.0"
+date = "2026-11-22"
+title = "Un vrai navigateur pour les agents"
+summary = "Les agents lisent les pages que seul un navigateur affiche, comme les grilles de prix des fournisseurs, avec les mêmes bornes que pour le reste du web."
+
+[[release.changes]]
+kind = "nouveau"
+text = "`lire-page` (exemple « catalogue ») : lit une page avec Chromium, piloté par Playwright. La page reste sur les sites de la liste ; ce qu'elle charge vient de noms publics en https ; ni image, ni téléchargement ; rien n'est gardé d'une lecture à l'autre. Les tableaux sont rendus une ligne par rangée."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Le navigateur n'est pas dans l'image du maître : l'agent qui lit le web est lancé dans son propre conteneur, jetable et fermé (`./tools.sh build navigateur`, puis une cible `docker` : voir `examples/catalogue/cible-navigateur.toml`). Chromium y garde son bac à sable, grâce à un filtre d'appels système livré avec le dépôt."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Cible `docker` : deux réglages de plus, `memory` et `seccomp` (le chemin d'un filtre d'appels système)."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Un droit refusé à la création d'un agent sur une cible dit maintenant que c'est le plafond de la cible, et ce qu'elle permet."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Exemple « catalogue » : chaque modèle est relevé « confirmé » (lu chez le fournisseur lui-même) ou « non confirmé », et le compte rendu donne le compte par fournisseur."
+
+[[release.changes]]
+kind = "attention"
+text = "Lancer un agent dans un conteneur demande un maître qui peut appeler `docker` : installé sur la machine, pas lui-même dans un conteneur (ce cas reste à faire). Qui peut appeler `docker` est maître de la machine : préférez un Docker sans droits d'administrateur."
+
+[[release]]
+version = "0.14.1"
+date = "2026-11-22"
+title = "Revue de sécurité des tâches planifiées et de l'exemple « catalogue »"
+summary = "Aucun constat haut ; trois moyens et neuf mineurs traités, deux limites notées."
+
+[[release.changes]]
+kind = "sécurité"
+text = "`catalog check` dit en tête tout changement de l'adresse ou des hôtes d'un fournisseur (c'est là que part sa clé), et tout modèle modifié ; sa sortie est nettoyée et bornée."
+
+[[release.changes]]
+kind = "sécurité"
+text = "`lire-web` (exemple « catalogue ») : plus de plages d'adresses, taille coupée à 3 Mo quoi qu'il arrive, redirection dite seulement vers un site permis, pages mieux nettoyées."
+
+[[release.changes]]
+kind = "correction"
+text = "Dialogue : une réponse du modèle avec un titre indenté pouvait figer l'onglet."
+
+[[release.changes]]
+kind = "correction"
+text = "Tâches planifiées : modifier une tâche en pause ne la réactive plus et garde son fuseau ; un lancement ne peut plus écraser une modification ni faire revenir une tâche supprimée."
+
+[[release]]
+version = "0.14.0"
+date = "2026-11-22"
+title = "Tâches planifiées, et un premier vrai travail d'équipe"
+summary = "Le maître lance seul un travail régulier, et un exemple complet montre une équipe d'agents qui tient à jour le catalogue des modèles."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Tâches planifiées : une consigne écrite d'avance, que le maître reçoit chaque jour, chaque semaine ou toutes les N heures. La page « Tâches » les montre toutes, avec la prochaine et la dernière fois, et permet de les créer, modifier, lancer tout de suite, suspendre et supprimer. Une tâche ne donne aucun droit de plus au maître, et les agents ne peuvent pas en créer."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Exemple « catalogue » (`examples/catalogue`) : un collecteur qui lit le web, un rédacteur et un vérificateur, chacun avec son modèle et ses seuls droits, tiennent à jour la liste des fournisseurs et des modèles. Tout est de la configuration : commandes autorisées, script qui borne le web à une liste de sites, consigne à planifier."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Trois outils : `make_dir` (créer un dossier là où l'agent a le droit d'écrire), `list_provider_models` (le maître demande à un fournisseur connecté la liste de ses modèles, avec sa clé, qui ne sort pas), et les commandes `talixio-agent catalog show` et `catalog check <fichier>`."
+
+[[release.changes]]
+kind = "amélioration"
+text = "`tools.sh` : `TALIXIO_TOOLS` monte un dossier de scripts en lecture seule sur `/outils`, pour donner des commandes aux agents sans reconstruire l'image."
+
+[[release]]
+version = "0.13.3"
+date = "2026-11-21"
+title = "Un parent attend ses enfants"
+summary = "Un agent ne peut plus conclure sa mission pendant que ses enfants travaillent encore."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Un agent qui a délégué ne peut plus conclure sa mission tant qu'un de ses enfants travaille : il attend son compte rendu, ou l'arrête lui-même d'abord. Avant, un parent pouvait se croire arrivé, conclure, et faire arrêter toute sa branche en plein travail."
+
+[[release]]
+version = "0.13.2"
+date = "2026-11-21"
+title = "Un dialogue qui dit ce qui se passe"
+summary = "Le dialogue avec le maître montre qu'il travaille, met en forme ses réponses et affiche ses erreurs."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Dialogue : un indicateur tourne tant que le maître travaille ; ses réponses sont mises en forme (titres, listes, gras, code) ; ses erreurs s'affichent au lieu de laisser la question sans suite."
+
+[[release.changes]]
+kind = "amélioration"
+text = "« Claude (abonnement) » : « Connecter » vérifie que la commande `claude` est bien connectée à l'abonnement et, sinon, dit quoi faire. Dans Docker, `claude` se connecte lui-même (`./tools.sh login`) et garde sa connexion dans le volume : plus de jeton à passer au lancement."
+
+[[release.changes]]
+kind = "correction"
+text = "Page des modèles : plus de « sans clé » en rouge pour les modèles de l'abonnement, qui n'en ont pas besoin."
+
+[[release]]
+version = "0.13.1"
+date = "2026-11-21"
+title = "L'abonnement Claude, revu"
+summary = "Les suites de la revue de sécurité du connecteur `claude` : le maître vérifie pendant le tour que `claude` n'a que les outils de l'agent."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Le maître lit ce que `claude` annonce avoir en main et chacun de ses appels : au moindre outil qui n'est pas à l'agent, le tour est tué. Jusqu'ici, seules les options passées à la commande le garantissaient."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Le dossier où `claude` garde sa connexion et ses conversations (`~/.claude`, `~/.claude.json`, `CLAUDE_CONFIG_DIR`) est interdit d'office à tous les agents."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Process `claude` bornés par branche (quatre, seize en tout, deux gardés au maître) ; une session n'est reprise que pour la même conversation ; un contenu lu ne peut plus imiter le rôle de l'utilisateur dans une conversation redonnée."
+
+[[release]]
+version = "0.13.0"
+date = "2026-11-21"
+title = "L'abonnement Claude, par la commande officielle"
+summary = "Les modèles de Claude peuvent être servis par un abonnement (Pro, Max) : le maître pilote la commande officielle `claude`, sans voir aucun jeton."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Fournisseur « Claude (abonnement) » : si la commande `claude` est installée et connectée sous le compte du maître, Opus, Sonnet et Haiku s'activent depuis l'interface et servent le maître comme ses enfants. Les outils intégrés de `claude` sont coupés : il n'a que ceux de l'agent, et chaque appel repasse par les contrôles de droits. Essayé avec la vraie commande."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Une seconde image Docker (`docker/Dockerfile.claude`) embarque la commande `claude`. L'image ordinaire reste vide ; « Anthropic » par clé d'API reste disponible à côté."
+
+[[release.changes]]
+kind = "attention"
+text = "L'usage par abonnement compte dans les limites de l'abonnement et suit les conditions d'Anthropic pour un usage personnel, qui ont changé plusieurs fois en 2026 : vérifiez-les. Le maître n'appelle jamais l'API avec le jeton d'abonnement et ne le garde pas."
+
+[[release]]
+version = "0.12.0"
+date = "2026-11-21"
+title = "Le maître reçoit son modèle depuis l'interface"
+summary = "Le maître démarre sans modèle ni clé : on connecte un fournisseur et on lui donne son modèle depuis la page, comme à n'importe quel agent."
+
+[[release.changes]]
+kind = "nouveau"
+text = "`model` et `[models]` deviennent facultatifs dans la configuration. Sans eux, le maître démarre, ouvre son interface et attend : le premier modèle de texte activé dans « Modèles » devient le sien, et « Donner au maître » lui en donne un autre, sans redémarrage. Le choix est gardé d'un démarrage à l'autre."
+
+[[release.changes]]
+kind = "nouveau"
+text = "OVHcloud se connecte sans clé : « Connecter sans clé » dans « Fournisseurs » (accès anonyme, limites basses). De quoi essayer le maître sans compte nulle part. Essayé pour de vrai."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Image Docker : plus aucune clé à fournir au lancement, seulement le jeton de l'interface."
+
+[[release.changes]]
+kind = "attention"
+text = "Un `model` écrit dans la configuration garde le dernier mot : il ne se change pas depuis la page. Retirez la ligne pour choisir depuis l'interface. Changer le modèle du maître en cours de conversation envoie la conversation en cours au nouveau fournisseur."
+
+[[release]]
+version = "0.11.0"
+date = "2026-11-21"
+title = "Le maître en service"
+summary = "Le maître s'installe en service du système et retrouve ses agents permanents : la grappe survit au redémarrage de la machine."
+
+[[release.changes]]
+kind = "nouveau"
+text = "« talixio-agent service install » inscrit le maître auprès du système et le démarre : systemd sous Linux, launchd sous macOS, tâche planifiée sous Windows. « service uninstall » le retire, « service status » montre son état, « --print » montre ce qui serait fait."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Agents permanents : le maître peut créer un agent « permanent », qu'il recrée à chaque redémarrage sous le même identifiant, avec sa mémoire et des droits revérifiés. Arrêté à la demande, il ne revient plus."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Une image Docker minimale pour essayer le maître sans risque : l'exécutable seul, sans système ni shell, sous un compte sans droit. Voir « Dans Docker » dans le README."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Le service ne tourne jamais en root et sa définition ne contient aucun secret. Sous Linux, il ne peut pas gagner de privilèges. Revue de sécurité indépendante du service, de l'image et de la publication : huit constats, traités ou notés."
+
+[[release.changes]]
+kind = "attention"
+text = "Un jeton TALIXIO_API_TOKEN trop faible, ou recopié d'un exemple, arrête désormais le démarrage. Les agents ordinaires ne reviennent pas après un redémarrage, et un agent permanent reprend d'après sa mémoire, pas sa conversation. Un service n'hérite pas des variables de votre terminal : donnez les clés par fichier ou depuis l'interface."
+
+[[release]]
+version = "0.10.0"
+date = "2026-11-21"
+title = "Se connecter depuis la page"
+summary = "On se connecte à un fournisseur et on active ses modèles depuis l'interface, sans toucher à la configuration ni redémarrer le maître."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Écran « Fournisseurs » : collez votre clé, le maître l'essaie chez le fournisseur puis la garde. OpenAI, Anthropic, Google Gemini, Mistral, OVHcloud, AKI.IO, Scaleway, ElevenLabs, DeepSeek, OpenRouter, machine locale. Un lien mène à la page où créer la clé."
+
+[[release.changes]]
+kind = "nouveau"
+text = "OpenRouter se connecte par autorisation dans le navigateur, sans copier de clé. C'est le seul fournisseur qui l'offre aujourd'hui à un outil tiers sans enregistrement préalable ; les autres demandent une clé, collée une fois."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Écran « Modèles » : « Activer » rend un modèle utilisable aussitôt par les agents ; pour un modèle de service, on donne son nombre d'appels. « Désactiver » et « Déconnecter » défont ce qui a été fait d'ici, et effacent la clé."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Une clé saisie ne part qu'à l'adresse du catalogue, reste dans un fichier fermé au compte du maître, et n'est plus jamais rendue : ni par l'API, ni au journal, ni à un agent. Revue de sécurité indépendante : deux constats moyens et quatre bas, traités ; un reste noté (OAuth sans « state »)."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Un exécutable par système (Linux, macOS, Windows) est publié à chaque version, avec une installation en une ligne : voir « Installer » dans le README."
+
+[[release.changes]]
+kind = "attention"
+text = "Le jeton de l'API permet désormais de connecter un fournisseur, donc d'engager une dépense : gardez-le comme une clé. Infomaniak, TypeSafe AI et Nixtla se déclarent encore dans la configuration. Rien n'a été essayé chez un vrai fournisseur."
+
+[[release]]
+version = "0.9.1"
+date = "2026-11-21"
+title = "Revue de sécurité des modèles de service"
+summary = "La revue indépendante de la version 0.9.0 a rendu huit constats, dont un haut et un moyen. Tous sont corrigés et rejoués en test."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Un appel de service parti chez le fournisseur est compté, qu'il aboutisse ou non : des demandes dont la réponse est écartée ne contournent plus le quota."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Le maître ne suit plus aucune redirection d'un fournisseur, pour tous les modèles : ni requête rejouée vers une adresse interne, ni clé qui voyage."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Seul un son reconnu part en transcription ou s'écrit comme un son. Les images jointes à une demande sont revérifiées à chaque niveau. Un enfant n'a qu'un modèle de conversation. L'attente d'un appel de service est bornée."
+
+[[release]]
+version = "0.9.0"
+date = "2026-11-21"
+title = "Voix, image, prévision, décision"
+summary = "Les agents appellent maintenant les modèles qui ne tiennent pas une conversation : transcription, synthèse vocale, image, lecture d'image, plongements, prévision et décision. Toujours à travers le maître, et comptés en appels."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Sept outils pour les agents : transcribe_audio, speak_text, generate_image, describe_image, memory_search (recherche par le sens dans la mémoire), forecast et decide. Un outil n'apparaît que si l'agent détient un modèle de cette nature et des appels."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Un modèle déclare sa nature dans la configuration du maître (nature, vision, voice). Quatre familles d'API : openai (transcription, voix, image, plongements), elevenlabs (voix), timesfm (prévision), systemone (décision)."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Quota en appels par nature (capabilities.max_calls), descendance comprise. Un parent confie à un enfant des modèles de service et un nombre d'appels, jamais plus que les siens. L'interface montre les appels utilisés et permis de chaque agent."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Tout est refusé par défaut : sans ligne dans max_calls, aucun appel. Chaque niveau revérifie l'alias, les bornes et le quota ; seul le maître appelle le fournisseur. Une image rendue par adresse n'est pas suivie, une réponse est lue sous une borne, rien du fournisseur n'atteint un agent. Revue de sécurité indépendante : constats traités en 0.9.1."
+
+[[release.changes]]
+kind = "attention"
+text = "Pour s'en servir : déclarer le modèle avec sa nature, puis ajouter la nature à [capabilities.max_calls]. Exemples dans talixio.example.toml."
+
+[[release.changes]]
+kind = "attention"
+text = "Essayé avec de faux fournisseurs seulement : le premier essai chez un vrai fournisseur peut demander un ajustement. Ce qu'un agent envoie à un service (son, notes, état d'une décision) part chez ce fournisseur."
+
+[[release]]
+version = "0.8.1"
+date = "2026-11-21"
+title = "Prévision et décision au catalogue"
+summary = "Les modèles de prévision (séries temporelles) et de décision de l'assistant rejoignent le catalogue, avec leurs fournisseurs."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Dix modèles de prévision et de décision (TimesFM, Chronos-2, TimeGPT, Jev, Kev…) et deux fournisseurs (TypeSafe AI, Nixtla) dans les écrans « Fournisseurs » et « Modèles », avec un filtre par nature."
+
+[[release.changes]]
+kind = "attention"
+text = "Ces modèles sont listés pour comparer : aucun agent ne peut encore les appeler."
+
+[[release]]
+version = "0.8.0"
+date = "2026-11-21"
+title = "Fournisseurs et modèles"
+summary = "Le maître embarque un catalogue de fournisseurs et de modèles, repris de l'assistant Talixio. Deux écrans le montrent : qui est européen, qui est connecté, quels modèles sont activés, avec leur qualité et leur prix indicatif."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Écran « Fournisseurs » : une table de tous les fournisseurs connus, avec pays, origine (Europe ou non), niveau de confiance et état de connexion. Un fournisseur choisi montre les lignes de configuration pour s'y connecter."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Écran « Modèles » : tous les modèles, fournisseur par fournisseur, avec nature, qualité de 1 à 10 et prix indicatif. Les modèles activés montrent leur alias, qui les utilise et à qui ils sont accordés."
+
+[[release.changes]]
+kind = "attention"
+text = "Se connecter à un fournisseur et activer un modèle se font encore dans la configuration du maître, pas depuis la page. L'image, la voix et les plongements sont listés pour comparer : aucun agent ne peut encore les appeler."
+
+[[release]]
+version = "0.7.1"
+date = "2026-11-21"
+title = "Revue de sécurité de l'interface"
+summary = "Une revue indépendante de l'interface et du répertoire des rôles a rendu dix constats, aucun critique. Tous sont corrigés."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Un enfant qui renvoie sans cesse un arbre énorme ne peut plus ralentir le maître ni remplir sa base : droits déclarés bornés, répertoire des rôles écrit à part, au plus toutes les deux secondes par branche."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Une branche ne peut plus réécrire ni chasser les fiches de rôles d'une autre, ni donner à un de ses agents le nom du maître."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Ce qu'un agent des niveaux profonds déclare au-delà de ce que son parent peut accorder est signalé « déclaration incohérente » dans la grappe et dans les rôles."
+
+[[release.changes]]
+kind = "correction"
+text = "Un genre d'événement inattendu ne fait plus tomber l'écran Journal ; un écran qui échoue ne vide plus la page."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Réponses de l'API jamais gardées en cache ; marques invisibles retirées des noms ; adresse du fournisseur retirée des messages d'erreur."
+
+[[release]]
+version = "0.7.0"
+date = "2026-11-21"
+title = "Maîtriser : commandes, modèles, rôles"
+summary = "L'interface est refaite avec shadcn/ui, à l'identité de Talixio, et montre désormais ce que la grappe a le droit de faire : les commandes et à qui elles sont confiées, les modèles par fournisseur, les rôles créés."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Écran « Commandes » : chaque commande que détient le maître, telle qu'elle est vérifiée, et les agents à qui elle est confiée, telle quelle ou restreinte. Les règles à arguments libres sont signalées."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Écran « Modèles » : les modèles du maître regroupés par fournisseur, qui les utilise, à qui ils sont accordés. Les clés ne sont jamais montrées (`GET /api/models`)."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Écran « Rôles » : le maître inscrit chaque agent créé dans la grappe, à tout niveau, avec son rôle et ses droits. Le répertoire survit aux redémarrages (`GET /api/roles`)."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Interface refaite avec la bibliothèque shadcn/ui : thème clair et sombre, menu sur téléphone, fiche d'agent plus lisible. Elle reste embarquée dans l'exécutable, sans rien charger d'ailleurs."
+
+[[release.changes]]
+kind = "attention"
+text = "Les consignes et la mission d'un agent ne figurent au répertoire des rôles que pour les enfants directs du maître : celles des niveaux plus bas ne remontent pas encore."
+
+[[release]]
+version = "0.6.2"
+date = "2026-11-21"
+title = "Journal complet des petits-enfants"
+summary = "Une vérification indépendante a passé en revue les 109 demandes du projet. Elle a trouvé un défaut, corrigé ici."
+
+[[release.changes]]
+kind = "correction"
+text = "Les tout premiers gestes d'un petit-enfant (mission reçue, première question) manquaient au journal du maître : ils arrivaient avant que le maître sache que cet agent existait, et étaient écartés. Ils sont maintenant gardés jusqu'à ce que l'arbre l'annonce."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Nouveau test sur trois niveaux d'agents réels : question au parent, compte rendu en cascade, coupure du lien puis reprise sans perte, arrêt d'un petit-enfant."
+
+[[release]]
+version = "0.6.1"
+date = "2026-11-21"
+title = "Windows et macOS"
+summary = "Les mêmes protections sur les trois systèmes, vérifiées à chaque modification sur des machines Linux, macOS et Windows."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Windows : les fichiers de clés sont fermés aux autres comptes et vérifiés à chaque ouverture, les liens ne sont plus suivis, et tout ce qu'une commande a lancé est tué avec elle (Job Objects). Si l'agent meurt, sa descendance part avec lui."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Les tests tournent désormais sur Linux, macOS et Windows à chaque modification, ainsi que sur l'exécutable statique."
+
+[[release.changes]]
+kind = "correction"
+text = "Docker sous Windows : les dossiers à monter s'écrivent avec leur lettre de lecteur."
+
+[[release.changes]]
+kind = "attention"
+text = "Une machine Windows ne peut pas encore recevoir un agent par SSH : les cibles SSH restent des machines Linux ou macOS."
+
+[[release]]
+version = "0.6.0"
+date = "2026-11-21"
+title = "Configuration scellée"
+summary = "Un agent ne reçoit plus sa configuration en clair : elle arrive chiffrée et signée, et seul son parent en détient la clé. Les journaux sont tenus dans une taille fixée par le maître."
+
+[[release.changes]]
+kind = "sécurité"
+text = "La configuration d'un enfant (rôle, instructions, droits, plafond, limites) lui est remise scellée (ChaCha20-Poly1305). Il ne peut ni la lire ni la changer : un seul octet modifié et elle est refusée en bloc."
+
+[[release.changes]]
+kind = "sécurité"
+text = "La clé ne quitte le parent qu'une seule fois, sur le lien chiffré, après que l'enfant a prouvé qui il est et que le parent l'a prouvé aussi. Une enveloppe volée ensuite ne s'ouvre plus ; elle ne vaut que pour cet agent et ce parent."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Rotation des journaux : `log_max_bytes` dans la configuration du maître (5 Mio par défaut) descend de parent en enfant. Un journal trop gros passe dans `.1` puis repart de zéro ; les journaux abandonnés depuis une semaine sont effacés."
+
+[[release]]
+version = "0.5.0"
+date = "2026-11-20"
+title = "L'interface"
+summary = "Le maître sert son interface web : la grappe en direct, le dialogue, le journal et ces notes de version. Elle tient dans l'exécutable et s'installe sur un téléphone."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Interface web à l'adresse du maître (`https://…:7700/`) : arbre des agents avec leur état, leurs droits et leur budget ; dialogue avec le maître ; journal filtrable ; arrêt d'un agent."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Utilisable sur téléphone et installable comme application (PWA) ; thème clair ou sombre selon l'appareil."
+
+[[release.changes]]
+kind = "sécurité"
+text = "La page ne charge que ses propres fichiers et n'appelle que sa propre API (politique de contenu stricte, jamais dans un cadre). Ce qu'écrit un agent n'est jamais interprété comme du HTML. Le jeton reste demandé pour toute donnée."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Deuxième passe de sécurité, sur le déploiement : les fichiers de clés et le dossier `.ssh` sont interdits aux outils de toute la descendance locale ; une cible SSH hostile ne peut plus bloquer le maître ; un agent déployé qui n'obéit plus est tué, pas seulement désinstallé ; le dossier distant doit appartenir au compte de l'agent."
+
+[[release.changes]]
+kind = "attention"
+text = "Cible Docker : `user` devient obligatoire (numéro de compte non privilégié). Cible SSH : `remote_dir` ne peut plus être `/tmp`."
+
+[[release.changes]]
+kind = "attention"
+text = "Le certificat fabriqué par le maître déclenche un avertissement du navigateur : comparer l'empreinte affichée au démarrage, ou fournir un certificat reconnu (`[tls]`). Un téléphone n'installe l'application qu'avec un certificat reconnu."
+
+[[release]]
+version = "0.4.0"
+date = "2026-11-20"
+title = "Sortir de la machine"
+summary = "Le maître peut installer des agents sur d'autres machines par SSH et dans des conteneurs Docker, avec un plafond de droits propre à chaque cible. Les notes de version arrivent."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Cibles de déploiement `[targets.<nom>]` : `ssh` (une autre machine) et `docker` (un conteneur). `spawn_agent` accepte une cible."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Chaque cible a son plafond de droits (dossiers, commandes) : un agent déployé n'en reçoit jamais plus, et il le revérifie lui-même à l'arrivée, sur les chemins réels de sa machine."
+
+[[release.changes]]
+kind = "sécurité"
+text = "SSH sans rien d'interactif : machine déjà connue exigée (`StrictHostKeyChecking=yes`), aucun transfert d'agent ni de port ; l'exécutable et les consignes voyagent dans le canal SSH, jamais sur la ligne de commande."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Conteneurs fermés : aucune capacité, pas de nouveaux privilèges, système en lecture seule, mémoire et nombre de process bornés, seuls les dossiers montés par la cible."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Désinstallation : un agent déployé est retiré de sa cible (exécutable, base, journal) quand il est arrêté ou quand le maître s'éteint."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Notes de version : `talixio-agent releases` et `GET /api/releases`."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Compilation statique (musl) : l'exécutable ne dépend plus d'aucune bibliothèque du système et tourne sur toute distribution Linux et dans toute image Docker. Voir le README."
+
+[[release.changes]]
+kind = "attention"
+text = "Seul le maître déploie sur une cible ; il doit écouter hors de sa machine (`listen`, `advertise`). Machine cible : même processeur que le maître ; pour ne pas dépendre de sa distribution, déployer l'exécutable statique."
+
+[[release]]
+version = "0.3.0"
+date = "2026-11-20"
+title = "Tout est chiffré"
+summary = "Le lien entre agents et l'API passent en TLS 1.3. Plus rien ne circule en clair, même sur la machine."
+
+[[release.changes]]
+kind = "sécurité"
+text = "TLS 1.3 partout : lien parent-enfant et API JSON. Chaque agent a son certificat ; l'enfant n'accepte que celui de son parent, reconnu à son empreinte."
+
+[[release.changes]]
+kind = "sécurité"
+text = "La preuve d'identité de la poignée de main est liée au certificat : un intermédiaire ne peut pas la rejouer."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Le maître peut écouter hors de sa machine (`listen`, `advertise`) et utiliser un certificat public (`[tls]`)."
+
+[[release.changes]]
+kind = "attention"
+text = "L'API n'est plus servie qu'en HTTPS. La ligne de commande reconnaît le maître à son empreinte (`.talixio/tls-fingerprint`, ou `--fingerprint`)."
+
+[[release]]
+version = "0.2.0"
+date = "2026-11-20"
+title = "Audit de sécurité et mémoire"
+summary = "Les 17 constats de la première passe de sécurité sont traités et rejoués en test. Chaque agent reçoit une mémoire qui dure."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Règles de commande réécrites : programme par chemin absolu, arguments décrits un à un, une option n'est jamais devinée."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Lien : authentification mutuelle, tailles et cadences bornées, un enfant ne peut ni saturer son parent ni se faire passer pour un autre."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Fichiers : chemins réels vérifiés, liens symboliques non suivis à l'écriture, dossier d'état et clés interdits aux outils."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Budgets réservés avant chaque appel au modèle : plus de dépassement par appels simultanés. Rien de ce qu'un agent lance ne lui survit."
+
+[[release.changes]]
+kind = "nouveau"
+text = "SQLite embarqué : mémoire par agent (`memory_write`, `memory_read`), journal du maître repris au redémarrage."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Le début de la conversation d'un agent ne change jamais ; tout ce qui est nouveau s'ajoute à la fin, pour que le cache du fournisseur de modèles serve."
+
+[[release.changes]]
+kind = "attention"
+text = "La syntaxe de `[[capabilities.exec]]` a changé : voir `talixio.example.toml`."
+
+[[release]]
+version = "0.1.0"
+date = "2026-11-20"
+title = "Le cœur"
+summary = "Un exécutable, un maître, des enfants : la grappe fonctionne sur une machine."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Agent maître et agents enfants en arbre ; un enfant ne parle qu'à son parent, et n'a jamais plus de droits que lui."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Droits refusés par défaut : dossiers en lecture, en écriture, commandes, modèles, budget de tokens, droit de créer des enfants."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Missions à objectif et critère de réussite mesurable ; compte rendu au parent."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Les clés des modèles restent chez le maître : les enfants passent par lui (Anthropic, OpenAI et compatibles)."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Lien perdu : l'enfant se met en veille, puis s'éteint. API JSON et ligne de commande : `tree`, `send`, `watch`, `stop`."

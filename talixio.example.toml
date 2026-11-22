@@ -1,0 +1,177 @@
+# Configuration de l'agent maître. Copiez ce fichier en talixio.toml et adaptez-le.
+#   talixio-agent root --config talixio.toml
+
+name = "maître"
+role = "orchestrateur"
+instructions = """
+Tu pilotes une grappe d'agents pour le compte de la personne qui te parle.
+Délègue ce qui peut l'être à des agents spécialisés, avec le strict minimum de droits.
+"""
+
+# Alias du modèle du maître, parmi ceux définis plus bas. Écrit ici, il ne se change pas depuis
+# l'interface. Sans cette ligne (et sans [models]), le maître démarre sans modèle ni clé et
+# reçoit le sien depuis l'interface : « Fournisseurs », puis « Modèles ».
+model = "main"
+
+# Adresse de l'API et du lien avec les enfants, toujours en TLS. Par défaut : cette machine seule.
+# Pour des enfants sur d'autres machines ou dans Docker : "0.0.0.0:7700", derrière un pare-feu.
+listen = "127.0.0.1:7700"
+# log_max_bytes = 5242880            # taille maximale du journal d'un agent, transmise à toute la grappe
+# advertise = "maitre.exemple.net"   # nom ou adresse par lequel les enfants distants joignent le maître
+
+# Dossier d'état : jeton de l'API, journaux des enfants, bases SQLite (mémoire des agents, journal).
+state_dir = ".talixio"
+
+[timing]
+heartbeat_secs = 5        # un battement toutes les 5 s
+suspend_after_secs = 20   # sans nouvelles du parent : mise en veille
+die_after_secs = 300      # toujours sans nouvelles : extinction, descendance comprise
+
+# Le maître fabrique son certificat au premier démarrage (dossier d'état). Pour un certificat
+# reconnu par les navigateurs, fournir le vôtre :
+# [tls]
+# cert_file = "/etc/talixio/cert.pem"
+# key_file = "/etc/talixio/key.pem"     # en 0600
+
+# --- Modèles -------------------------------------------------------------------------------
+# Les clés restent chez le maître : les enfants passent par lui pour appeler un modèle.
+# La clé n'est jamais écrite ici. Deux façons de la fournir :
+#   api_key_file = "/etc/talixio/anthropic.key"   # fichier en 0600, à préférer
+#   api_key_env  = "ANTHROPIC_API_KEY"            # variable d'environnement du maître
+
+[models.main]
+provider = "anthropic"
+model = "claude-opus-5-5"
+api_key_env = "ANTHROPIC_API_KEY"
+effort = "high"
+
+[models.fast]
+provider = "anthropic"
+model = "claude-haiku-5-5"
+api_key_env = "ANTHROPIC_API_KEY"
+
+# Tout serveur compatible OpenAI : OpenAI, Gemini, Mistral, OpenRouter, Ollama, vLLM…
+# [models.local]
+# provider = "openai"
+# base_url = "http://localhost:11434/v1"
+# model = "qwen3"
+
+# D'autres modèles se connectent et s'activent depuis l'interface (« Fournisseurs », « Modèles »),
+# sans toucher à ce fichier. Les clés saisies là vont dans <state_dir>/keys/.
+# claude_program = "/usr/local/bin/claude"     # la commande `claude` (abonnement Claude) ; par défaut, cherchée dans PATH
+# claude_env = ["CLAUDE_CONFIG_DIR"]           # variables du maître à lui transmettre en plus du nécessaire
+# catalog_file = "/etc/talixio/catalog.toml"   # un autre catalogue que celui de l'exécutable ;
+#                                               # il fixe où vont les clés : à protéger comme ce fichier
+
+# --- Modèles de service ---------------------------------------------------------------------
+# Un modèle qui ne tient pas une conversation dit sa nature. Les agents l'appellent par un outil,
+# toujours à travers le maître, et chaque appel est compté ([capabilities.max_calls] plus bas).
+#   nature          provider                 outil de l'agent
+#   transcription   openai                   transcribe_audio
+#   speech          openai, elevenlabs       speak_text
+#   image           openai                   generate_image
+#   embedding       openai                   memory_search (recherche par le sens dans sa mémoire)
+#   forecast        timesfm                  forecast   (base_url obligatoire)
+#   decision        systemone                decide     (base_url obligatoire)
+# Un modèle de texte qui lit les images : `vision = true` (outil describe_image, compté en tokens).
+#
+# [models.oreille]
+# provider = "openai"
+# nature = "transcription"
+# base_url = "https://api.mistral.ai/v1"
+# model = "voxtral-mini-latest"
+# api_key_file = "/etc/talixio/mistral.key"
+#
+# [models.voix]
+# provider = "elevenlabs"
+# nature = "speech"
+# model = "eleven_v3"
+# voice = "identifiant-de-la-voix"       # celle employée quand l'agent n'en demande pas
+# api_key_file = "/etc/talixio/elevenlabs.key"
+#
+# [models.oracle]
+# provider = "timesfm"
+# nature = "forecast"
+# base_url = "http://127.0.0.1:8100"
+# model = "timesfm"
+
+# --- Droits du maître ----------------------------------------------------------------------
+# Tout ce qui n'est pas listé est refusé. Un enfant ne reçoit jamais plus que son parent.
+# Les dossiers doivent exister ; ils sont figés sur leur chemin réel au démarrage.
+# Le dossier d'état et les fichiers de clés restent interdits aux outils, quoi qu'on accorde ici.
+
+[capabilities]
+fs_read = ["/srv/projet"]
+fs_write = ["/srv/projet/travail"]
+# models = ["main", "fast"]   # par défaut : tous les modèles définis ci-dessus
+# max_tokens = 5000000         # budget global ; absent : pas de plafond
+
+# Appels permis aux modèles de service, par nature, pour toute la grappe.
+# Une nature absente : aucun appel, même si le modèle est défini.
+# [capabilities.max_calls]
+# transcription = 200
+# speech = 50
+# forecast = 100
+
+# Commandes autorisées, sans shell. Le programme est un chemin absolu. Arguments, position par position :
+#   "texte"    cet argument exact
+#   "*"        un argument libre, jamais une option (rien qui commence par « - »)
+#   "{read}"   un chemin que l'agent a le droit de lire ; "{write}" : d'écrire
+#   "**"       en dernier : une suite d'arguments libres, sans option
+# ATTENTION : une commande autorisée s'exécute avec tous les droits du compte du process, tant
+# que le cloisonnement par le système n'est pas en place. Chaque règle est donc à écrire au plus
+# serré : jamais d'interpréteur (sh, python…), jamais `args` omis (arguments libres), et se
+# méfier des programmes dont une option écrit un fichier ou lance un autre programme.
+[[capabilities.exec]]
+program = "/usr/bin/git"
+args = ["status", "--short"]
+cwd = "/srv/projet"          # dossier d'exécution ; absent : le dossier temporaire
+
+[[capabilities.exec]]
+program = "/usr/bin/wc"
+args = ["-l", "{read}"]
+
+# Cibles de déploiement : où le maître peut installer des agents hors de sa machine.
+# Il faut alors que le maître écoute hors de sa machine (`listen`, `advertise`).
+# Chaque cible a son plafond de droits : un agent déployé là n'en reçoit jamais plus.
+#
+# [targets.vm-build]
+# kind = "ssh"
+# host = "build.exemple.net"            # doit déjà figurer dans known_hosts du compte du maître
+# user = "talixio"                      # compte dédié, sans privilèges
+# identity_file = "/home/maitre/.ssh/talixio_ed25519"
+# remote_dir = "/home/talixio/agents"   # réservé aux agents
+#
+# [targets.vm-build.capabilities]
+# fs_read = ["/srv/projet"]
+# fs_write = ["/srv/projet/sortie"]
+#
+# [targets.bac]
+# kind = "docker"
+# image = "debian:12-slim"              # déjà présente sur la machine ; n'importe laquelle avec l'exécutable statique
+# user = "1000:1000"
+# mounts = [{ host = "/srv/projet", container = "/data" }]   # write = true pour l'écriture
+# memory = "2g"                         # facultatif ; 1 Go sinon
+# seccomp = "/opt/talixio/chromium-seccomp.json"   # facultatif : pour une image avec navigateur (examples/catalogue)
+# Pour un maître lui-même en conteneur, qui a reçu le socket Docker (TALIXIO_DOCKER=1 ./tools.sh) :
+# network = "talixio-net"               # le réseau Docker du maître : l'agent l'y rejoint
+# agent_in_image = true                 # l'exécutable de l'agent est dans l'image (/talixio-agent)
+# mounts = [{ volume = "talixio-data", subpath = "work/projet", container = "/data" }]   # un sous-dossier du volume du maître
+#
+# [targets.bac.capabilities]
+# fs_read = ["/data"]
+#
+# Puis : targets = ["local", "vm-build", "bac"] dans [capabilities.spawn].
+
+# Paquets installés par vous (`talixio-agent pack list`, `pack show <nom>`, `pack install <nom>
+# --dir <dossier>`) : des commandes et des rôles. Le maître vérifie leurs empreintes au démarrage,
+# et refuse de démarrer s'il peut écrire ce dossier : installez sous un autre compte (sudo).
+# packs_dir = "/opt/talixio/packs"
+# Fixer les paquets par leur identifiant (donné par `talixio-agent pack verify`) : le maître ne
+# démarre alors qu'avec ceux-là, à ce contenu-là.
+# [packs]
+# catalogue = "…"
+
+[capabilities.spawn]
+max_children = 5   # enfants directs en vie
+max_depth = 2      # niveaux sous le maître

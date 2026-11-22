@@ -1,0 +1,76 @@
+#!/bin/bash
+# Lit une page du web pour un agent, et rien d'autre : une adresse https, sur un site de la
+# liste (sites.txt, à côté de ce script), sans suivre de redirection, taille et durée bornées.
+# L'agent n'a pas `curl` : il n'a que ce script, installé avec son paquet dans un dossier que
+# le maître ne peut pas écrire (`talixio-agent pack install catalogue`).
+#
+#   lire-web https://exemple.fr/prix          le contenu, balises retirées si c'est une page
+#   lire-web https://exemple.fr/api.json      tel quel si c'est du JSON
+#   lire-web https://exemple.fr/api.json mot  seulement les éléments qui contiennent « mot »
+#                                             (pour une grande liste : un élément par ligne)
+set -uo pipefail
+url="${1:-}"
+sites="$(dirname "$(readlink -f "$0")")/sites.txt"
+
+refuse() { echo "lire-web : $*" >&2; exit 2; }
+
+[[ $# -eq 1 || $# -eq 2 ]] || refuse "une adresse, et au plus un mot à chercher"
+word="${2:-}"
+[[ -z "$word" || "$word" =~ ^[A-Za-z0-9._/:-]{2,60}$ ]] || refuse "mot refusé (lettres, chiffres, . _ / : -)"
+# https seulement, un nom de machine simple, ni compte, ni port, ni caractère douteux
+[[ "$url" =~ ^https://([a-z0-9]([a-z0-9.-]*[a-z0-9])?)(/[A-Za-z0-9._~:/?#@!\$\&\'()*+,\;=%-]*)?$ ]] || refuse "adresse refusée (https, sans compte ni port)"
+host="${BASH_REMATCH[1]}"
+[[ "$host" == *.* && "$host" != *..* ]] || refuse "nom de machine refusé"
+[[ -r "$sites" ]] || refuse "liste des sites introuvable"
+
+permis() {
+    local host="$1" line site
+    while IFS= read -r line; do
+        site="${line%%#*}"; site="${site//[[:space:]]/}"
+        [[ -n "$site" ]] || continue
+        # « exemple.fr » vaut pour lui seul ; « .exemple.fr » pour ses sous-domaines aussi
+        if [[ "$host" == "$site" ]] || { [[ "$site" == .* ]] && [[ "$host" == *"$site" || "$host" == "${site#.}" ]]; }; then
+            return 0
+        fi
+    done < "$sites"
+    return 1
+}
+permis "$host" || refuse "$host n'est pas dans la liste des sites permis"
+
+tmp="$(mktemp)"; meta="$(mktemp)"; trap 'rm -f "$tmp" "$meta"' EXIT
+# ni fichier de réglages, ni redirection suivie, ni autre protocole, ni plage d'adresses ; 40 s au
+# plus, et jamais plus de 3 Mo gardés, même si la réponse se décompresse en bien davantage
+/usr/bin/curl -q --globoff --silent --proto '=https' --max-redirs 0 --max-time 40 --max-filesize 3000000 \
+    --compressed -A 'talixio-agent (lecture de catalogue)' -o - -w '%{stderr}%{http_code}\t%{content_type}\t%{redirect_url}' -- "$url" 2> "$meta" \
+    | head -c 3000000 > "$tmp"
+# curl peut se plaindre avant (sortie coupée à 3 Mo) : la ligne de -w est la dernière
+IFS=$'\t' read -r status type redirect < <(tail -n 1 "$meta") || true
+[[ "${status:-}" =~ ^[0-9]{3}$ && "$status" != 000 ]] || refuse "lecture impossible"
+case "$status" in
+    2??) ;;
+    3??)
+        # la cible est une donnée du site : dite seulement si elle reste dans la liste
+        target="$(printf '%s' "${redirect:-}" | head -c 300)"
+        if [[ "$target" =~ ^https://([a-z0-9.-]+)(/|$) ]] && permis "${BASH_REMATCH[1]}"; then
+            echo "le site répond par une redirection vers : $target"
+        else
+            echo "le site répond par une redirection vers un site hors de la liste"
+        fi
+        exit 0 ;;
+    *) refuse "le site a répondu $status" ;;
+esac
+# ce qui est rendu à l'agent : sans caractère de commande ni caractère invisible
+propre() { LC_ALL=C /bin/sed -e 's/[\x00-\x08\x0b-\x1f\x7f]//g' -e 's/\xc2[\x80-\x9f\xad]//g' -e 's/\xe2\x80[\x8b-\x8f\xa8-\xae]//g' -e 's/\xe2\x81[\xa0-\xa9]//g' -e 's/\xef\xbb\xbf//g' -e 's/\xf3\xa0[\x80-\xbf][\x80-\xbf]//g'; }
+{
+if [[ "$type" == *html* ]]; then
+    # une page : sans scripts ni styles ni balises, lignes vides resserrées
+    /bin/sed -e ':a;N;$!ba' -e 's/<script[^>]*>[^<]*\(<[^/][^<]*\)*<\/script>//g' -e 's/<style[^>]*>[^<]*<\/style>//g' -e 's/<!--[^-]*\(-[^-][^-]*\)*-->//g' "$tmp" \
+        | /bin/sed -e 's/<[^>]*>/ /g' -e 's/&nbsp;/ /g' -e 's/&amp;/\&/g' -e 's/[[:space:]]\{2,\}/ /g' \
+        | /bin/sed -e '/^[[:space:]]*$/d' | head -c 60000
+elif [[ -n "$word" ]]; then
+    # une grande liste : un élément par ligne, et seulement ceux qui portent le mot
+    /bin/sed -e 's/},[[:space:]]*\([{"]\)/},\n\1/g' "$tmp" | /bin/grep -i -F -- "$word" | head -c 60000
+else
+    head -c 60000 "$tmp"
+fi
+} | propre

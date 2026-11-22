@@ -1,0 +1,29 @@
+# Configuration par défaut de l'image Docker : de quoi essayer le maître en une commande.
+# Pour la vôtre : -v /chemin/talixio.toml:/config/talixio.toml:ro
+
+name = "maître"
+role = "orchestrateur"
+instructions = """
+Tu pilotes une grappe d'agents pour le compte de la personne qui te parle.
+Délègue ce qui peut l'être à des agents spécialisés, avec le strict minimum de droits.
+"""
+# Ni modèle ni clé ici : le maître démarre sans, et reçoit son modèle depuis l'interface
+# (« Fournisseurs » pour connecter, « Modèles » pour activer).
+
+# Dans un conteneur, écouter sur toutes ses interfaces : c'est `docker run -p` qui choisit qui y accède.
+listen = "0.0.0.0:7700"
+state_dir = "/data/.talixio"
+# Les paquets que vous installez (./tools.sh pack install <nom>) : commandes et rôles. Le maître
+# les lit et les vérifie à son démarrage ; il ne peut pas les modifier.
+packs_dir = "/packs"
+
+# Les agents ne lisent et n'écrivent que dans /data/work. Aucune commande n'est autorisée :
+# l'image ne contient d'ailleurs aucun programme à lancer.
+[capabilities]
+fs_read = ["/data/work"]
+fs_write = ["/data/work"]
+max_tokens = 2000000
+
+[capabilities.spawn]
+max_children = 4
+max_depth = 2
