@@ -145,8 +145,17 @@ async fn un_paquet_installe_sert_et_reste_verifie() {
     assert!(!refused.status.success());
     assert!(String::from_utf8_lossy(&refused.stderr).contains("ne doit pouvoir modifier"), "{}", String::from_utf8_lossy(&refused.stderr));
 
+    // le paquet fixé par son identifiant : un autre identifiant, ou un paquet non listé, et le maître ne démarre pas
+    let verify = String::from_utf8_lossy(&agent(&["pack", "verify", "--dir", packs.to_str().unwrap()]).stdout).to_string();
+    let pin = verify.lines().find(|l| l.starts_with("bonjour = \"")).expect("identifiant affiché").to_string();
+    for (wrong, why) in [("bonjour = \"00\"".to_string(), "n'est pas celui"), ("autre = \"00\"".to_string(), "pas installé")] {
+        std::fs::write(&config, format!("{}[packs]\n{wrong}\n", text(true))).unwrap();
+        let refused = agent(&["root", "--config", config.to_str().unwrap()]);
+        assert!(String::from_utf8_lossy(&refused.stderr).contains(why), "{}", String::from_utf8_lossy(&refused.stderr));
+    }
+
     // accepté pour l'essai : l'agent créé par son rôle reçoit consignes et commande, et la lance
-    std::fs::write(&config, text(true)).unwrap();
+    std::fs::write(&config, format!("{}[packs]\n{pin}\n", text(true))).unwrap();
     let (mut root, api) = start_root(&config, &state, port).await;
     api.say("salue").await;
     let report = api.wait_event("le bonjour", |e| e["kind"] == "report" && e["text"].as_str().is_some_and(|t| t.contains("Rendu :"))).await;

@@ -520,6 +520,15 @@ Demandé le 2026-11-20. Rien n'est codé.
       et ne peut pas être retirée en route ; l'agent qui lance la commande, où qu'il soit,
       relit le programme et refuse s'il a changé. Une empreinte ne s'écrit pas dans la
       configuration.
+    - **Identifiant** (demandé : « les identifier avec un identifiant unique », pour qu'on ne
+      contourne pas par le nom) : un paquet a pour identifiant l'empreinte SHA-256 de tout son
+      contenu (SHA-1 et MD5 ne résistent plus à une modification voulue). `pack show` et
+      `pack verify` le donnent. La configuration du maître peut fixer ses paquets par cet
+      identifiant (`[packs] catalogue = "…"`) : le maître ne démarre alors qu'avec exactement
+      ces paquets, à ce contenu ; un paquet du même nom et d'un autre contenu est refusé. C'est
+      l'ancre hors du dossier des paquets, qui manquait à `pack.lock`. Un rôle se nomme
+      « paquet/rôle », une commande porte l'empreinte de son programme : tous deux tiennent
+      donc à l'identifiant du paquet.
     - **Rôles** : le maître voit les rôles installés dans ses consignes ; `spawn_agent` avec le
       nom complet d'un rôle installé (« paquet/rôle ») donne à l'enfant les consignes et les commandes du rôle. Dossiers,
       budget et mission restent choisis par le maître, dans ses propres droits.

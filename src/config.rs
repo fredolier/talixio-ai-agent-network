@@ -60,6 +60,11 @@ pub struct RootConfig {
     /// et rôles. Le maître le lit, le vérifie, et ne doit pas pouvoir l'écrire.
     #[serde(default)]
     pub packs_dir: Option<PathBuf>,
+    /// Les paquets attendus, par leur identifiant (`talixio-agent pack verify` le donne) :
+    /// `catalogue = "…"`. Dès qu'il y en a un, le maître ne démarre qu'avec exactement ces
+    /// paquets-là, à ce contenu-là : un paquet du même nom et d'un autre contenu est refusé.
+    #[serde(default)]
+    pub packs: BTreeMap<String, String>,
     /// Pour un essai seulement : accepter un dossier de paquets que le maître peut écrire.
     #[serde(default)]
     pub packs_unprotected: bool,
@@ -366,6 +371,21 @@ impl RootConfig {
                 bail!("packs_dir doit être un chemin absolu");
             }
             let installed = crate::pack::load_installed(dir, !cfg.packs_unprotected).context("paquets installés")?;
+            // les paquets fixés par leur identifiant : ni un de plus, ni un de moins, ni un autre contenu
+            if !cfg.packs.is_empty() {
+                for (name, wanted) in &cfg.packs {
+                    match installed.ids.get(name) {
+                        None => bail!("[packs] attend le paquet « {name} », qui n'est pas installé"),
+                        Some(id) if id != wanted.trim_start_matches("sha256:") => {
+                            bail!("paquet « {name} » : son identifiant ({id}) n'est pas celui que [packs] attend. S'il a été remplacé volontairement, mettez la configuration à jour")
+                        }
+                        Some(_) => {}
+                    }
+                }
+                if let Some(extra) = installed.ids.keys().find(|name| !cfg.packs.contains_key(*name)) {
+                    bail!("le paquet « {extra} » est installé mais absent de [packs]");
+                }
+            }
             let real = dir.canonicalize().unwrap_or_else(|_| dir.clone());
             let inside = |program: &Path| program.starts_with(dir) || program.starts_with(&real);
             // une commande de paquet ne se réécrit pas à la main : sa règle vient du paquet, avec son empreinte

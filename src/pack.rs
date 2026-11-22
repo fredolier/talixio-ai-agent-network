@@ -105,6 +105,8 @@ pub struct Installed {
     pub exec: Vec<ExecRule>,
     pub roles: BTreeMap<String, InstalledRole>,
     pub names: Vec<String>,
+    /// L'identifiant de chaque paquet installé, par nom.
+    pub ids: BTreeMap<String, String>,
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
@@ -245,10 +247,18 @@ impl Pack {
         Self::available(from)?.into_iter().find(|p| p.manifest.name == name).with_context(|| format!("paquet « {} » introuvable (talixio-agent pack list)", crate::clean(name, 80, false)))
     }
 
+    /// L'identifiant du paquet : l'empreinte SHA-256 de tout son contenu (le nom et l'empreinte
+    /// de chaque fichier). Deux paquets de même nom et de contenu différent n'ont pas le même ;
+    /// c'est lui, pas le nom, qu'on fixe dans la configuration du maître (`[packs]`).
+    pub fn id(&self) -> String {
+        let listing: String = self.files.iter().map(|(name, bytes)| format!("{name}\0{}\n", sha256_hex(bytes))).collect();
+        sha256_hex(listing.as_bytes())
+    }
+
     /// Ce que le paquet donnerait, en clair : à lire avant d'installer.
     pub fn describe(&self) -> String {
         let m = &self.manifest;
-        let mut out = format!("{} (version {})\n{}\n", m.name, m.version, m.description);
+        let mut out = format!("{} (version {})\n{}\nIdentifiant : {}\n", m.name, m.version, m.description, self.id());
         out.push_str("\nCommandes données au maître, qui peut les confier à ses agents :\n");
         for command in &m.commands {
             out.push_str(&format!("  {} {}\n", command.program, command.args.join(" ")));
@@ -428,7 +438,9 @@ pub fn load_installed(dir: &Path, strict: bool) -> Result<Installed> {
             installed.roles.insert(format!("{name}/{}", role.name), InstalledRole { pack: name.clone(), role: role.clone(), exec });
         }
         installed.exec.extend(rules);
-        installed.names.push(format!("{name} {}", pack.manifest.version));
+        let id = pack.id();
+        installed.names.push(format!("{name} {} ({})", pack.manifest.version, &id[..12]));
+        installed.ids.insert(name, id);
     }
     Ok(installed)
 }

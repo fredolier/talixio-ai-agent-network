@@ -244,6 +244,13 @@ async fn main() -> Result<()> {
                     for name in &installed.names {
                         println!("{name} : intact");
                     }
+                    if !installed.ids.is_empty() {
+                        println!("\nPour que le maître n'accepte que ces paquets-là, à ce contenu-là, dans sa configuration :\n[packs]");
+                        for (name, id) in &installed.ids {
+                            println!("{name} = \"{id}\"");
+                        }
+                        println!();
+                    }
                     for (name, role) in &installed.roles {
                         println!("  rôle {name} ({})", role.pack);
                     }

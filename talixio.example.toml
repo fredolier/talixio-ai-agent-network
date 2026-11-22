@@ -167,6 +167,10 @@ args = ["-l", "{read}"]
 # --dir <dossier>`) : des commandes et des rôles. Le maître vérifie leurs empreintes au démarrage,
 # et refuse de démarrer s'il peut écrire ce dossier : installez sous un autre compte (sudo).
 # packs_dir = "/opt/talixio/packs"
+# Fixer les paquets par leur identifiant (donné par `talixio-agent pack verify`) : le maître ne
+# démarre alors qu'avec ceux-là, à ce contenu-là.
+# [packs]
+# catalogue = "…"
 
 [capabilities.spawn]
 max_children = 5   # enfants directs en vie

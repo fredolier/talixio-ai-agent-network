@@ -7,6 +7,16 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.17.2"
+date = "2026-11-22"
+title = "Un identifiant par paquet"
+summary = "Chaque paquet a un identifiant tiré de son contenu ; la configuration du maître peut n'accepter que ceux-là."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Un paquet a pour identifiant l'empreinte SHA-256 de tout son contenu (`pack show`, `pack verify`). Avec `[packs] nom = \"identifiant\"` dans sa configuration, le maître ne démarre qu'avec exactement ces paquets, à ce contenu : un paquet du même nom et d'un autre contenu est refusé."
+
+[[release]]
 version = "0.17.1"
 date = "2026-11-22"
 title = "Paquets : corrections de la revue de sécurité"
