@@ -7,6 +7,20 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.21.1"
+date = "2026-11-22"
+title = "Écran des paquets : corrections de la revue de sécurité"
+summary = "Tout le texte d'un paquet se lit à l'écran avant d'installer, et rien ne s'y cache."
+
+[[release.changes]]
+kind = "sécurité"
+text = "`pack tui` : le défilement atteint toujours la fin du texte et l'écran dit où en est la lecture ; les caractères larges ou invisibles deviennent « ? » ; le paquet installé est celui qui a été lu ; un texte collé ou une touche tapée d'avance ne confirme rien."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Les caractères invisibles (étiquettes, sélecteurs de variante, usage privé) sont refusés dans les paquets et retirés de tout texte nettoyé : des consignes ne peuvent plus s'y cacher."
+
+[[release]]
 version = "0.21.0"
 date = "2026-11-22"
 title = "Un écran pour parcourir les paquets"

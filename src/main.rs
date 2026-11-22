@@ -200,6 +200,14 @@ impl talixio_agent::tui::Source for Opened {
         })
     }
 
+    fn label(&self) -> String {
+        match (&self.0, &self.1) {
+            (Some((_, depot)), _) => format!("dépôt signé (index du {}, clé {})", talixio_agent::depot::day(depot.issued), depot.signer),
+            (None, Some(dir)) => format!("source locale NON signée ({})", dir.display()),
+            (None, None) => "ceux de cet exécutable".into(),
+        }
+    }
+
     fn load(&self, name: &str) -> Result<talixio_agent::pack::Pack> {
         match &self.0 {
             Some((fetch, depot)) => depot.pack(fetch.as_ref(), name),

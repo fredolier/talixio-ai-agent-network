@@ -610,7 +610,8 @@ Demandé le 2026-11-20. Rien n'est codé.
     `--depot` et `--key`) et même dossier (`--dir`, `TALIXIO_PACKS`, ou `/opt/talixio/packs` en
     root) que les autres commandes `pack`, dont il n'est qu'une façade (`src/tui.rs`) : mêmes
     contrôles, et rien que le maître puisse lancer lui-même. Sans dossier d'installation connu,
-    il ne fait que lire. Tout texte affiché est nettoyé des caractères de commande. Il tourne
+    il ne fait que lire. Tout texte affiché tient en une colonne par caractère et se voit (le reste
+    devient « ? ») ; l'écran dit où en est la lecture et d'où viennent les paquets (signés ou non). Il tourne
     hors de Docker sur le dossier des paquets de la machine, ou par `./tools.sh pack tui` ; en
     sortant, il rappelle de relancer le maître si quelque chose a changé. Dépendance ajoutée :
     `crossterm` (compilée dans l'exécutable, toujours unique).
@@ -811,6 +812,24 @@ les seules options passées à `claude`, sans contrôle de ce qu'il fait réelle
 | K10 | Basse | Filtre des secrets de l'environnement sensible à la casse (Windows ne l'est pas). | ✅ Comparaison sans casse. Ce que `claude_env` laisse passer reste à la charge de l'exploitant (noté). |
 | K11 | Basse | `<état>/claude` pouvait être un lien symbolique posé avant le démarrage. | ✅ Refusé au démarrage. |
 | K12 | Basse | Une invite commençant par « / » pouvait être prise pour une commande de `claude`. | ✅ Jamais en tête d'invite (et `--disable-slash-commands`). |
+
+### Quinzième passe (2026-11-22) : l'écran des paquets (décision 41)
+
+Revue indépendante, essayée dans un terminal sur des paquets hostiles. Garde du dossier en root,
+nettoyage des erreurs et confirmation de base trouvés corrects. Deux constats hauts, quatre
+moyens, six bas.
+
+| Constat | Gravité | Traitement |
+|---|---|---|
+| Une partie du texte d'un paquet ne pouvait pas être atteinte à l'écran (défilement borné sur les lignes d'avant repli) : on installait ce qu'on n'avait pas pu lire. | haut | ✅ défilement borné sur les lignes affichées, d'une page moins une ligne ; l'écran dit « lu : n lignes sur m » puis « lu jusqu'au bout » (testé : tout le texte est atteignable à trois tailles). |
+| Les caractères larges faisaient déborder une ligne, que la suivante recouvrait : texte masqué. | haut | ✅ tout ce qui s'affiche passe par `shown` : une colonne par caractère ; caractères larges, invisibles, de commande ou d'autres écritures deviennent « ? » (testé). Limite : un paquet écrit dans une autre écriture que latine se lit avec `pack show`, pas à l'écran. |
+| Avec `--from`, le paquet était relu à l'installation : un tiers pouvait le changer entre la lecture et le « o ». | moyen | ✅ c'est le paquet lu et affiché qui est installé ; la marque se fonde sur son contenu, pas sur ce que la liste annonce. |
+| Confirmation sans « o » délibéré : texte collé, touche tapée d'avance, Alt-o. | moyen | ✅ collage ignoré, file vidée une fois la question à l'écran, touches avec modificateur refusées (essayé : Alt-o ne confirme pas). |
+| « ✓ installé » affiché à tort quand la vérification des paquets installés échouait ; compte rendu de l'action écrasé. | moyen | ✅ marque « ? » (inconnu), compte rendu gardé ; un paquet abîmé peut être retiré de l'écran (testé). |
+| `clean` laissait passer des caractères invisibles (« étiquettes » U+E0000, sélecteurs, usage privé, U+00AD…) : un paquet pouvait porter des consignes que l'exploitant ne voit pas mais que l'agent reçoit. | moyen | ✅ ajoutés à `clean` (`src/lib.rs`) : un paquet qui en contient est refusé par `pack`, et ils sont retirés partout où un texte est nettoyé. |
+| Fausses lignes fabriquées par des espaces insécables ; question coupée par un long chemin ; chemin non nettoyé ; avertissement « non signée » masqué par l'écran. | bas | ✅ espaces normalisés, question avant le chemin, tout passe par `shown`, la nature de la source est en tête d'écran. |
+| Terminal non rendu après une panique. | bas | ✅ crochet de panique. Sur SIGTERM ou SIGHUP : ⬜ noté (`reset` le rend). |
+| L'écran relit le dossier `--from` à chaque déplacement ; il se fige pendant un téléchargement. | information | ⬜ noté. |
 
 ### Quatorzième passe (2026-11-22) : le dépôt de paquets signé (décision 40)
 

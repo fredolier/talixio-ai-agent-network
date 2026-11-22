@@ -1,6 +1,6 @@
 [package]
 name = "talixio-agent"
-version = "0.21.0"
+version = "0.21.1"
 edition = "2021"
 description = "Agents IA autonomes en grappe : chaque agent est un petit process, aux droits limités, qui ne parle qu'à son parent"
 publish = false
@@ -28,7 +28,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-tungstenite = "0.26"
 toml = "0.8"
 uuid = { version = "1", features = ["v4"] }
-crossterm = { version = "0.28", default-features = false, features = ["events", "windows"] }
+crossterm = { version = "0.28", default-features = false, features = ["events", "windows", "bracketed-paste"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

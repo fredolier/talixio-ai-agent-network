@@ -66,7 +66,14 @@ pub fn proof(secret: &str, side: &str, parts: [&str; 4]) -> String {
 /// (sauts de ligne gardés si `multiline`), sans caractères invisibles ni marques qui retournent
 /// le sens de lecture (un nom ne doit pas pouvoir en imiter un autre), et coupé à `max` caractères.
 pub fn clean(text: &str, max: usize, multiline: bool) -> String {
-    let hidden = |c: char| matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}');
+    // ce qui ne se voit pas, ou change le sens de lecture : largeur nulle, bidirectionnel,
+    // « étiquettes », sélecteurs de variante, usage privé
+    let hidden = |c: char| {
+        matches!(c,
+            '\u{AD}' | '\u{34F}' | '\u{61C}' | '\u{115F}' | '\u{1160}' | '\u{180E}' | '\u{3164}' | '\u{FFA0}'
+            | '\u{200B}'..='\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2060}'..='\u{2069}' | '\u{FEFF}'
+            | '\u{FE00}'..='\u{FE0F}' | '\u{FFF9}'..='\u{FFFB}' | '\u{E000}'..='\u{F8FF}' | '\u{E0000}'..='\u{E0FFF}' | '\u{F0000}'..='\u{10FFFF}')
+    };
     let keep = |c: &char| !hidden(*c) && (!c.is_control() || (multiline && (*c == '\n' || *c == '\t')));
     let mut out: String = text.chars().filter(keep).take(max).collect();
     if text.chars().filter(keep).nth(max).is_some() {
