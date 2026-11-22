@@ -79,6 +79,11 @@ pub struct Target {
     /// Docker : dossiers de la machine montrés au conteneur.
     #[serde(default)]
     pub mounts: Vec<Mount>,
+    /// Docker : mémoire du conteneur, « 512m » ou « 2g ». Par défaut 1 Go.
+    pub memory: Option<String>,
+    /// Docker : filtre d'appels système à la place de celui de Docker (un fichier de la machine).
+    /// Sert à un navigateur, dont le bac à sable demande des appels que Docker refuse d'ordinaire.
+    pub seccomp: Option<PathBuf>,
     /// Le programme `ssh` ou `docker`. Par défaut `/usr/bin/ssh`, `/usr/bin/docker`.
     pub program: Option<PathBuf>,
     /// Plafond des droits d'un agent sur cette cible : dossiers et commandes, tels qu'ils
@@ -144,6 +149,9 @@ impl Target {
                 if self.image.is_some() || !self.mounts.is_empty() {
                     bail!("cible ssh : `image` et `mounts` ne valent que pour docker");
                 }
+                if self.memory.is_some() || self.seccomp.is_some() {
+                    bail!("cible ssh : `memory` et `seccomp` ne valent que pour docker");
+                }
             }
             "docker" => {
                 if !plain(self.image.as_deref().context("cible docker : `image` manquante")?, "/._:@-") {
@@ -162,6 +170,18 @@ impl Target {
                     }
                     if !mount.host.is_absolute() || !plain_host_path(mount.host.to_str().unwrap_or("")) {
                         bail!("cible docker : montage invalide ({})", mount.host.display());
+                    }
+                }
+                if let Some(memory) = &self.memory {
+                    let (number, unit) = memory.split_at(memory.len().saturating_sub(1));
+                    if !matches!(unit, "m" | "g") || number.len() > 5 || !number.parse::<u32>().is_ok_and(|n| n > 0) {
+                        bail!("cible docker : `memory` s'écrit « 512m » ou « 2g »");
+                    }
+                }
+                if let Some(seccomp) = &self.seccomp {
+                    // un fichier précis de la machine, jamais « unconfined » ni une option de plus
+                    if !seccomp.is_absolute() || !plain_host_path(seccomp.to_str().unwrap_or("")) || seccomp.extension().is_none_or(|e| e != "json") {
+                        bail!("cible docker : `seccomp` doit être le chemin absolu d'un fichier .json");
                     }
                 }
                 if self.host.is_some() || self.identity_file.is_some() || self.remote_dir.is_some() || self.port.is_some() {

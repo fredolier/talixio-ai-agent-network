@@ -24,12 +24,13 @@ Rien n'est programmé pour cet exemple : tout est dans ce dossier.
   La page et ses cadres restent sur les sites de la liste ; ce qu'elle charge pour se construire
   doit venir d'un nom public, en https ; ni image, ni téléchargement ; profil jeté à chaque
   lecture ; 60 s au plus. Les lignes de tableau sont rendues sur une ligne.
+- `cible-navigateur.toml` : la cible Docker où tourne le collecteur quand il a le navigateur.
 - `consigne.md` : la consigne à remettre au maître, à coller dans une tâche planifiée.
 
 ## Le lancer dans Docker
 
 ```bash
-TALIXIO_CONFIG=examples/catalogue/talixio.toml TALIXIO_TOOLS=examples/catalogue/outils ./tools.sh up navigateur
+TALIXIO_CONFIG=examples/catalogue/talixio.toml TALIXIO_TOOLS=examples/catalogue/outils ./tools.sh up claude
 ```
 
 ```bash
@@ -54,20 +55,33 @@ talixio-agent catalog check ./catalogue-propose/catalog.toml
 Relisez `CHANGEMENTS.md`, en particulier « À valider par une personne » (la note de qualité des
 nouveaux modèles), puis copiez `catalog.toml` à la racine du dépôt.
 
+## Avec un navigateur : le collecteur dans son conteneur
+
+Les grilles de prix officielles ne se lisent qu'avec un navigateur. Il n'est pas ajouté à l'image
+du maître : c'est le collecteur qui est lancé dans un conteneur à part, fait pour ça.
+
+```bash
+./tools.sh build navigateur
+```
+
+Puis ajoutez `cible-navigateur.toml` à la configuration du maître, avec vos chemins. La consigne
+en tient compte : si la cible « navigateur » existe, le collecteur y est créé.
+
+Aujourd'hui, il faut pour cela un maître qui peut lancer `docker` : installé sur la machine
+(`talixio-agent service install`), pas lui-même dans un conteneur. Qui peut lancer `docker` est
+maître de la machine : un Docker sans droits d'administrateur (« rootless ») limite ce risque au
+compte du maître.
+
 ## Ce qu'il faut savoir
 
 - Une page lue sur le web peut chercher à manipuler l'agent qui la lit. Le collecteur n'a aucun
   droit sur le catalogue, et rien n'entre dans le dépôt sans votre copie.
-- Un navigateur est une grosse surface : il exécute les scripts des pages qu'il lit. Il garde
-  son bac à sable (l'image se lance avec `docker/chromium-seccomp.json`, le filtre ordinaire de
-  Docker plus ce que ce bac à sable demande), il tourne sous le compte sans droit du conteneur,
-  et seul le collecteur peut le lancer. Mais il tourne dans le même conteneur que le maître :
-  n'ajoutez à la liste que des sites que vous tenez pour sérieux.
+- Un navigateur est une grosse surface : il exécute les scripts des pages qu'il lit. Il ne
+  tourne donc jamais à côté du maître : seulement dans le conteneur du collecteur, jetable, en
+  lecture seule, sans capacité, qui ne voit que ses scripts et ses relevés, et où Chromium garde
+  son bac à sable. Ce conteneur garde le réseau : n'ajoutez à la liste que des sites publics.
 - Certains sites refusent les navigateurs pilotés (réponse 403) : le relevé le dit, et le
   modèle reste « non confirmé ».
-- Hors de Docker : `lire-page` demande Node, `playwright-core` et un Chromium ; s'ils ne sont pas
-  aux endroits ordinaires, donnez-les dans `outils/navigateur.conf` (`modules = …`,
-  `chromium = …`).
 - `lire-web` borne les sites, pas ce qu'ils répondent : ne mettez dans la liste que des sites
   publics, jamais une adresse de votre réseau.
 - Une passe complète appelle les trois modèles plusieurs dizaines de fois : comptez-la dans les

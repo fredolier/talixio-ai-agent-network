@@ -8,7 +8,10 @@ Critère de réussite : `/talixio-agent catalog check /data/work/catalogue/catal
 
 Organisation : trois agents, créés l'un après l'autre, chacun avec le strict minimum de droits.
 
-1. « collecteur » (modèle : haiku). Droits : lire et écrire /data/work/catalogue/releves ; les commandes /outils/lire-web et /outils/lire-page (chacune avec une adresse, ou une adresse et un mot). Aucun autre droit.
+1. « collecteur » (modèle : haiku).
+   Si tu as une cible « navigateur » : crée-le dessus, avec les droits de cette cible repris tels quels (lire et écrire /releves ; /outils/lire-web et /outils/lire-page, chacune avec une adresse, ou une adresse et un mot). Son dossier /releves est ton dossier /data/work/catalogue/releves.
+   Sinon : crée-le ici, avec pour droits lire et écrire /data/work/catalogue/releves et les deux commandes /outils/lire-web ; il n'a alors pas /outils/lire-page, les grilles de prix ne seront pas lues, et tu le diras en tête de ton compte rendu.
+   Aucun autre droit dans les deux cas.
    Mission : pour chaque fournisseur du catalogue actuel, relever les modèles servis aujourd'hui et leurs prix, dans un fichier par fournisseur (releves/<fournisseur>.md), en citant l'adresse lue pour chaque fait.
    Sources, dans cet ordre :
    a. la page de prix et la page des modèles du fournisseur lui-même, lues avec /outils/lire-page (un vrai navigateur : c'est lui qui lit les grilles de prix) ; ajouter un mot (le nom d'une famille de modèles) pour ne garder que les lignes utiles ;

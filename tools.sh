@@ -3,10 +3,11 @@
 #
 #   ./tools.sh up            construit l'image vide et lance le maître
 #   ./tools.sh up claude     pareil, avec la commande `claude` (abonnement Claude Pro ou Max)
-#   ./tools.sh up navigateur   pareil, avec en plus un navigateur pour les scripts des agents (lire-page)
 #   ./tools.sh login         connecte `claude` à votre abonnement, une fois (lien à ouvrir, code à recoller)
-#   ./tools.sh build [claude|navigateur]   construit seulement
-#   ./tools.sh run [claude|navigateur]     lance seulement (l'image doit exister)
+#   ./tools.sh build [claude]   construit seulement
+#   ./tools.sh run [claude]     lance seulement (l'image doit exister)
+#   ./tools.sh build navigateur   construit l'image des AGENTS qui lisent le web avec un navigateur
+#                                 (talixio-navigateur ; pas une image du maître : voir examples/catalogue)
 #   ./tools.sh token         affiche le jeton de l'interface
 #   ./tools.sh logs          suit le journal du maître
 #   ./tools.sh status        dit si le maître tourne, et où
@@ -43,12 +44,9 @@ command -v docker >/dev/null || die "docker n'est pas installé"
 # « claude » ou rien : quelle image
 variant() {
     case "${1:-}" in
-        "") IMAGE="talixio-agent"; DOCKERFILE="Dockerfile"; PIDS=256; MEMORY=1g; SECCOMP=() ;;
-        claude) IMAGE="talixio-agent:claude"; DOCKERFILE="docker/Dockerfile.claude"; PIDS=512; MEMORY=3g; SECCOMP=() ;;
-        # le filtre ordinaire de Docker, plus ce que le bac à sable de Chromium demande
-        navigateur) IMAGE="talixio-agent:navigateur"; DOCKERFILE="docker/Dockerfile.navigateur"; PIDS=1024; MEMORY=4g
-            SECCOMP=(--security-opt "seccomp=$PWD/docker/chromium-seccomp.json") ;;
-        *) die "image inconnue : « $1 » (rien, « claude » ou « navigateur »)" ;;
+        "") IMAGE="talixio-agent"; DOCKERFILE="Dockerfile"; PIDS=256; MEMORY=1g ;;
+        claude) IMAGE="talixio-agent:claude"; DOCKERFILE="docker/Dockerfile.claude"; PIDS=512; MEMORY=3g ;;
+        *) die "image inconnue : « $1 » (rien, ou « claude »)" ;;
     esac
 }
 
@@ -67,8 +65,13 @@ api_token() {
 }
 
 build() {
-    # l'image avec navigateur se pose sur celle avec `claude`
-    if [ "${1:-}" = navigateur ]; then build claude; fi
+    if [ "${1:-}" = navigateur ]; then
+        # l'image des agents à navigateur : ni maître, ni clé, ni script dedans
+        # shellcheck disable=SC2086
+        docker build ${TALIXIO_BUILD_ARGS:-} -f docker/Dockerfile.navigateur -t talixio-navigateur docker
+        echo "Image talixio-navigateur construite : à donner à une cible « docker » du maître (examples/catalogue)."
+        return
+    fi
     variant "${1:-}"
     [ -f web/dist/index.html ] || die "web/dist manque : l'interface construite fait partie du dépôt"
     # shellcheck disable=SC2086  # TALIXIO_BUILD_ARGS : options de plus pour docker build (réseau, mandataire)
@@ -82,7 +85,7 @@ run() {
     export TALIXIO_API_TOKEN
     # les secrets passent par leur nom : leur valeur n'apparaît pas sur la ligne de commande
     local env=(-e TALIXIO_API_TOKEN)
-    if [ "${1:-}" != "" ] && [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+    if [ "${1:-}" = claude ] && [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
         env+=(-e CLAUDE_CODE_OAUTH_TOKEN)
     fi
     local config=()
@@ -104,12 +107,12 @@ run() {
     docker rm -f "$NAME" >/dev/null 2>&1 || true
     docker run -d --name "$NAME" --restart unless-stopped \
         -p "$BIND:$PORT:7700" -v "$VOLUME:/data" \
-        --cap-drop ALL --security-opt no-new-privileges --pids-limit "$PIDS" --memory "$MEMORY" ${SECCOMP[@]+"${SECCOMP[@]}"} \
+        --cap-drop ALL --security-opt no-new-privileges --pids-limit "$PIDS" --memory "$MEMORY" \
         "${env[@]}" ${config[@]+"${config[@]}"} "$IMAGE" >/dev/null
     echo "Le maître tourne : https://$BIND:$PORT"
     echo "(certificat fabriqué par le maître : le navigateur demande confirmation)"
     echo "Jeton de l'interface : ./tools.sh token"
-    if [ "${1:-}" != "" ]; then
+    if [ "${1:-}" = claude ]; then
         [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || echo "Connectez votre abonnement, une fois : ./tools.sh login"
         echo "Puis « Fournisseurs », « Claude (abonnement) », « Connecter »."
     fi
@@ -133,5 +136,5 @@ case "${1:-}" in
         rm -f "$TOKEN_FILE"
         echo "Effacé."
         ;;
-    *) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+    *) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

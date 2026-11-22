@@ -151,6 +151,8 @@ args = ["-l", "{read}"]
 # image = "debian:12-slim"              # déjà présente sur la machine ; n'importe laquelle avec l'exécutable statique
 # user = "1000:1000"
 # mounts = [{ host = "/srv/projet", container = "/data" }]   # write = true pour l'écriture
+# memory = "2g"                         # facultatif ; 1 Go sinon
+# seccomp = "/opt/talixio/chromium-seccomp.json"   # facultatif : pour une image avec navigateur (examples/catalogue)
 #
 # [targets.bac.capabilities]
 # fs_read = ["/data"]

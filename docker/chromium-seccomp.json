@@ -1250,7 +1250,6 @@
   {
    "names": [
     "clone",
-    "setns",
     "unshare",
     "chroot"
    ],

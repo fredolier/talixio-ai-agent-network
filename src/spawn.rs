@@ -178,7 +178,10 @@ pub fn docker_args(id: &str, target: &Target, exe: &std::path::Path) -> Vec<Stri
     let mut args: Vec<String> = ["run", "--interactive", "--rm", "--init", "--pull=never", "--name"].map(String::from).into();
     args.push(format!("talixio-{id}"));
     args.extend(["--cap-drop=ALL", "--security-opt=no-new-privileges", "--read-only"].map(String::from));
-    args.extend(["--pids-limit=512", "--memory=1g", "--tmpfs=/tmp"].map(String::from));
+    args.extend(["--pids-limit=512".to_string(), format!("--memory={}", target.memory.as_deref().unwrap_or("1g")), "--tmpfs=/tmp".to_string()]);
+    if let Some(seccomp) = &target.seccomp {
+        args.push(format!("--security-opt=seccomp={}", seccomp.display()));
+    }
     args.push("--add-host=host.docker.internal:host-gateway".into());
     // le dossier d'état vit en mémoire et disparaît avec le conteneur
     let user = target.user.as_deref().unwrap_or("65534:65534");
@@ -303,7 +306,16 @@ mod tests {
         for wanted in ["--cap-drop=ALL", "--security-opt=no-new-privileges", "--read-only", "--user=1000:1000", mount.as_str(), binary.as_str(), "--pull=never"] {
             assert!(args.iter().any(|a| a == wanted), "{wanted} manque dans {args:?}");
         }
-        assert!(!args.iter().any(|a| a.contains("privileged") || a.contains("docker.sock")));
+        assert!(!args.iter().any(|a| a.contains("privileged") || a.contains("docker.sock") || a.contains("seccomp")));
+        assert!(args.iter().any(|a| a == "--memory=1g"));
+        // mémoire et filtre d'appels système de la cible : rien d'autre ne s'ajoute
+        let profile = if cfg!(windows) { "C:/opt/chromium-seccomp.json" } else { "/opt/chromium-seccomp.json" };
+        let t = target(&format!("kind = 'docker'\nimage = 'talixio-navigateur'\nuser = '65532:65532'\nmemory = '2g'\nseccomp = '{profile}'")).unwrap();
+        let args = docker_args("abc", &t, std::path::Path::new(exe));
+        let filter = format!("--security-opt=seccomp={profile}");
+        for wanted in ["--memory=2g", filter.as_str(), "--cap-drop=ALL", "--security-opt=no-new-privileges", "--read-only"] {
+            assert!(args.iter().any(|a| a == wanted), "{wanted} manque dans {args:?}");
+        }
     }
 
     #[test]
@@ -322,6 +334,14 @@ mod tests {
             "kind = 'ssh'\nhost = 'vm'\nuser = 'a'\nremote_dir = '/tmp'",
             "kind = 'docker'\nimage = 'debian'\nmounts = [{ host = '/srv:/etc', container = '/data' }]",
             "kind = 'docker'\nimage = 'debian'\n[capabilities]\nmodels = ['main']",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nseccomp = 'unconfined'",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nseccomp = '/opt/profil.json --privileged'",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nseccomp = '/opt/../etc/profil.json'",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nseccomp = '/opt/profil'",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmemory = '2g --privileged'",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmemory = '0g'",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmemory = '2'",
+            "kind = 'ssh'\nhost = 'vm'\nuser = 'a'\nremote_dir = '/opt/t'\nmemory = '2g'",
             "kind = 'telnet'",
         ] {
             assert!(target(bad).is_err(), "aurait dû être refusé : {bad}");

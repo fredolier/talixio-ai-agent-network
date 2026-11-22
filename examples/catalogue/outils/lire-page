@@ -10,7 +10,10 @@
 //   - la page elle-même, et tout cadre : sur un site de la liste seulement (redirections comprises) ;
 //   - ce que la page charge pour se construire (scripts, styles, données) : en https, sur un nom
 //     public ; jamais une adresse chiffrée, un nom local, ni une adresse privée ;
-//   - ni image, ni police, ni média, ni téléchargement, ni connexion permanente ;
+//   - tout ce que le navigateur envoie, quel qu'en soit l'auteur (page, redirection, tâche de
+//     fond), sort par un mandataire tenu par ce script : https seulement, port 443, vers
+//     l'adresse publique qu'il a lui-même résolue et contrôlée ; rien vers cette machine ;
+//   - ni image, ni police, ni média, ni téléchargement, ni connexion permanente, ni WebRTC ;
 //   - rien n'est gardé d'une lecture à l'autre (profil neuf, jeté à la fin) ; 60 s au plus.
 // Le bac à sable de Chromium reste en place. Réglages de l'exploitant, facultatifs, dans
 // navigateur.conf à côté de ce script (clé = valeur) : modules, chromium, bac-a-sable.
@@ -19,6 +22,7 @@ const fs = require('fs');
 const path = require('path');
 const dns = require('dns').promises;
 const net = require('net');
+const http = require('http');
 
 const here = path.dirname(fs.realpathSync(__filename));
 const refuse = (why) => { process.stderr.write(`lire-page : ${why}\n`); process.exit(2); };
@@ -64,23 +68,47 @@ function inside(address) {
     return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 100 && b >= 64 && b < 128) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b < 32) || (a === 192 && b === 168) || (a === 192 && b === 0) || (a === 198 && (b === 18 || b === 19));
   }
   const low = address.toLowerCase();
-  return low === '::' || low === '::1' || /^f[cde]/.test(low) || low.startsWith('::ffff:') || low.startsWith('64:ff9b:');
+  return low === '::' || low === '::1' || /^f[cdef]/.test(low) || low.startsWith('::ffff:') || low.startsWith('64:ff9b:') || low.startsWith('2002:');
 }
 
 const judged = new Map();
-// Un nom public, en https : ni adresse chiffrée, ni nom local, ni nom qui mène à l'intérieur.
-function outside(target) {
-  if (target.protocol !== 'https:' || target.username || target.password || (target.port && target.port !== '443')) return Promise.resolve(false);
-  const host = target.hostname.toLowerCase();
-  if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(host) || !host.includes('.') || /^[0-9.]+$/.test(host)) return Promise.resolve(false);
-  if (/\.(local|localhost|internal|lan|home|corp|intranet)$/.test(host)) return Promise.resolve(false);
+// Les adresses publiques d'un nom, ou rien : ni adresse chiffrée, ni nom local, ni nom qui mène
+// à l'intérieur. Le résultat est gardé : c'est à ces adresses-là qu'on se connectera.
+function addresses(host) {
+  host = host.toLowerCase();
+  if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(host) || !host.includes('.') || /^[0-9.]+$/.test(host)) return Promise.resolve([]);
+  if (/\.(local|localhost|internal|lan|home|corp|intranet)$/.test(host)) return Promise.resolve([]);
   if (!judged.has(host)) {
-    judged.set(host, dns.lookup(host, { all: true }).then((found) => found.length > 0 && found.every((entry) => !inside(entry.address)), () => false));
+    judged.set(host, dns.lookup(host, { all: true }).then((found) => (found.length > 0 && found.every((entry) => !inside(entry.address)) ? found.map((entry) => entry.address) : []), () => []));
   }
   return judged.get(host);
 }
+// Un nom public, en https.
+async function outside(target) {
+  if (target.protocol !== 'https:' || target.username || target.password || (target.port && target.port !== '443')) return false;
+  return (await addresses(target.hostname)).length > 0;
+}
 
-const clean = (text) => text.replace(/[\u0000-\u0008\u000b-\u001f\u007f​-‏‪-‮⁠-⁩﻿]/g, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
+// Le mandataire : la seule sortie du navigateur. Il n'accepte que « CONNECT nom:443 », et se
+// connecte à l'adresse qu'il a contrôlée lui-même : ni redirection, ni tâche de fond, ni nom
+// qui change d'adresse ne mène ailleurs qu'à du https public.
+function gate() {
+  const server = http.createServer((request, response) => { response.writeHead(403); response.end(); });
+  server.on('connect', async (request, socket) => {
+    socket.on('error', () => {});
+    const found = /^([a-z0-9.-]+):443$/i.exec(request.url || '');
+    const list = found ? await addresses(found[1]) : [];
+    if (!list.length) return socket.end('HTTP/1.1 403 Forbidden\r\n\r\n');
+    const upstream = net.connect({ host: list[0], port: 443 });
+    upstream.on('error', () => socket.destroy());
+    upstream.once('connect', () => { socket.write('HTTP/1.1 200 Connection Established\r\n\r\n'); upstream.pipe(socket); socket.pipe(upstream); });
+    socket.on('close', () => upstream.destroy());
+  });
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
+}
+
+// ni caractère de commande, ni caractère invisible : ce texte est lu par un agent
+const clean = (text) => text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u00ad\u115f\u200b-\u200f\u2028-\u202e\u2060-\u2069\u3164\ufe00-\ufe0f\ufeff\u{E0000}-\u{E0FFF}]/gu, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
 
 async function main() {
   const { chromium } = driver();
@@ -97,17 +125,27 @@ async function main() {
     return undefined;
   };
   const executablePath = settings.chromium || posed() || ['/usr/bin/chromium-browser', '/usr/bin/chromium'].find((file) => fs.existsSync(file));
+  const door = await gate();
   const browser = await chromium.launch({
+    // « <-loopback> » : même les adresses de cette machine passent par le mandataire, qui les refuse
+    proxy: { server: `http://127.0.0.1:${door.address().port}`, bypass: '<-loopback>' },
     headless: true,
     executablePath,
     // le bac à sable de Chromium : ôté seulement si l'exploitant l'écrit, à ses risques
     chromiumSandbox: settings['bac-a-sable'] !== 'non',
-    args: ['--disable-dev-shm-usage', '--disable-gpu', '--disable-extensions', '--disable-background-networking', '--disable-sync', '--no-first-run', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp', '--disable-features=WebRtcHideLocalIpsWithMdns,PrivateNetworkAccessPermissionPrompt'],
-  }).catch(() => refuse('le navigateur ne démarre pas (dans Docker : lancez le conteneur avec docker/chromium-seccomp.json, comme le fait « ./tools.sh up navigateur »)'));
+    args: ['--disable-dev-shm-usage', '--disable-gpu', '--disable-extensions', '--disable-background-networking', '--disable-sync', '--no-first-run', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp', '--webrtc-ip-handling-policy=disable_non_proxied_udp', '--disable-quic'],
+  }).catch((error) => refuse(`le navigateur ne démarre pas : ${String(error && error.message || error).split('\n')[0].slice(0, 160)} (dans Docker : la cible doit donner seccomp = docker/chromium-seccomp.json)`));
   let away = '';
   try {
     const context = await browser.newContext({ acceptDownloads: false, serviceWorkers: 'block', permissions: [], javaScriptEnabled: true, locale: 'fr-FR' });
     if (context.routeWebSocket) await context.routeWebSocket(/.*/, (socket) => socket.close());
+    // ce dont une page n'a pas besoin pour montrer ses prix : ni fenêtre, ni tâche de fond partagée, ni pair à pair
+    await context.addInitScript(() => {
+      for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel', 'SharedWorker', 'WebTransport', 'WebSocket', 'EventSource']) {
+        try { Object.defineProperty(window, name, { value: undefined, configurable: false, writable: false }); } catch { /* déjà absent */ }
+      }
+      try { window.open = () => null; } catch { /* figé */ }
+    });
     await context.route('**/*', async (route) => {
       const request = route.request();
       let target;
@@ -116,7 +154,7 @@ async function main() {
       if (request.isNavigationRequest() || request.resourceType() === 'document') {
         if (target.protocol === 'about:') return route.continue();
         if (!allowed(target.hostname.toLowerCase()) || !(await outside(target))) {
-          if (request.frame() === page.mainFrame()) away = target.hostname.toLowerCase();
+          try { if (request.frame() === page.mainFrame()) away = target.hostname.toLowerCase(); } catch { /* une fenêtre que la page a voulu ouvrir : pas de cadre */ }
           return route.abort();
         }
         return route.continue();
@@ -137,11 +175,16 @@ async function main() {
       }
       refuse('lecture impossible');
     }
+    // où que le site ait mené (redirection, script), on ne rend que le texte d'une page de la liste
+    const landed = () => { try { const at = new URL(page.url()); return at.protocol === 'https:' && allowed(at.hostname.toLowerCase()); } catch { return false; } };
+    const elsewhere = () => { console.log('le site répond par une redirection vers un site hors de la liste'); };
+    if (!landed()) return elsewhere();
     const status = response ? response.status() : 0;
     if (status < 200 || status >= 300) refuse(`le site a répondu ${status}`);
     // le temps que la page se construise, sans attendre une page qui ne se tait jamais
     await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
     await page.waitForTimeout(1000);
+    if (!landed()) return elsewhere();
     // une ligne de tableau tient sur une ligne de texte : « modèle | prix d'entrée | prix de sortie »
     const read = () => {
       for (const row of document.querySelectorAll('tr')) {
@@ -161,6 +204,7 @@ async function main() {
     process.stdout.write(out.slice(0, 60000) + (out.length > 60000 ? '\n… [coupé à 60 000 caractères : redemandez avec un mot]\n' : '\n'));
   } finally {
     await browser.close().catch(() => {});
+    door.close();
   }
 }
 

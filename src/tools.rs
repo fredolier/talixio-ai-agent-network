@@ -839,7 +839,12 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value, resumed: Option<&str>) -> 
             if let Some(spawn) = &mut limit.spawn {
                 spawn.targets = vec!["local".into()];
             }
-            limit.check_grant(&caps)?;
+            // un refus sur un dossier ou une commande vient ici du plafond de la cible : le dire,
+            // avec ce qu'elle permet, pour que l'agent reprenne les règles telles qu'elles sont
+            limit.check_grant(&caps).map_err(|e| match e.strip_suffix("hors de vos propres droits") {
+                Some(what) if !what.starts_with("modèle") && !what.starts_with("mode de") => format!("{what}hors du plafond de la cible « {target_name} » ({}). Reprenez ses règles telles quelles, arguments compris.", target.describe()),
+                _ => e,
+            })?;
             Some(target.capabilities.clone())
         }
     };

@@ -18,7 +18,15 @@ text = "`lire-page` (exemple « catalogue ») : lit une page avec Chromium, pilo
 
 [[release.changes]]
 kind = "nouveau"
-text = "Image Docker avec navigateur : `./tools.sh up navigateur`. Chromium y garde son bac à sable, grâce à un filtre d'appels système livré avec le dépôt (`docker/chromium-seccomp.json`)."
+text = "Le navigateur n'est pas dans l'image du maître : l'agent qui lit le web est lancé dans son propre conteneur, jetable et fermé (`./tools.sh build navigateur`, puis une cible `docker` : voir `examples/catalogue/cible-navigateur.toml`). Chromium y garde son bac à sable, grâce à un filtre d'appels système livré avec le dépôt."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Cible `docker` : deux réglages de plus, `memory` et `seccomp` (le chemin d'un filtre d'appels système)."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Un droit refusé à la création d'un agent sur une cible dit maintenant que c'est le plafond de la cible, et ce qu'elle permet."
 
 [[release.changes]]
 kind = "amélioration"
@@ -26,7 +34,7 @@ text = "Exemple « catalogue » : chaque modèle est relevé « confirmé » (lu
 
 [[release.changes]]
 kind = "attention"
-text = "Un navigateur exécute les scripts des pages qu'il lit, dans le conteneur du maître : ne mettez dans la liste des sites que ceux que vous tenez pour sérieux. L'image ordinaire et l'image `claude` ne changent pas et n'ont pas de navigateur."
+text = "Lancer un agent dans un conteneur demande un maître qui peut appeler `docker` : installé sur la machine, pas lui-même dans un conteneur (ce cas reste à faire). Qui peut appeler `docker` est maître de la machine : préférez un Docker sans droits d'administrateur."
 
 [[release]]
 version = "0.14.1"

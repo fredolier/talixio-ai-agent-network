@@ -1,0 +1,44 @@
+# À ajouter au talixio.toml d'un maître qui peut lancer des conteneurs (maître installé sur la
+# machine : `talixio-agent service install`) : le collecteur tourne alors dans un conteneur
+# jetable et fermé, avec un navigateur, loin du maître et de ses clés.
+#
+# 1. Construire l'image des agents à navigateur :   ./tools.sh build navigateur
+# 2. Remplacer les trois chemins /chemin/vers/… ci-dessous par les vôtres (chemins absolus).
+# 3. Ajouter « navigateur » aux cibles permises :   [capabilities.spawn] targets = ["local", "navigateur"]
+# 4. Le maître doit être joignable depuis le conteneur :   listen = "0.0.0.0:7700"
+#
+# Ce que l'agent voit dans son conteneur : /outils (les scripts, en lecture seule) et /releves
+# (son dossier de travail). Rien d'autre de la machine. Le système du conteneur est en lecture
+# seule, sans aucune capacité ; Chromium y garde son bac à sable grâce au filtre `seccomp`.
+
+[targets.navigateur]
+kind = "docker"
+image = "talixio-navigateur"
+user = "65532:65532"
+memory = "2g"
+seccomp = "/chemin/vers/talixio-ai-agent-network/docker/chromium-seccomp.json"
+mounts = [
+  { host = "/chemin/vers/talixio-ai-agent-network/examples/catalogue/outils", container = "/outils" },
+  { host = "/chemin/vers/travail/catalogue/releves", container = "/releves", write = true },
+]
+
+# Le plafond des droits d'un agent lancé là : ses relevés, et les deux scripts de lecture.
+[targets.navigateur.capabilities]
+fs_read = ["/releves"]
+fs_write = ["/releves"]
+
+[[targets.navigateur.capabilities.exec]]
+program = "/outils/lire-web"
+args = ["*"]
+
+[[targets.navigateur.capabilities.exec]]
+program = "/outils/lire-web"
+args = ["*", "*"]
+
+[[targets.navigateur.capabilities.exec]]
+program = "/outils/lire-page"
+args = ["*"]
+
+[[targets.navigateur.capabilities.exec]]
+program = "/outils/lire-page"
+args = ["*", "*"]

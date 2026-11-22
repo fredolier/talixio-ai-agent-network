@@ -204,7 +204,7 @@ user = "1000"
     // au-delà du plafond de la cible : refusé
     api.say("escalade").await;
     api.wait_event("le refus hors plafond", |e| {
-        e["kind"] == "tool_error" && e["text"].as_str().unwrap().contains("hors de vos propres droits")
+        e["kind"] == "tool_error" && e["text"].as_str().unwrap().contains("hors du plafond de la cible")
     })
     .await;
     // une cible définie mais non accordée au maître : refusée

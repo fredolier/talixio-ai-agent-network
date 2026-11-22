@@ -464,17 +464,22 @@ Demandé le 2026-11-20. Rien n'est codé.
     Deux commandes de l'exécutable le servent : `catalog show` (le catalogue embarqué) et
     `catalog check <fichier>` (validité, et ce qui change), qui donne au vérificateur un critère
     mesurable. Le résultat reste une proposition : c'est une personne qui le copie dans le dépôt.
-35. **Le navigateur est une commande de plus, pas une fonction du maître** (demandé après la
-    première passe réelle, où aucune grille de prix officielle n'avait pu être lue). Le script
-    `lire-page` de l'exemple pilote Chromium par Playwright, avec les bornes de `lire-web` : la
-    page et ses cadres sur les sites de la liste, ce qu'elle charge sur des noms publics en
-    https, ni image ni téléchargement ni connexion permanente, profil jeté, 60 s. L'exécutable
-    ne change pas et ne dépend de rien : c'est une troisième image (`docker/Dockerfile.navigateur`,
-    posée sur celle de `claude`, `./tools.sh up navigateur`), lancée avec un filtre d'appels
-    système (`docker/chromium-seccomp.json`) qui est celui de Docker plus ce que le bac à sable
-    de Chromium demande. Limites : le navigateur exécute les scripts des pages, dans le même
-    conteneur que le maître, sous son compte ; un nom public qui change d'adresse entre le
-    contrôle et la connexion n'est pas arrêté ; un site peut refuser un navigateur piloté.
+35. **Le navigateur vit dans le conteneur de l'agent qui s'en sert, jamais à côté du maître**
+    (demandé après la première passe réelle, où aucune grille de prix officielle n'avait pu être
+    lue ; d'abord mis dans l'image du maître, puis retiré à la demande : « au lieu de polluer
+    celui du maître »). Le script `lire-page` de l'exemple pilote Chromium par Playwright, avec
+    les bornes de `lire-web` : la page et ses cadres sur les sites de la liste, ce qu'elle charge
+    sur des noms publics en https, ni image ni téléchargement ni connexion permanente, profil
+    jeté, 60 s. L'exécutable ne change pas et ne dépend de rien : l'image `talixio-navigateur`
+    (`docker/Dockerfile.navigateur`, `./tools.sh build navigateur`) ne contient que Chromium et
+    son pilote ; le maître y lance l'agent par une cible `docker` (décision 19), qui reçoit deux
+    réglages : `memory`, et `seccomp`, le chemin d'un filtre d'appels système
+    (`docker/chromium-seccomp.json` : celui de Docker plus ce que le bac à sable de Chromium
+    demande). Le navigateur exécute ainsi les scripts des pages dans un conteneur jetable, en
+    lecture seule, sans capacité, qui ne voit que ses scripts et son dossier de relevés.
+    Limites : ce conteneur garde le réseau (limite 8) ; un nom public qui change d'adresse entre
+    le contrôle et la connexion n'est pas arrêté ; un site peut refuser un navigateur piloté ;
+    un maître lui-même dans Docker ne peut pas encore lancer de conteneur (Q12).
 20. **Les notes de version ont une source unique**, `releases.toml`, embarquée dans l'exécutable.
     Chaque version y ajoute une entrée ; un test refuse une version sans note.
 
@@ -578,6 +583,7 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 | Q9 | Android (P4) : piloter depuis le téléphone, ou y faire tourner un agent ? | Piloter : l'interface web, installable comme application (PWA), suffit ; elle demande HTTPS et un maître joignable depuis le téléphone, donc l'étape 2. Agent sur le téléphone : Rust se compile pour Android, mais le système arrête les process d'arrière-plan et enferme chaque application ; à n'étudier que si un usage le demande. |
 | Q10 | Catalogue de fournisseurs et capacités image et voix (F1–F4). | Fait pour l'essentiel (décisions 25 et 26, v0.9.0 et v0.10.0 : on se connecte et on active depuis la page). Reste ouvert : comptage en argent (B4) ; mise à jour du catalogue depuis les fournisseurs ; essai chez de vrais fournisseurs. Notes de l'étude : Format de l'assistant relu (`src/ModelCatalog.php`, `Sovereign.php`, `Routing.php`, `Pricing.php`) : une table de fournisseurs (identifiant, nom, pays, niveau de confiance, adresse, mode de facturation) et une table de modèles (identifiant exact de l'API, fournisseur, nature `LLM`, `Vision`, `Voice`, `Image`, `Embedding`, prix par million de tokens ou par unité : minute, image). Usages liés à un modèle : `fast`, `standard`, `deep`, `voice`, `vision`, `embedding` ; effort et tokens de réflexion portés par le palier. À reprendre ici : `[providers.<nom>]` (adresse, type d'API, fichier de clé) et des modèles par nature, avec prix ; droits de la forme `fournisseur/modèle`. À savoir : l'assistant ne tient ni taille de contexte ni effort par modèle, ne compte que les tokens (minutes et images sont affichées, pas comptées), et n'appelle aucune API d'image ni de synthèse vocale : seules la transcription (`POST /audio/transcriptions`) et les embeddings existent. Image et synthèse sont donc à écrire, pas à reprendre. Côté maître, du code par nature : nouveaux messages du lien, tailles bornées autrement (un son ou une image pèse lourd), comptage en argent (B4), nouveaux outils chez l'agent. Nouvelle surface : revue de sécurité avant de coder. |
 | Q11 | Se connecter par abonnement (Claude Pro/Max, ChatGPT) plutôt que par clé d'API ? | **Tranchée (2026-11-21) : oui, par la commande officielle `claude` seulement (décision 32).** D'abord écartée (« pas de dépendances, un seul exécutable »), puis demandée : l'abonnement Max doit pouvoir servir. Talixio reste un exécutable seul ; `claude` est un programme externe facultatif. Pour mémoire : L'assistant le fait pour Claude seulement, en pilotant la commande officielle `claude` (`setup-token`, puis `claude -p` à chaque tour, les outils exposés en MCP). Ici, cela demande d'installer cette commande à côté du maître, qui ne serait plus un exécutable seul, et un connecteur d'une autre nature (la commande tient elle-même la boucle d'outils). Le jeton d'abonnement ne doit pas servir à appeler l'API directement : les conditions d'Anthropic réservent cet usage à ses propres outils. Rien d'équivalent chez OpenAI dans l'assistant. |
+| Q12 | Un maître lui-même dans Docker doit-il pouvoir lancer des agents dans d'autres conteneurs ? Comment ? | **Ouverte (2026-11-22), demandée.** Trois voies. (a) Montrer au maître le socket Docker de la machine : les agents deviennent des conteneurs voisins. Simple, mais qui prend le maître prend la machine en root, sauf avec un Docker sans droits d'administrateur (« rootless »), où il ne prend que son compte. (b) Docker dans Docker : demande un conteneur privilégié, donc pire que (a), pour une isolation moindre. (c) Maître installé sur la machine (`service install`) : marche aujourd'hui, essayé. Proposition : (a), en option explicite de `tools.sh`, en recommandant un Docker rootless. À faire pour (a) : l'exécutable de l'agent et les montages sont aujourd'hui des chemins de la machine, que le maître en conteneur ne connaît pas (exécutable à prendre dans une image, dossiers dans le volume du maître) ; un réseau Docker dédié pour le lien ; le socket dans les chemins interdits aux agents. Nouvelle surface : revue de sécurité avant livraison. |
 | Q11 | Répertoire des rôles (R1–R3). | Une table SQLite chez le maître. Écriture : à chaque `spawn_agent`, le rôle remonte par le lien, de parent en parent ; à chaque fin de mission, son résultat. Lecture : un outil `find_role` (recherche par mots, puis par embeddings quand F1 existera), dont la demande remonte au maître comme une demande de modèle. Sécurité, à trancher avant de coder : un rôle enregistré contient des instructions écrites par un agent, donc un texte qui peut avoir été empoisonné et que d'autres agents reliront. Il doit être présenté comme une donnée à évaluer, jamais comme une consigne ; ne jamais porter de droits (les droits restent accordés par le parent, dans la limite des siens) ; et un rôle « approuvé » par l'humain doit se distinguer d'un rôle seulement observé. Fuite : un agent d'une branche lit ce qu'une autre branche a écrit ; prévoir de quoi cloisonner. |
 
 ## 7. Sécurité
@@ -666,6 +672,26 @@ les seules options passées à `claude`, sans contrôle de ce qu'il fait réelle
 | K10 | Basse | Filtre des secrets de l'environnement sensible à la casse (Windows ne l'est pas). | ✅ Comparaison sans casse. Ce que `claude_env` laisse passer reste à la charge de l'exploitant (noté). |
 | K11 | Basse | `<état>/claude` pouvait être un lien symbolique posé avant le démarrage. | ✅ Refusé au démarrage. |
 | K12 | Basse | Une invite commençant par « / » pouvait être prise pour une commande de `claude`. | ✅ Jamais en tête d'invite (et `--disable-slash-commands`). |
+
+### Dixième passe (2026-11-22) : le navigateur des agents (`lire-page`, image, filtre d'appels système)
+
+Revue indépendante, avec un banc d'essai (serveur local, pages piégées). Deux constats hauts,
+vérifiés en les jouant : le contrôle des sites ne valait que pour le premier saut. Corrigés à la
+racine par un mandataire interne au script, seule sortie du navigateur.
+
+| N° | Gravité | Constat | Traitement |
+|---|---|---|---|
+| M1 | Haute | Les redirections 30x ne repassaient pas par le contrôle : un site de la liste qui redirige menait à n'importe quel site, et à tout service http joignable depuis la machine (métadonnées, réseau privé, ports locaux). | ✅ Tout le trafic de Chromium sort par un mandataire tenu par le script : `CONNECT nom:443` seulement, vers l'adresse publique qu'il a lui-même résolue et contrôlée ; cette machine comprise (`<-loopback>`). Et le texte n'est rendu que si la page d'arrivée est sur un site de la liste. |
+| M2 | Haute | Les tâches de fond (Worker, SharedWorker) échappaient au contrôle : WebSocket et http vers la machine. | ✅ Même mandataire (rien n'en sort) ; SharedWorker, WebSocket, WebTransport, EventSource retirés des pages. |
+| M3 | Moyenne | WebRTC sortait en UDP et révélait l'adresse locale (un drapeau faisait l'inverse de ce qu'il fallait). | ✅ Drapeau retiré, politique « rien hors mandataire », `RTCPeerConnection` retiré des pages. |
+| M4 | Moyenne | Chromium figé à une version de plus d'un an ; ni empreinte ni verrou des dépendances. | ✅ Version courante du pilote. 📌 À monter à chaque publication ; verrou et empreinte de l'image de base restent à faire. |
+| M5 | Moyenne | Le filtre ouvrait `clone`, `unshare`, `setns`, `chroot` à tout le conteneur du maître. | ✅ Le navigateur n'est plus dans le conteneur du maître : seul le conteneur jetable de l'agent reçoit ce filtre, sans `setns`. 📌 Créer des espaces de noms reste une surface noyau de plus, dans ce conteneur-là. |
+| M6 | Moyenne | Un nom public qui change d'adresse entre le contrôle et la connexion. | ✅ Le mandataire se connecte à l'adresse qu'il a contrôlée. |
+| M7 | Basse | Une fenêtre ouverte par la page faisait planter le script. | ✅ Cas rattrapé ; `window.open` retiré. |
+| M8 | Basse | La page d'erreur de Chromium rendue comme contenu, avec une adresse choisie par la page. | ✅ Hors d'un site de la liste, rien n'est rendu. |
+| M9 | Basse | Caractères invisibles laissés dans la sortie (C1, « étiquettes », séparateurs) ; `lire-web` ne filtrait rien. | ✅ Retirés dans les deux scripts. |
+| M10 | Basse | Les scripts tiers d'une page de la liste peuvent envoyer ce qu'ils voient (l'adresse lue) à tout nom public. | 📌 Limite, par nature d'un navigateur : l'agent qui lit le web n'a que ses relevés, ni clé ni catalogue. |
+| M11 | Info | `navigateur.conf` vaut exécution de code si le dossier des scripts est inscriptible par un agent. | 📌 Le dossier est monté en lecture seule dans le conteneur ; à tenir hors de portée ailleurs. |
 
 ### Neuvième passe (2026-11-22) : tâches planifiées, `make_dir`, `list_provider_models`, `catalog check`, exemple « catalogue »
 

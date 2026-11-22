@@ -59,6 +59,9 @@ case "$status" in
         exit 0 ;;
     *) refuse "le site a répondu $status" ;;
 esac
+# ce qui est rendu à l'agent : sans caractère de commande ni caractère invisible
+propre() { LC_ALL=C /bin/sed -e 's/[\x00-\x08\x0b-\x1f\x7f]//g' -e 's/\xc2[\x80-\x9f\xad]//g' -e 's/\xe2\x80[\x8b-\x8f\xa8-\xae]//g' -e 's/\xe2\x81[\xa0-\xa9]//g' -e 's/\xef\xbb\xbf//g' -e 's/\xf3\xa0[\x80-\xbf][\x80-\xbf]//g'; }
+{
 if [[ "$type" == *html* ]]; then
     # une page : sans scripts ni styles ni balises, lignes vides resserrées
     /bin/sed -e ':a;N;$!ba' -e 's/<script[^>]*>[^<]*\(<[^/][^<]*\)*<\/script>//g' -e 's/<style[^>]*>[^<]*<\/style>//g' -e 's/<!--[^-]*\(-[^-][^-]*\)*-->//g' "$tmp" \
@@ -70,3 +73,4 @@ elif [[ -n "$word" ]]; then
 else
     head -c 60000 "$tmp"
 fi
+} | propre
