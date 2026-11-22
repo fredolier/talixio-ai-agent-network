@@ -256,12 +256,31 @@ impl Store {
         rows.map(|rows| rows.flatten().filter_map(|text| serde_json::from_str(&text).ok()).collect()).unwrap_or_default()
     }
 
-    pub fn task_save(&self, task: &crate::schedule::Task) -> Result<(), String> {
+    /// Crée une tâche, si le plafond n'est pas atteint : compté et écrit d'un seul geste.
+    pub fn task_create(&self, task: &crate::schedule::Task, max: usize) -> Result<bool, String> {
         let text = serde_json::to_string(task).map_err(|e| e.to_string())?;
         let db = self.db.lock().unwrap();
-        db.execute("INSERT INTO tasks (id, task, created_ms) VALUES (?1, ?2, ?3) ON CONFLICT(id) DO UPDATE SET task = ?2", params![task.id, text, task.created_ms as i64])
-            .map(|_| ())
+        db.execute("INSERT INTO tasks (id, task, created_ms) SELECT ?1, ?2, ?3 WHERE (SELECT COUNT(*) FROM tasks) < ?4", params![task.id, text, task.created_ms as i64, max as i64])
+            .map(|rows| rows == 1)
             .map_err(err)
+    }
+
+    /// Réécrit une tâche qui existe encore ; `false` si elle a été supprimée entre-temps.
+    pub fn task_update(&self, task: &crate::schedule::Task) -> Result<bool, String> {
+        let text = serde_json::to_string(task).map_err(|e| e.to_string())?;
+        self.db.lock().unwrap().execute("UPDATE tasks SET task = ?2 WHERE id = ?1", params![task.id, text]).map(|rows| rows == 1).map_err(err)
+    }
+
+    /// Note un lancement sans toucher au reste : une modification faite au même moment n'est pas
+    /// écrasée, une tâche supprimée ne revient pas.
+    pub fn task_fired(&self, id: &str, last_run_ms: u64, next_run_ms: Option<u64>) -> Result<bool, String> {
+        let db = self.db.lock().unwrap();
+        match next_run_ms {
+            Some(next) => db.execute("UPDATE tasks SET task = json_set(task, '$.last_run_ms', ?2, '$.next_run_ms', ?3) WHERE id = ?1", params![id, last_run_ms as i64, next as i64]),
+            None => db.execute("UPDATE tasks SET task = json_set(task, '$.last_run_ms', ?2) WHERE id = ?1", params![id, last_run_ms as i64]),
+        }
+        .map(|rows| rows == 1)
+        .map_err(err)
     }
 
     pub fn task_delete(&self, id: &str) -> Result<(), String> {

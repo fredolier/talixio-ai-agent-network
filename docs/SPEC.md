@@ -656,6 +656,29 @@ les seules options passées à `claude`, sans contrôle de ce qu'il fait réelle
 | K11 | Basse | `<état>/claude` pouvait être un lien symbolique posé avant le démarrage. | ✅ Refusé au démarrage. |
 | K12 | Basse | Une invite commençant par « / » pouvait être prise pour une commande de `claude`. | ✅ Jamais en tête d'invite (et `--disable-slash-commands`). |
 
+### Neuvième passe (2026-11-22) : tâches planifiées, `make_dir`, `list_provider_models`, `catalog check`, exemple « catalogue »
+
+Revue indépendante de la v0.14.0. Aucun constat haut : aucun outil d'agent ne touche aux tâches,
+les routes sont derrière le jeton de l'interface, `make_dir` repasse par les contrôles d'écriture
+à chaque niveau, la clé d'un fournisseur ne sort pas de `list_provider_models`.
+
+| N° | Gravité | Constat | Traitement |
+|---|---|---|---|
+| L1 | Moyenne | `catalog check` ne disait rien d'un fournisseur connu dont l'adresse ou les hôtes changent : un agent pouvait proposer un catalogue qui envoie une clé ailleurs, avec un contrôle « valide ». | ✅ Tout changement de `endpoint`, `hosts`, `apis`, `keys_url`, OAuth ou `keyless` est dit en tête (« ATTENTION ») ; fournisseurs ajoutés montrés avec leur adresse ; modèles modifiés dits champ par champ. Le catalogue n'est de toute façon jamais chargé à chaud : c'est une personne qui le copie au dépôt. |
+| L2 | Moyenne | Le rendu Markdown du dialogue pouvait boucler sans fin sur une ligne qu'aucun bloc ne prenait (titre indenté) : onglet figé par une réponse du modèle. | ✅ Le rendu avance toujours d'une ligne ; titres indentés reconnus. |
+| L3 | Moyenne | `lire-web` laissait passer les plages de curl (`[1-3]`) : plusieurs adresses en un appel. | ✅ `--globoff`, crochets refusés. |
+| L4 | Basse | `lire-web` : champs de `-w` décalés par un type de contenu à espace, pages jamais nettoyées. | ✅ Champs séparés par tabulation, lus sur la dernière ligne ; scripts, styles et commentaires retirés. |
+| L5 | Basse | La sortie de `catalog check` reprenait des chaînes du fichier candidat sans les nettoyer. | ✅ Chaque élément nettoyé et borné à 200 caractères ; erreurs bornées. |
+| L6 | Basse | Un lancement réécrivait toute la tâche : une modification simultanée était perdue, une tâche supprimée revenait ; plafond de 32 compté puis écrit en deux temps. | ✅ Un lancement n'écrit que ses deux dates, et rien si la tâche n'existe plus ; création comptée et écrite d'un seul geste. |
+| L7 | Basse | Une modification sans `enabled` ni `tz_offset_min` réactivait la tâche et remettait son fuseau à UTC. | ✅ Un champ absent garde sa valeur. |
+| L8 | Basse | `lire-web` : la taille gardée dépendait de curl seul ; l'adresse résolue n'est pas contrôlée. | ✅ Coupe à 3 Mo quoi que fasse curl. 📌 Limite : pas de contrôle de l'adresse résolue ; la liste des sites est tenue par l'exploitant, et ne doit porter que des sites publics. |
+| L9 | Basse | Une redirection était rendue avec sa cible, texte choisi par le site. | ✅ La cible n'est dite que si elle reste dans la liste des sites. |
+| L10 | Basse | `catalog check` : comparaisons quadratiques, pas de borne de taille. | ✅ Tables d'index, 1 Mo au plus. |
+| L11 | Basse | `list_provider_models` rend du texte choisi par le fournisseur. | 📌 Limite : champs choisis, nettoyés et bornés (500 lignes, 80 000 octets), rendus comme résultat d'outil, donc comme une donnée ; le fournisseur est déjà celui à qui le maître confie sa clé. |
+| L12 | Info | `make_dir` : chemin vérifié après le premier regard sur le disque ; un dossier créé puis refusé restait. | ✅ Chemin vérifié d'abord ; le dossier refusé est retiré. |
+| L13 | Info | Une tâche planifiée survit au changement du jeton de l'interface. | 📌 Limite notée : qui a eu le jeton a pu laisser une consigne ; la page « Tâches » les montre toutes, à relire après un changement de jeton. |
+| L14 | Info | `TALIXIO_TOOLS` avec « : » dans le chemin changeait le montage ; l'exemple exige l'image `claude` sans le dire. | ✅ Chemin refusé ; dit dans l'exemple. |
+
 ### Première passe (2026-11-20) : constats et traitement
 
 Audit complet du code, des connexions et du cloisonnement. Conclusion de l'auditeur : l'invariant

@@ -84,6 +84,8 @@ run() {
     fi
     if [ -n "${TALIXIO_TOOLS:-}" ]; then
         [ -d "$TALIXIO_TOOLS" ] || die "dossier d'outils introuvable : $TALIXIO_TOOLS"
+        # « : » sépare les champs d'un montage : un chemin qui en porte monterait autre chose
+        case "$(cd "$TALIXIO_TOOLS" && pwd)" in *:*) die "dossier d'outils refusé : « : » dans son chemin" ;; esac
         # en lecture seule : un agent ne doit pas pouvoir réécrire ce qu'il a le droit de lancer
         config+=(-v "$(cd "$TALIXIO_TOOLS" && pwd):/outils:ro")
     fi

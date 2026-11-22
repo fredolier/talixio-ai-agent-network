@@ -382,6 +382,8 @@ fn write_checked(caps: &Capabilities, denied: &[PathBuf], asked: &Path, content:
 /// vérifié avant d'être créé (dans un dossier où l'agent écrit, jamais à travers un lien), puis
 /// revérifié une fois là.
 fn make_dir_checked(caps: &Capabilities, denied: &[PathBuf], asked: &Path) -> Result<String, String> {
+    // absolu et sans « .. », avant de regarder quoi que ce soit sur le disque
+    crate::policy::check_plain_path(asked)?;
     let mut missing = Vec::new();
     let mut at = asked;
     while at.symlink_metadata().is_err() {
@@ -399,7 +401,9 @@ fn make_dir_checked(caps: &Capabilities, denied: &[PathBuf], asked: &Path) -> Re
         let real = caps.resolve_write(dir, denied)?;
         std::fs::create_dir(&real).map_err(|e| format!("{} : {e}", real.display()))?;
         // ce qui vient d'être créé est bien là où on l'a voulu
-        if caps.resolve_write(dir, denied)? != real {
+        if caps.resolve_write(dir, denied).ok().as_ref() != Some(&real) {
+            // rien ne reste de ce qui a été créé au mauvais endroit (vide, donc sans perte)
+            let _ = std::fs::remove_dir(&real);
             return Err("création refusée : le chemin a changé pendant l'opération".into());
         }
     }

@@ -80,7 +80,7 @@ pub fn valid_target_name(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
-fn check_plain_path(path: &Path) -> Result<(), String> {
+pub(crate) fn check_plain_path(path: &Path) -> Result<(), String> {
     if !path.is_absolute() {
         return Err(format!("chemin non absolu : {}", path.display()));
     }

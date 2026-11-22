@@ -177,24 +177,104 @@ fn coherent(catalog: &Catalog) -> Result<(), String> {
 /// Vérifie un catalogue candidat sans le charger, et dit ce qu'il change par rapport à celui de
 /// cet exécutable. C'est le contrôle à passer avant de le proposer au dépôt.
 pub fn audit(text: &str) -> Result<String, String> {
-    let candidate: Catalog = toml::from_str(text).map_err(|e| format!("catalogue illisible : {e}"))?;
-    check(&candidate)?;
-    coherent(&candidate)?;
+    use std::collections::HashMap;
+    // un catalogue tient en quelques dizaines de milliers d'octets : au-delà, ce n'en est pas un
+    if text.len() > 1_000_000 {
+        return Err("catalogue trop gros (1 Mo au plus)".into());
+    }
+    let candidate: Catalog = toml::from_str(text).map_err(|e| format!("catalogue illisible : {}", crate::clean(&e.to_string(), 600, true)))?;
+    check(&candidate).map_err(|e| crate::clean(&e, 600, true))?;
+    coherent(&candidate).map_err(|e| crate::clean(&e, 600, true))?;
     let current: Catalog = toml::from_str(SOURCE).map_err(|e| e.to_string())?;
+    // ce qui sort d'ici est lu par un agent, puis par une personne : rien de ce que le fichier
+    // candidat porte n'y passe sans être nettoyé et borné
+    let said = |text: &str| crate::clean(text, 200, false);
     let key = |m: &Model| format!("{} / {}", m.provider, m.id);
-    let mut lines = vec![format!("catalogue valide : {} fournisseurs, {} modèles", candidate.provider.len(), candidate.model.len())];
+    let old_providers: HashMap<&str, &Provider> = current.provider.iter().map(|p| (p.id.as_str(), p)).collect();
+    let new_providers: HashMap<&str, &Provider> = candidate.provider.iter().map(|p| (p.id.as_str(), p)).collect();
+    let old_models: HashMap<String, &Model> = current.model.iter().map(|m| (key(m), m)).collect();
+    let new_models: HashMap<String, &Model> = candidate.model.iter().map(|m| (key(m), m)).collect();
+
+    // là où part une clé, et par quelle porte : un changement ici se dit en tête
+    let mut routes = Vec::new();
+    let mut touched = Vec::new();
+    for p in &candidate.provider {
+        let Some(old) = old_providers.get(p.id.as_str()) else { continue };
+        let mut fields = Vec::new();
+        if old.endpoint != p.endpoint {
+            fields.push(format!("endpoint « {} » → « {} »", said(&old.endpoint), said(&p.endpoint)));
+        }
+        if old.hosts != p.hosts {
+            fields.push(format!("hosts {} → {}", said(&old.hosts.join(", ")), said(&p.hosts.join(", "))));
+        }
+        if old.apis != p.apis {
+            fields.push(format!("apis {} → {}", said(&old.apis.join(", ")), said(&p.apis.join(", "))));
+        }
+        if old.keys_url != p.keys_url {
+            fields.push(format!("keys_url « {} » → « {} »", said(&old.keys_url), said(&p.keys_url)));
+        }
+        if (&old.oauth_authorize, &old.oauth_exchange) != (&p.oauth_authorize, &p.oauth_exchange) {
+            fields.push("adresses OAuth".to_string());
+        }
+        if old.keyless != p.keyless {
+            fields.push(format!("keyless {} → {}", old.keyless, p.keyless));
+        }
+        if !fields.is_empty() {
+            routes.push(format!("{} : {}", said(&p.id), fields.join(" ; ")));
+        } else if format!("{old:?}") != format!("{p:?}") {
+            touched.push(said(&p.id));
+        }
+    }
+    let mut prices = Vec::new();
+    let mut changed = Vec::new();
+    for m in &candidate.model {
+        let Some(old) = old_models.get(&key(m)) else { continue };
+        if format!("{old:?}") == format!("{m:?}") {
+            continue;
+        }
+        let mut what = Vec::new();
+        if (old.price_in, old.price_out, old.unit_price) != (m.price_in, m.price_out, m.unit_price) {
+            prices.push(said(&key(m)));
+            what.push("prix");
+        }
+        if old.rank != m.rank {
+            what.push("rank");
+        }
+        if (&old.nature, old.speech) != (&m.nature, m.speech) {
+            what.push("nature");
+        }
+        if old.name != m.name {
+            what.push("nom");
+        }
+        // le reste (soon, estimated, deprecated, contexte…) : dit sans détail
+        let other = { let mut a = (*old).clone(); a.price_in = m.price_in; a.price_out = m.price_out; a.unit_price = m.unit_price; a.rank = m.rank; a.nature = m.nature.clone(); a.speech = m.speech; a.name = m.name.clone(); format!("{a:?}") != format!("{m:?}") };
+        if other {
+            what.push("autres champs");
+        }
+        if what != ["prix"] {
+            changed.push(format!("{} ({})", said(&key(m)), what.join(", ")));
+        }
+    }
+
+    let mut lines = Vec::new();
+    if !routes.is_empty() {
+        lines.push("ATTENTION : l'adresse ou la porte d'un fournisseur change (c'est là que part sa clé) — à relire par une personne :".to_string());
+        lines.extend(routes.iter().map(|item| format!("  {item}")));
+    }
+    lines.push(format!("catalogue valide : {} fournisseurs, {} modèles", candidate.provider.len(), candidate.model.len()));
     let mut list = |title: &str, items: Vec<String>| {
         if !items.is_empty() {
             lines.push(format!("{title} ({}) :", items.len()));
             lines.extend(items.into_iter().map(|item| format!("  {item}")));
         }
     };
-    list("fournisseurs ajoutés", candidate.provider.iter().filter(|p| !current.provider.iter().any(|c| c.id == p.id)).map(|p| p.id.clone()).collect());
-    list("fournisseurs retirés", current.provider.iter().filter(|p| !candidate.provider.iter().any(|c| c.id == p.id)).map(|p| p.id.clone()).collect());
-    list("modèles ajoutés", candidate.model.iter().filter(|m| !current.model.iter().any(|c| key(c) == key(m))).map(key).collect());
-    list("modèles retirés", current.model.iter().filter(|m| !candidate.model.iter().any(|c| key(c) == key(m))).map(key).collect());
-    let moved = |m: &Model| current.model.iter().find(|c| key(c) == key(m) && c.nature == m.nature && c.speech == m.speech).filter(|c| (c.price_in, c.price_out, c.unit_price) != (m.price_in, m.price_out, m.unit_price)).map(|_| key(m));
-    list("prix modifiés", candidate.model.iter().filter_map(moved).collect());
+    list("fournisseurs ajoutés (adresse et hôtes à relire)", candidate.provider.iter().filter(|p| !old_providers.contains_key(p.id.as_str())).map(|p| format!("{} : endpoint « {} », hosts {}", said(&p.id), said(&p.endpoint), said(&p.hosts.join(", ")))).collect());
+    list("fournisseurs retirés", current.provider.iter().filter(|p| !new_providers.contains_key(p.id.as_str())).map(|p| said(&p.id)).collect());
+    list("fournisseurs modifiés (fiche)", touched);
+    list("modèles ajoutés", candidate.model.iter().filter(|m| !old_models.contains_key(&key(m))).map(|m| said(&key(m))).collect());
+    list("modèles retirés", current.model.iter().filter(|m| !new_models.contains_key(&key(m))).map(|m| said(&key(m))).collect());
+    list("prix modifiés", prices);
+    list("modèles modifiés", changed);
     Ok(lines.join("\n"))
 }
 
@@ -381,6 +461,19 @@ mod tests {
         assert!(audit(&added).unwrap().contains("modèles ajoutés (1) :\n  mistral / neuf-1"));
         assert!(audit(&added.replace("provider = \"mistral\"\nnature = \"LLM\"\nrank = 5", "provider = \"inconnu\"\nnature = \"LLM\"\nrank = 5")).unwrap_err().contains("fournisseur « inconnu » inconnu"));
         assert!(audit(&added.replace("rank = 5\n", "rank = 11\n")).is_err());
+        // un fournisseur connu dont l'adresse change : dit en tête, c'est là que part sa clé
+        let mistral = provider("mistral").unwrap();
+        let moved = SOURCE.replace(&format!("endpoint = \"{}\"", mistral.endpoint), "endpoint = \"https://ailleurs.example/v1\"").replace(&format!("\"{}\"", mistral.hosts[0]), "\"ailleurs.example\"");
+        let report = audit(&moved).unwrap();
+        assert!(report.starts_with("ATTENTION") && report.contains("mistral : endpoint") && report.contains("ailleurs.example"), "{report}");
+        // un modèle dont autre chose que le prix change est dit aussi
+        let first = &catalog.model[0];
+        let ranked = audit(&SOURCE.replacen(&format!("rank = {}\n", first.rank), &format!("rank = {}\n", if first.rank > 1 { first.rank - 1 } else { 2 }), 1)).unwrap();
+        assert!(ranked.contains("modèles modifiés (1) :") && ranked.contains("(rank)"), "{ranked}");
+        // ce que le fichier porte ne sort pas tel quel : ni caractère de contrôle, ni texte sans fin
+        let odd = audit(&added.replace("id = \"neuf-1\"", &format!("id = \"neuf\\u001b[31m{}\"", "x".repeat(900))));
+        assert!(odd.as_ref().map_or_else(|e| !e.contains('\u{1b}') && e.len() < 2_000, |r| !r.contains('\u{1b}') && r.lines().all(|l| l.chars().count() < 300)), "{odd:?}");
+        assert!(audit(&format!("{SOURCE}\n#{}", "x".repeat(1_000_000))).unwrap_err().contains("trop gros"));
         assert!(audit(&format!("{added}{}", added.rsplit_once("\n[[model]]").map(|(_, m)| format!("\n[[model]]{m}")).unwrap())).unwrap_err().contains("déclaré deux fois"));
     }
 

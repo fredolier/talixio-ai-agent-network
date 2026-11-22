@@ -106,7 +106,8 @@ pub fn parse(body: &Value, known: Option<&Task>, now_ms: u64) -> Result<Task, St
         _ => return Err("rythme inconnu : hours, daily ou weekly".into()),
     };
     when.check()?;
-    let tz_offset_min = body["tz_offset_min"].as_i64().unwrap_or(0);
+    // un champ absent d'une modification garde sa valeur : ni fuseau remis à UTC, ni tâche réactivée
+    let tz_offset_min = body["tz_offset_min"].as_i64().unwrap_or(known.map(|t| t.tz_offset_min as i64).unwrap_or(0));
     if !(-14 * 60..=14 * 60).contains(&tz_offset_min) {
         return Err("fuseau horaire invalide".into());
     }
@@ -117,7 +118,7 @@ pub fn parse(body: &Value, known: Option<&Task>, now_ms: u64) -> Result<Task, St
         text: text.to_string(),
         when,
         tz_offset_min,
-        enabled: body["enabled"].as_bool().unwrap_or(true),
+        enabled: body["enabled"].as_bool().unwrap_or(known.map(|t| t.enabled).unwrap_or(true)),
         next_run_ms: when.next_after(now_ms, tz_offset_min),
         last_run_ms: known.and_then(|t| t.last_run_ms),
         created_ms: known.map(|t| t.created_ms).unwrap_or(now_ms),
@@ -129,11 +130,10 @@ pub fn list(node: &Node) -> Value {
 }
 
 pub fn create(node: &Node, body: &Value) -> Result<Value, String> {
-    if node.store.tasks().len() >= MAX_TASKS {
+    let task = parse(body, None, crate::now_ms())?;
+    if !node.store.task_create(&task, MAX_TASKS)? {
         return Err(format!("pas plus de {MAX_TASKS} tâches planifiées"));
     }
-    let task = parse(body, None, crate::now_ms())?;
-    node.store.task_save(&task)?;
     node.emit("status", format!("tâche planifiée créée depuis l'interface : « {} »", task.name));
     Ok(json!(task))
 }
@@ -141,7 +141,9 @@ pub fn create(node: &Node, body: &Value) -> Result<Value, String> {
 pub fn update(node: &Node, id: &str, body: &Value) -> Result<Value, String> {
     let known = node.store.tasks().into_iter().find(|t| t.id == id).ok_or("tâche inconnue")?;
     let task = parse(body, Some(&known), crate::now_ms())?;
-    node.store.task_save(&task)?;
+    if !node.store.task_update(&task)? {
+        return Err("tâche inconnue".into());
+    }
     node.emit("status", format!("tâche planifiée modifiée depuis l'interface : « {} »", task.name));
     Ok(json!(task))
 }
@@ -166,7 +168,10 @@ fn fire(node: &Node, task: &mut Task, now_ms: u64, scheduled: bool) -> Result<()
         task.next_run_ms = task.when.next_after(now_ms, task.tz_offset_min);
     }
     // l'échéance est avancée avant l'envoi : une base qui n'écrit plus ne fait pas partir la tâche en boucle
-    node.store.task_save(task)?;
+    // et seules ces deux dates sont écrites : une tâche supprimée entre-temps ne part pas
+    if !node.store.task_fired(&task.id, now_ms, scheduled.then_some(task.next_run_ms))? {
+        return Err("tâche supprimée entre-temps".into());
+    }
     let _ = node.inbox.send(Input::Task { name: task.name.clone(), text: task.text.clone() });
     Ok(())
 }
@@ -234,6 +239,9 @@ mod tests {
         assert!(!odd.name.contains('»') && !odd.name.contains('«'));
         let known = Task { last_run_ms: Some(5), created_ms: 1, ..task.clone() };
         let changed = parse(&json!({ "name": "Autre", "text": "t", "kind": "daily", "time": "08:15", "enabled": false }), Some(&known), SUNDAY).unwrap();
-        assert_eq!((changed.id, changed.last_run_ms, changed.created_ms, changed.enabled), (task.id, Some(5), 1, false));
+        assert_eq!((changed.id.clone(), changed.last_run_ms, changed.created_ms, changed.enabled), (task.id, Some(5), 1, false));
+        // un champ que la modification ne donne pas garde sa valeur : fuseau, et tâche en pause
+        let partial = parse(&json!({ "name": "Autre", "text": "t", "kind": "daily", "time": "08:15" }), Some(&changed), SUNDAY).unwrap();
+        assert_eq!((partial.enabled, partial.tz_offset_min), (false, 60));
     }
 }

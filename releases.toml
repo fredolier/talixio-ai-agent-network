@@ -7,6 +7,28 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.14.1"
+date = "2026-11-22"
+title = "Revue de sécurité des tâches planifiées et de l'exemple « catalogue »"
+summary = "Aucun constat haut ; trois moyens et neuf mineurs traités, deux limites notées."
+
+[[release.changes]]
+kind = "sécurité"
+text = "`catalog check` dit en tête tout changement de l'adresse ou des hôtes d'un fournisseur (c'est là que part sa clé), et tout modèle modifié ; sa sortie est nettoyée et bornée."
+
+[[release.changes]]
+kind = "sécurité"
+text = "`lire-web` (exemple « catalogue ») : plus de plages d'adresses, taille coupée à 3 Mo quoi qu'il arrive, redirection dite seulement vers un site permis, pages mieux nettoyées."
+
+[[release.changes]]
+kind = "correction"
+text = "Dialogue : une réponse du modèle avec un titre indenté pouvait figer l'onglet."
+
+[[release.changes]]
+kind = "correction"
+text = "Tâches planifiées : modifier une tâche en pause ne la réactive plus et garde son fuseau ; un lancement ne peut plus écraser une modification ni faire revenir une tâche supprimée."
+
+[[release]]
 version = "0.14.0"
 date = "2026-11-22"
 title = "Tâches planifiées, et un premier vrai travail d'équipe"

@@ -1,6 +1,7 @@
 # Exemple « catalogue » : une équipe d'agents tient à jour la liste des fournisseurs et des modèles.
 # Pour l'image Docker avec `claude` :
 #   TALIXIO_CONFIG=examples/catalogue/talixio.toml TALIXIO_TOOLS=examples/catalogue/outils ./tools.sh up claude
+# Il faut l'image avec `claude` : l'image ordinaire est vide, sans bash ni curl pour `lire-web`.
 # Voir examples/catalogue/README.md.
 
 name = "maître"

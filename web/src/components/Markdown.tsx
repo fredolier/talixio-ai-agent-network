@@ -48,7 +48,7 @@ export function Markdown({ text }: { text: string }) {
       )
       continue
     }
-    const heading = line.match(/^(#{1,6})\s+(.*)$/)
+    const heading = line.match(/^\s{0,3}(#{1,6})\s+(.*)$/)
     if (heading) {
       const big = heading[1].length <= 2
       out.push(
@@ -106,6 +106,8 @@ export function Markdown({ text }: { text: string }) {
     while (i < lines.length && lines[i].trim() && !/^\s*(```|~~~|#{1,6}\s|>)/.test(lines[i]) && !(paragraph.length && bullet.test(lines[i]))) {
       paragraph.push(lines[i++])
     }
+    // quoi qu'il arrive, on avance : une ligne qu'aucun bloc ne prend est un paragraphe
+    if (!paragraph.length) paragraph.push(lines[i++])
     out.push(
       <p key={key()} className="whitespace-pre-wrap">
         {inline(paragraph.join('\n'))}
