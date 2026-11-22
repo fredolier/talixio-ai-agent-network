@@ -468,7 +468,8 @@ mod tests {
         assert!(report.starts_with("ATTENTION") && report.contains("mistral : endpoint") && report.contains("ailleurs.example"), "{report}");
         // un modèle dont autre chose que le prix change est dit aussi
         let first = &catalog.model[0];
-        let ranked = audit(&SOURCE.replacen(&format!("rank = {}\n", first.rank), &format!("rank = {}\n", if first.rank > 1 { first.rank - 1 } else { 2 }), 1)).unwrap();
+        // (sous Windows, le fichier peut être extrait avec des fins de ligne « \r\n »)
+        let ranked = audit(&SOURCE.replace("\r\n", "\n").replacen(&format!("rank = {}\n", first.rank), &format!("rank = {}\n", if first.rank > 1 { first.rank - 1 } else { 2 }), 1)).unwrap();
         assert!(ranked.contains("modèles modifiés (1) :") && ranked.contains("(rank)"), "{ranked}");
         // ce que le fichier porte ne sort pas tel quel : ni caractère de contrôle, ni texte sans fin
         let odd = audit(&added.replace("id = \"neuf-1\"", &format!("id = \"neuf\\u001b[31m{}\"", "x".repeat(900))));

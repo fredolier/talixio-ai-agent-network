@@ -1,7 +1,8 @@
 # Exemple « catalogue » : une équipe d'agents tient à jour la liste des fournisseurs et des modèles.
 # Pour l'image Docker avec `claude` :
-#   TALIXIO_CONFIG=examples/catalogue/talixio.toml TALIXIO_TOOLS=examples/catalogue/outils ./tools.sh up claude
-# Il faut l'image avec `claude` : l'image ordinaire est vide, sans bash ni curl pour `lire-web`.
+#   TALIXIO_CONFIG=examples/catalogue/talixio.toml TALIXIO_TOOLS=examples/catalogue/outils ./tools.sh up navigateur
+# Il faut l'image avec navigateur : `lire-web` demande bash et curl, `lire-page` Chromium et Node.
+# (Avec l'image `claude`, sans navigateur, `lire-page` répond qu'il ne trouve pas Playwright.)
 # Voir examples/catalogue/README.md.
 
 name = "maître"
@@ -28,6 +29,15 @@ args = ["*"]
 # La même, en ne gardant d'une grande liste que les éléments qui portent un mot.
 [[capabilities.exec]]
 program = "/outils/lire-web"
+args = ["*", "*"]
+
+# Les pages qui se construisent par leurs scripts (grilles de prix) : un vrai navigateur, mêmes sites.
+[[capabilities.exec]]
+program = "/outils/lire-page"
+args = ["*"]
+
+[[capabilities.exec]]
+program = "/outils/lire-page"
 args = ["*", "*"]
 
 # Le catalogue de cet exécutable, et le contrôle d'un catalogue candidat.

@@ -464,6 +464,17 @@ Demandé le 2026-11-20. Rien n'est codé.
     Deux commandes de l'exécutable le servent : `catalog show` (le catalogue embarqué) et
     `catalog check <fichier>` (validité, et ce qui change), qui donne au vérificateur un critère
     mesurable. Le résultat reste une proposition : c'est une personne qui le copie dans le dépôt.
+35. **Le navigateur est une commande de plus, pas une fonction du maître** (demandé après la
+    première passe réelle, où aucune grille de prix officielle n'avait pu être lue). Le script
+    `lire-page` de l'exemple pilote Chromium par Playwright, avec les bornes de `lire-web` : la
+    page et ses cadres sur les sites de la liste, ce qu'elle charge sur des noms publics en
+    https, ni image ni téléchargement ni connexion permanente, profil jeté, 60 s. L'exécutable
+    ne change pas et ne dépend de rien : c'est une troisième image (`docker/Dockerfile.navigateur`,
+    posée sur celle de `claude`, `./tools.sh up navigateur`), lancée avec un filtre d'appels
+    système (`docker/chromium-seccomp.json`) qui est celui de Docker plus ce que le bac à sable
+    de Chromium demande. Limites : le navigateur exécute les scripts des pages, dans le même
+    conteneur que le maître, sous son compte ; un nom public qui change d'adresse entre le
+    contrôle et la connexion n'est pas arrêté ; un site peut refuser un navigateur piloté.
 20. **Les notes de version ont une source unique**, `releases.toml`, embarquée dans l'exécutable.
     Chaque version y ajoute une entrée ; un test refuse une version sans note.
 

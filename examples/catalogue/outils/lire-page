@@ -1,0 +1,169 @@
+#!/usr/bin/env node
+// Lit une page du web avec un vrai navigateur (Chromium, piloté par Playwright), pour les pages
+// que `lire-web` rend vides : celles qui se construisent par leurs scripts (grilles de prix).
+// Mêmes bornes : une adresse https, sur un site de la liste (sites.txt, à côté de ce script).
+//
+//   lire-page https://exemple.fr/prix          le texte de la page, tel qu'une personne le lit
+//   lire-page https://exemple.fr/prix mot      seulement les lignes qui portent « mot », et leurs voisines
+//
+// Ce que le navigateur a le droit de faire pendant la lecture :
+//   - la page elle-même, et tout cadre : sur un site de la liste seulement (redirections comprises) ;
+//   - ce que la page charge pour se construire (scripts, styles, données) : en https, sur un nom
+//     public ; jamais une adresse chiffrée, un nom local, ni une adresse privée ;
+//   - ni image, ni police, ni média, ni téléchargement, ni connexion permanente ;
+//   - rien n'est gardé d'une lecture à l'autre (profil neuf, jeté à la fin) ; 60 s au plus.
+// Le bac à sable de Chromium reste en place. Réglages de l'exploitant, facultatifs, dans
+// navigateur.conf à côté de ce script (clé = valeur) : modules, chromium, bac-a-sable.
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const dns = require('dns').promises;
+const net = require('net');
+
+const here = path.dirname(fs.realpathSync(__filename));
+const refuse = (why) => { process.stderr.write(`lire-page : ${why}\n`); process.exit(2); };
+
+const args = process.argv.slice(2);
+if (args.length < 1 || args.length > 2) refuse('une adresse, et au plus un mot à chercher');
+const [url, word = ''] = args;
+if (word && !/^[A-Za-z0-9._/:-]{2,60}$/.test(word)) refuse('mot refusé (lettres, chiffres, . _ / : -)');
+const shape = /^https:\/\/([a-z0-9]([a-z0-9.-]*[a-z0-9])?)(\/[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]*)?$/.exec(url);
+if (!shape) refuse('adresse refusée (https, sans compte ni port)');
+if (!shape[1].includes('.') || shape[1].includes('..')) refuse('nom de machine refusé');
+
+let sites;
+try {
+  sites = fs.readFileSync(path.join(here, 'sites.txt'), 'utf8').split('\n').map((line) => line.replace(/#.*/, '').replace(/\s/g, '')).filter(Boolean);
+} catch { refuse('liste des sites introuvable'); }
+// « exemple.fr » vaut pour lui seul ; « .exemple.fr » pour ses sous-domaines aussi
+const allowed = (host) => sites.some((site) => host === site || (site.startsWith('.') && (host.endsWith(site) || host === site.slice(1))));
+if (!allowed(shape[1])) refuse(`${shape[1]} n'est pas dans la liste des sites permis`);
+
+const settings = {};
+try {
+  for (const line of fs.readFileSync(path.join(here, 'navigateur.conf'), 'utf8').split('\n')) {
+    const found = /^\s*([a-z-]+)\s*=\s*(.*?)\s*$/.exec(line.replace(/#.*/, ''));
+    if (found) settings[found[1]] = found[2];
+  }
+} catch { /* pas de réglages : les valeurs ordinaires */ }
+
+function driver() {
+  const roots = [settings.modules, '/usr/local/lib/node_modules', '/usr/lib/node_modules'].filter(Boolean);
+  for (const name of ['playwright-core', 'playwright']) {
+    for (const root of [null, ...roots]) {
+      try { return require(root ? path.join(root, name) : name); } catch { /* le suivant */ }
+    }
+  }
+  refuse('Playwright introuvable : installez playwright-core, ou donnez « modules = … » dans navigateur.conf');
+}
+
+// Une adresse où le navigateur n'a rien à faire : cette machine, un réseau privé, un lien local.
+function inside(address) {
+  if (net.isIPv4(address)) {
+    const [a, b] = address.split('.').map(Number);
+    return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 100 && b >= 64 && b < 128) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b < 32) || (a === 192 && b === 168) || (a === 192 && b === 0) || (a === 198 && (b === 18 || b === 19));
+  }
+  const low = address.toLowerCase();
+  return low === '::' || low === '::1' || /^f[cde]/.test(low) || low.startsWith('::ffff:') || low.startsWith('64:ff9b:');
+}
+
+const judged = new Map();
+// Un nom public, en https : ni adresse chiffrée, ni nom local, ni nom qui mène à l'intérieur.
+function outside(target) {
+  if (target.protocol !== 'https:' || target.username || target.password || (target.port && target.port !== '443')) return Promise.resolve(false);
+  const host = target.hostname.toLowerCase();
+  if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(host) || !host.includes('.') || /^[0-9.]+$/.test(host)) return Promise.resolve(false);
+  if (/\.(local|localhost|internal|lan|home|corp|intranet)$/.test(host)) return Promise.resolve(false);
+  if (!judged.has(host)) {
+    judged.set(host, dns.lookup(host, { all: true }).then((found) => found.length > 0 && found.every((entry) => !inside(entry.address)), () => false));
+  }
+  return judged.get(host);
+}
+
+const clean = (text) => text.replace(/[\u0000-\u0008\u000b-\u001f\u007f​-‏‪-‮⁠-⁩﻿]/g, '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n');
+
+async function main() {
+  const { chromium } = driver();
+  // le Chromium de l'exploitant, sinon celui que Playwright a posé dans l'image, sinon celui du système
+  const posed = () => {
+    try {
+      for (const dir of fs.readdirSync('/opt/pw-browsers').sort().reverse()) {
+        for (const tail of ['chrome-headless-shell-linux64/chrome-headless-shell', 'chrome-linux64/chrome', 'chrome-linux/chrome', 'chrome-linux/headless_shell']) {
+          const file = path.join('/opt/pw-browsers', dir, tail);
+          if (/^chromium/.test(dir) && fs.existsSync(file)) return file;
+        }
+      }
+    } catch { /* pas de navigateur posé là */ }
+    return undefined;
+  };
+  const executablePath = settings.chromium || posed() || ['/usr/bin/chromium-browser', '/usr/bin/chromium'].find((file) => fs.existsSync(file));
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath,
+    // le bac à sable de Chromium : ôté seulement si l'exploitant l'écrit, à ses risques
+    chromiumSandbox: settings['bac-a-sable'] !== 'non',
+    args: ['--disable-dev-shm-usage', '--disable-gpu', '--disable-extensions', '--disable-background-networking', '--disable-sync', '--no-first-run', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp', '--disable-features=WebRtcHideLocalIpsWithMdns,PrivateNetworkAccessPermissionPrompt'],
+  }).catch(() => refuse('le navigateur ne démarre pas (dans Docker : lancez le conteneur avec docker/chromium-seccomp.json, comme le fait « ./tools.sh up navigateur »)'));
+  let away = '';
+  try {
+    const context = await browser.newContext({ acceptDownloads: false, serviceWorkers: 'block', permissions: [], javaScriptEnabled: true, locale: 'fr-FR' });
+    if (context.routeWebSocket) await context.routeWebSocket(/.*/, (socket) => socket.close());
+    await context.route('**/*', async (route) => {
+      const request = route.request();
+      let target;
+      try { target = new URL(request.url()); } catch { return route.abort(); }
+      // la page et ses cadres : un site de la liste, rien d'autre, où que mène une redirection
+      if (request.isNavigationRequest() || request.resourceType() === 'document') {
+        if (target.protocol === 'about:') return route.continue();
+        if (!allowed(target.hostname.toLowerCase()) || !(await outside(target))) {
+          if (request.frame() === page.mainFrame()) away = target.hostname.toLowerCase();
+          return route.abort();
+        }
+        return route.continue();
+      }
+      if (!['script', 'stylesheet', 'xhr', 'fetch'].includes(request.resourceType())) return route.abort();
+      return (await outside(target)) ? route.continue() : route.abort();
+    });
+    const page = await context.newPage();
+    page.on('dialog', (dialog) => dialog.dismiss().catch(() => {}));
+    page.on('popup', (popup) => popup.close().catch(() => {}));
+    let response;
+    try {
+      response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    } catch (error) {
+      if (away) {
+        console.log(allowed(away) ? `le site répond par une redirection vers ${away}` : 'le site répond par une redirection vers un site hors de la liste');
+        return;
+      }
+      refuse('lecture impossible');
+    }
+    const status = response ? response.status() : 0;
+    if (status < 200 || status >= 300) refuse(`le site a répondu ${status}`);
+    // le temps que la page se construise, sans attendre une page qui ne se tait jamais
+    await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {});
+    await page.waitForTimeout(1000);
+    // une ligne de tableau tient sur une ligne de texte : « modèle | prix d'entrée | prix de sortie »
+    const read = () => {
+      for (const row of document.querySelectorAll('tr')) {
+        const cells = [...row.cells].map((cell) => cell.innerText.replace(/\s+/g, ' ').trim());
+        row.replaceChildren(document.createTextNode(cells.join(' | ')));
+      }
+      return document.body ? document.body.innerText : '';
+    };
+    const text = clean(await page.evaluate(read).catch(() => '')).slice(0, 2000000);
+    let out = text;
+    if (word) {
+      const lines = text.split('\n');
+      const keep = new Set();
+      lines.forEach((line, i) => { if (line.toLowerCase().includes(word.toLowerCase())) for (let k = i - 2; k <= i + 8; k++) keep.add(k); });
+      out = lines.filter((_, i) => keep.has(i)).join('\n');
+    }
+    process.stdout.write(out.slice(0, 60000) + (out.length > 60000 ? '\n… [coupé à 60 000 caractères : redemandez avec un mot]\n' : '\n'));
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+
+// quoi qu'il arrive, la lecture ne dure pas
+setTimeout(() => refuse('lecture trop longue (60 s)'), 60000).unref();
+main().then(() => process.exit(0), (error) => refuse(`lecture impossible (${String(error && error.message || error).split('\n')[0].slice(0, 200)})`));

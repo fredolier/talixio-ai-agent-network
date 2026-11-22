@@ -7,6 +7,28 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.15.0"
+date = "2026-11-22"
+title = "Un vrai navigateur pour les agents"
+summary = "Les agents lisent les pages que seul un navigateur affiche, comme les grilles de prix des fournisseurs, avec les mêmes bornes que pour le reste du web."
+
+[[release.changes]]
+kind = "nouveau"
+text = "`lire-page` (exemple « catalogue ») : lit une page avec Chromium, piloté par Playwright. La page reste sur les sites de la liste ; ce qu'elle charge vient de noms publics en https ; ni image, ni téléchargement ; rien n'est gardé d'une lecture à l'autre. Les tableaux sont rendus une ligne par rangée."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Image Docker avec navigateur : `./tools.sh up navigateur`. Chromium y garde son bac à sable, grâce à un filtre d'appels système livré avec le dépôt (`docker/chromium-seccomp.json`)."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Exemple « catalogue » : chaque modèle est relevé « confirmé » (lu chez le fournisseur lui-même) ou « non confirmé », et le compte rendu donne le compte par fournisseur."
+
+[[release.changes]]
+kind = "attention"
+text = "Un navigateur exécute les scripts des pages qu'il lit, dans le conteneur du maître : ne mettez dans la liste des sites que ceux que vous tenez pour sérieux. L'image ordinaire et l'image `claude` ne changent pas et n'ont pas de navigateur."
+
+[[release]]
 version = "0.14.1"
 date = "2026-11-22"
 title = "Revue de sécurité des tâches planifiées et de l'exemple « catalogue »"

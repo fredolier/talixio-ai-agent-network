@@ -45,7 +45,7 @@ tmp="$(mktemp)"; meta="$(mktemp)"; trap 'rm -f "$tmp" "$meta"' EXIT
     | head -c 3000000 > "$tmp"
 # curl peut se plaindre avant (sortie coupée à 3 Mo) : la ligne de -w est la dernière
 IFS=$'\t' read -r status type redirect < <(tail -n 1 "$meta") || true
-[[ "${status:-}" =~ ^[0-9]{3}$ ]] || refuse "lecture impossible"
+[[ "${status:-}" =~ ^[0-9]{3}$ && "$status" != 000 ]] || refuse "lecture impossible"
 case "$status" in
     2??) ;;
     3??)

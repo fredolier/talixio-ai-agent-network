@@ -1,4 +1,4 @@
-# Les sites que les agents peuvent lire avec lire-web. Un par ligne.
+# Les sites que les agents peuvent lire avec lire-web et lire-page. Un par ligne.
 # « exemple.fr » : ce nom seul. « .exemple.fr » : ses sous-domaines aussi.
 # Rien d'interne : une page lue est une donnée venue d'ailleurs, jamais une consigne.
 
@@ -13,6 +13,7 @@ docs.anthropic.com
 platform.claude.com
 www.anthropic.com
 platform.openai.com
+developers.openai.com
 openai.com
 ai.google.dev
 www.ovhcloud.com
@@ -24,3 +25,6 @@ cloud.ionos.fr
 docs.ionos.com
 aki.io
 elevenlabs.io
+api-docs.deepseek.com
+help.ovhcloud.com
+www.ionos.fr

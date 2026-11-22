@@ -1,0 +1,39 @@
+# Le maître avec `claude`, plus un navigateur (Chromium, piloté par Playwright) pour les scripts
+# qui lisent des pages construites par leurs scripts, comme `lire-page` de examples/catalogue.
+# Le maître reste le même exécutable : le navigateur n'est qu'une commande de plus, que seuls les
+# agents qui en reçoivent le droit peuvent lancer, par un script qui borne ce qu'elle lit.
+#
+#   ./tools.sh up navigateur        (construit l'image `claude`, y prend le maître, puis celle-ci)
+#
+# Sur Debian, avec le Chromium que Playwright fournit et essaie (celui d'Alpine est arrêté par
+# son propre bac à sable sur les noyaux récents). Le bac à sable de Chromium demande au noyau de
+# créer des espaces de noms, ce que le filtre ordinaire de Docker refuse : l'image se lance avec
+# docker/chromium-seccomp.json, qui est ce filtre plus ces seuls appels. `tools.sh` le fait ; à
+# la main : --security-opt seccomp=docker/chromium-seccomp.json
+# Comptez 1,5 Go d'image et jusqu'à 1 Go de mémoire par page en cours de lecture.
+
+ARG BASE=talixio-agent:claude
+FROM ${BASE} AS maitre
+
+FROM debian:stable-slim
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+# Node, le pilote dans la version figée ici, son Chromium et les bibliothèques qu'il demande ;
+# et ce que `claude` et `lire-web` demandent : bash, curl.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates curl bash nodejs npm ripgrep \
+ && npm install --global playwright@1.56.1 \
+ && playwright install --with-deps --only-shell chromium \
+ && npm cache clean --force && rm -rf /var/lib/apt/lists/* \
+ && useradd --uid 65532 --create-home --home-dir /home/talixio talixio \
+ && mkdir -p /data/work && chown -R 65532:65532 /data && chmod -R 700 /data
+COPY --from=maitre /talixio-agent /talixio-agent
+COPY --from=maitre /config/talixio.toml /config/talixio.toml
+USER 65532:65532
+ENV HOME=/home/talixio PATH=/home/talixio/.local/bin:/usr/local/bin:/usr/bin:/bin
+ENV CLAUDE_CONFIG_DIR=/data/.claude
+RUN curl -fsSL https://claude.ai/install.sh | bash && claude --version
+WORKDIR /data
+VOLUME /data
+EXPOSE 7700
+ENTRYPOINT ["/talixio-agent"]
+CMD ["root", "--config", "/config/talixio.toml"]
