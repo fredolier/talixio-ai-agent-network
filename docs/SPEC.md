@@ -624,9 +624,11 @@ Demandé le 2026-11-20. Rien n'est codé.
       `docs/SPEC.md`, `PLAN.md`, `EXIGENCES.md`, `VERIFICATION.md` ni `CLAUDE.md` : leur condensé
       est `docs/DESIGN.md` (anglais : architecture, modèle de sécurité, décisions, bilan des
       revues, API, limites), à tenir à jour avec le code. `scripts/publier-main.sh` pose sur
-      `main` le même arbre moins ces fichiers. **Reste** : ces documents sont encore dans
-      l'historique de `main` (commits d'avant 0.22.0). Les en retirer demande de réécrire
-      `main` (poussée forcée), refusée par le garde-fou sans accord explicite du propriétaire.
+      `main` le même arbre moins ces fichiers. L'historique de `main` a été
+      réécrit avec l'accord du propriétaire (2026-11-22) : il repart d'un commit sans passé, et
+      ces documents n'y figurent plus. Les anciens commits restent atteignables par la branche
+      de travail, qui les contient : elle doit rester privée ou être supprimée avant d'ouvrir
+      le dépôt.
     - *Anglais.* `README.md` (le français reste dans `README.fr.md`), `CONTRIBUTING.md`,
       `SECURITY.md`, `docs/DESIGN.md`. Le code Rust garde pour l'instant ses commentaires et ses
       messages en français (journal, erreurs de l'API, ligne de commande, écran des paquets,
