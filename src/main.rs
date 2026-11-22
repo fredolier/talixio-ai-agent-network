@@ -49,6 +49,11 @@ enum Command {
     /// Usage interne : le pont d'outils que la commande `claude` lance et qui rappelle le maître.
     #[command(hide = true)]
     McpBridge,
+    /// Vérifie un fichier de catalogue (fournisseurs et modèles) et dit ce qu'il change.
+    Catalog {
+        #[command(subcommand)]
+        action: CatalogAction,
+    },
     /// Affiche les notes de version de cet exécutable.
     Releases {
         /// Seulement la dernière version.
@@ -69,6 +74,14 @@ enum Command {
         #[command(flatten)]
         remote: Remote,
     },
+}
+
+#[derive(Subcommand)]
+enum CatalogAction {
+    /// Vérifie le fichier sans rien charger, et le compare au catalogue de cet exécutable.
+    Check { file: PathBuf },
+    /// Affiche le catalogue de cet exécutable, au format du fichier.
+    Show,
 }
 
 #[derive(Subcommand)]
@@ -129,6 +142,15 @@ async fn main() -> Result<()> {
         Command::Service { action } => service(action),
         Command::Child { state_dir, log_file } => run_child(state_dir, log_file).await,
         Command::McpBridge => talixio_agent::model::cli::run_bridge().await,
+        Command::Catalog { action: CatalogAction::Check { file } } => {
+            let text = std::fs::read_to_string(&file).with_context(|| format!("lecture de {}", file.display()))?;
+            println!("{}", talixio_agent::catalog::audit(&text).map_err(anyhow::Error::msg)?);
+            Ok(())
+        }
+        Command::Catalog { action: CatalogAction::Show } => {
+            print!("{}", talixio_agent::catalog::SOURCE);
+            Ok(())
+        }
         Command::Releases { last } => {
             use std::io::IsTerminal;
             let mut releases = talixio_agent::releases::all();
@@ -353,6 +375,7 @@ async fn run_root(config: &Path) -> Result<()> {
     tokio::spawn(spawn::keep_logs_small(node.state_dir.join("logs"), node.log_max_bytes));
     tokio::spawn(print_activity(node.clone()));
     tokio::spawn(agent::run_agent(node.clone(), inbox));
+    tokio::spawn(talixio_agent::schedule::run(node.clone()));
     // les agents permanents reviennent, avec leur mémoire et des droits revérifiés
     tokio::spawn({
         let node = node.clone();

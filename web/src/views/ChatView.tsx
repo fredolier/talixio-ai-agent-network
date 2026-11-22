@@ -9,6 +9,8 @@ import type { Cluster } from '@/lib/store'
 import { cn } from '@/lib/utils'
 
 const MINE = "de l'utilisateur : "
+// une tâche planifiée : votre consigne, écrite d'avance
+const TASK = /^de la tâche planifiée « ([^»]*) » : /
 
 export function ChatView({ cluster }: { cluster: Cluster }) {
   const [text, setText] = useState('')
@@ -19,7 +21,7 @@ export function ChatView({ cluster }: { cluster: Cluster }) {
     (e) =>
       e.agent_id === cluster.tree.id &&
       (e.kind === 'message' ||
-        (e.kind === 'input' && e.text.startsWith(MINE)) ||
+        (e.kind === 'input' && (e.text.startsWith(MINE) || TASK.test(e.text))) ||
         // une erreur du maître se dit ici aussi : sans cela, une question resterait sans réponse ni raison.
         // Celles des appels de ses enfants restent au journal.
         (e.kind === 'error' && (!e.text.startsWith('appel du modèle') || e.text.includes(cluster.tree.id)))),
@@ -55,14 +57,15 @@ export function ChatView({ cluster }: { cluster: Cluster }) {
         {lines.map((event) => {
           const mine = event.kind === 'input'
           const failed = event.kind === 'error'
+          const task = mine ? event.text.match(TASK) : null
           return (
             <div key={event.id} className={cn('flex max-w-[min(680px,90%)] flex-col gap-1', mine && 'self-end items-end')}>
-              <span className="eyebrow">{mine ? 'vous' : cluster.tree.name} · {hour(event.ts_ms)}</span>
+              <span className="eyebrow">{mine ? (task ? `tâche planifiée · ${task[1]}` : 'vous') : cluster.tree.name} · {hour(event.ts_ms)}</span>
               <div
                 className={cn('rounded-lg border px-3.5 py-2.5', mine ? 'border-primary bg-primary text-primary-foreground' : failed ? 'border-destructive/40 bg-destructive/5 text-destructive' : 'bg-card')}
                 role={failed ? 'alert' : undefined}
               >
-                {mine || failed ? <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{mine ? event.text.slice(MINE.length) : event.text}</p> : <Markdown text={event.text} />}
+                {mine || failed ? <p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{mine ? event.text.slice(task ? task[0].length : MINE.length) : event.text}</p> : <Markdown text={event.text} />}
               </div>
             </div>
           )

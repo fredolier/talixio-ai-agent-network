@@ -7,6 +7,28 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.14.0"
+date = "2026-11-22"
+title = "Tâches planifiées, et un premier vrai travail d'équipe"
+summary = "Le maître lance seul un travail régulier, et un exemple complet montre une équipe d'agents qui tient à jour le catalogue des modèles."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Tâches planifiées : une consigne écrite d'avance, que le maître reçoit chaque jour, chaque semaine ou toutes les N heures. La page « Tâches » les montre toutes, avec la prochaine et la dernière fois, et permet de les créer, modifier, lancer tout de suite, suspendre et supprimer. Une tâche ne donne aucun droit de plus au maître, et les agents ne peuvent pas en créer."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Exemple « catalogue » (`examples/catalogue`) : un collecteur qui lit le web, un rédacteur et un vérificateur, chacun avec son modèle et ses seuls droits, tiennent à jour la liste des fournisseurs et des modèles. Tout est de la configuration : commandes autorisées, script qui borne le web à une liste de sites, consigne à planifier."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Trois outils : `make_dir` (créer un dossier là où l'agent a le droit d'écrire), `list_provider_models` (le maître demande à un fournisseur connecté la liste de ses modèles, avec sa clé, qui ne sort pas), et les commandes `talixio-agent catalog show` et `catalog check <fichier>`."
+
+[[release.changes]]
+kind = "amélioration"
+text = "`tools.sh` : `TALIXIO_TOOLS` monte un dossier de scripts en lecture seule sur `/outils`, pour donner des commandes aux agents sans reconstruire l'image."
+
+[[release]]
 version = "0.13.3"
 date = "2026-11-21"
 title = "Un parent attend ses enfants"

@@ -283,20 +283,73 @@ fn client() -> Result<reqwest::Client, String> {
 /// Essaie la clé chez le fournisseur, en listant ses modèles. `Ok(true)` : acceptée ;
 /// `Ok(false)` : le fournisseur ne dit ni oui ni non (pas de liste à cette adresse).
 async fn verify(provider: &Provider, key: &str) -> Result<bool, String> {
-    let base = provider.endpoint.trim_end_matches('/');
-    let api = provider.apis.iter().map(String::as_str).find(|a| matches!(*a, "anthropic" | "openai" | "elevenlabs")).unwrap_or("openai");
-    let request = match api {
-        "anthropic" => client()?.get(format!("{base}/v1/models")).header("x-api-key", key).header("anthropic-version", "2023-06-01"),
-        "elevenlabs" => client()?.get(format!("{base}/v1/models")).header("xi-api-key", key),
-        _ if key.is_empty() => client()?.get(format!("{base}/models")),
-        _ => client()?.get(format!("{base}/models")).bearer_auth(key),
-    };
-    let response = request.send().await.map_err(|e| format!("{} est injoignable : {}", provider.name, e.without_url()))?;
+    let response = models_request(provider, key)?.send().await.map_err(|e| format!("{} est injoignable : {}", provider.name, e.without_url()))?;
     match response.status().as_u16() {
         200..=299 => Ok(true),
         401 | 403 => Err(format!("{} refuse cette clé", provider.name)),
         _ => Ok(false),
     }
+}
+
+/// La demande « quels modèles servez-vous ? », à l'adresse du catalogue, avec la clé du maître.
+fn models_request(provider: &Provider, key: &str) -> Result<reqwest::RequestBuilder, String> {
+    let base = provider.endpoint.trim_end_matches('/');
+    let api = provider.apis.iter().map(String::as_str).find(|a| matches!(*a, "anthropic" | "openai" | "elevenlabs")).unwrap_or("openai");
+    Ok(match api {
+        "anthropic" => client()?.get(format!("{base}/v1/models")).header("x-api-key", key).header("anthropic-version", "2023-06-01"),
+        "elevenlabs" => client()?.get(format!("{base}/v1/models")).header("xi-api-key", key),
+        _ if key.is_empty() => client()?.get(format!("{base}/models")),
+        _ => client()?.get(format!("{base}/models")).bearer_auth(key),
+    })
+}
+
+/// Pour le maître : les modèles qu'un fournisseur connecté sert aujourd'hui, tels qu'il les
+/// annonce. Sans fournisseur : la liste de ceux qui sont connectés. La clé reste chez le maître ;
+/// ce que le fournisseur répond est une donnée, rendue en clair et bornée.
+pub async fn listing(node: &Node, id: &str) -> Result<String, String> {
+    let saved = load(&node.state_dir);
+    if id.is_empty() {
+        let connected: Vec<&str> = saved.providers.iter().map(String::as_str).collect();
+        return Ok(if connected.is_empty() { "aucun fournisseur connecté depuis l'interface".into() } else { format!("fournisseurs connectés : {}", connected.join(", ")) });
+    }
+    let provider = known(id)?;
+    if !saved.providers.contains(&provider.id) {
+        return Err(format!("{} n'est pas connecté : cela se fait dans l'interface, page « Fournisseurs »", provider.name));
+    }
+    if provider.cli() || provider.endpoint.is_empty() {
+        return Err(format!("{} n'annonce pas ses modèles par une adresse", provider.name));
+    }
+    let path = key_file(&node.state_dir, &provider.id);
+    let key = if path.exists() { std::fs::read_to_string(&path).map_err(|e| hidden(format!("{} : {e}", path.display())))? } else { String::new() };
+    let mut response = models_request(provider, key.trim())?.send().await.map_err(|e| format!("{} est injoignable : {}", provider.name, e.without_url()))?;
+    if !response.status().is_success() {
+        return Err(format!("{} a répondu {} à la demande de liste", provider.name, response.status().as_u16()));
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|e| format!("réponse interrompue : {}", e.without_url()))? {
+        body.extend_from_slice(&chunk);
+        if body.len() > 4 << 20 {
+            return Err("liste trop volumineuse".into());
+        }
+    }
+    let parsed: Value = serde_json::from_slice(&body).map_err(|_| "la réponse du fournisseur n'est pas du JSON".to_string())?;
+    let items = [&parsed["data"], &parsed["models"], &parsed].into_iter().find_map(Value::as_array).ok_or("réponse sans liste de modèles")?;
+    // ce qui décrit un modèle, pas le reste (permissions, liens, textes libres)
+    const KEPT: [&str; 14] = ["id", "name", "display_name", "owned_by", "created", "created_at", "type", "context_length", "context_window", "max_tokens", "pricing", "architecture", "capabilities", "deprecation"];
+    let mut out = format!("{} annonce {} modèle(s). Une ligne JSON par modèle :\n", provider.name, items.len());
+    for item in items.iter().take(500) {
+        let line = match item {
+            Value::Object(fields) => Value::Object(fields.iter().filter(|(k, _)| KEPT.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect()).to_string(),
+            other => other.to_string(),
+        };
+        out.push_str(&crate::clean(&line, 600, false));
+        out.push('\n');
+        if out.len() > 80_000 {
+            out.push_str("… [liste tronquée]\n");
+            break;
+        }
+    }
+    Ok(out)
 }
 
 fn store_key(node: &Node, provider: &Provider, key: &str) -> Result<(), String> {

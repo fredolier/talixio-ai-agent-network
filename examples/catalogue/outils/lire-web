@@ -1,0 +1,58 @@
+#!/bin/bash
+# Lit une page du web pour un agent, et rien d'autre : une adresse https, sur un site de la
+# liste (sites.txt, à côté de ce script), sans suivre de redirection, taille et durée bornées.
+# L'agent n'a pas `curl` : il n'a que ce script. Posez ce dossier hors de portée des agents
+# (dans Docker : monté en lecture seule sur /outils).
+#
+#   lire-web https://exemple.fr/prix          le contenu, balises retirées si c'est une page
+#   lire-web https://exemple.fr/api.json      tel quel si c'est du JSON
+#   lire-web https://exemple.fr/api.json mot  seulement les éléments qui contiennent « mot »
+#                                             (pour une grande liste : un élément par ligne)
+set -uo pipefail
+url="${1:-}"
+sites="$(dirname "$(readlink -f "$0")")/sites.txt"
+
+refuse() { echo "lire-web : $*" >&2; exit 2; }
+
+[[ $# -eq 1 || $# -eq 2 ]] || refuse "une adresse, et au plus un mot à chercher"
+word="${2:-}"
+[[ -z "$word" || "$word" =~ ^[A-Za-z0-9._/:-]{2,60}$ ]] || refuse "mot refusé (lettres, chiffres, . _ / : -)"
+# https seulement, un nom de machine simple, ni compte, ni port, ni caractère douteux
+[[ "$url" =~ ^https://([a-z0-9]([a-z0-9.-]*[a-z0-9])?)(/[][A-Za-z0-9._~:/?#@!\$\&\'()*+,\;=%-]*)?$ ]] || refuse "adresse refusée (https, sans compte ni port)"
+host="${BASH_REMATCH[1]}"
+[[ "$host" == *.* && "$host" != *..* ]] || refuse "nom de machine refusé"
+[[ -r "$sites" ]] || refuse "liste des sites introuvable"
+
+allowed=no
+while IFS= read -r line; do
+    site="${line%%#*}"; site="${site//[[:space:]]/}"
+    [[ -n "$site" ]] || continue
+    # « exemple.fr » vaut pour lui seul ; « .exemple.fr » pour ses sous-domaines aussi
+    if [[ "$host" == "$site" ]] || { [[ "$site" == .* ]] && [[ "$host" == *"$site" || "$host" == "${site#.}" ]]; }; then
+        allowed=yes; break
+    fi
+done < "$sites"
+[[ "$allowed" == yes ]] || refuse "$host n'est pas dans la liste des sites permis"
+
+tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
+# ni fichier de réglages, ni redirection suivie, ni autre protocole ; 3 Mo et 40 s au plus
+code="$(/usr/bin/curl -q --silent --show-error --proto '=https' --max-redirs 0 --max-time 40 --max-filesize 3000000 \
+    --compressed -A 'talixio-agent (lecture de catalogue)' -o "$tmp" -w '%{http_code} %{redirect_url} %{content_type}' -- "$url")" || refuse "lecture impossible"
+read -r status redirect type <<< "$code"
+case "$status" in
+    2??) ;;
+    3??) echo "redirection vers : ${redirect:-inconnue} (relancez lire-web avec cette adresse si le site est permis)"; exit 0 ;;
+    *) refuse "le site a répondu $status" ;;
+esac
+head -c 3000000 "$tmp" > "$tmp.b" && mv "$tmp.b" "$tmp"
+if [[ "$type" == *html* ]]; then
+    # une page : sans scripts ni styles ni balises, lignes vides resserrées
+    /bin/sed -e ':a;N;$!ba' -e 's/<script[^>]*>[^<]*\(<[^/][^<]*\)*<\/script>//g' "$tmp" \
+        | /bin/sed -e 's/<style[^>]*>.*<\/style>//g' -e 's/<[^>]*>/ /g' -e 's/&nbsp;/ /g' -e 's/&amp;/\&/g' -e 's/[[:space:]]\{2,\}/ /g' \
+        | /bin/sed -e '/^[[:space:]]*$/d' | head -c 60000
+elif [[ -n "$word" ]]; then
+    # une grande liste : un élément par ligne, et seulement ceux qui portent le mot
+    /bin/sed -e 's/},[[:space:]]*\([{"]\)/},\n\1/g' "$tmp" | /bin/grep -i -F -- "$word" | head -c 60000
+else
+    head -c 60000 "$tmp"
+fi

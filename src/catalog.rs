@@ -11,7 +11,8 @@ use serde_json::{json, Value};
 
 use crate::model::ModelInfo;
 
-const SOURCE: &str = include_str!("../catalog.toml");
+/// Le catalogue embarqué, tel qu'il est dans le dépôt.
+pub const SOURCE: &str = include_str!("../catalog.toml");
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -125,6 +126,76 @@ fn check(catalog: &Catalog) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Ce que tout catalogue doit respecter pour être servi tel quel : valeurs connues, modèles
+/// rattachés à un fournisseur, rien en double.
+fn coherent(catalog: &Catalog) -> Result<(), String> {
+    for p in &catalog.provider {
+        if !matches!(p.trust.as_str(), "1" | "2" | "3" | "4" | "5" | "L") {
+            return Err(format!("fournisseur « {} » : confiance « {} » inconnue (1 à 5, ou L)", p.id, crate::clean(&p.trust, 20, false)));
+        }
+        if let Some(api) = p.apis.iter().find(|a| !matches!(a.as_str(), "anthropic" | "openai" | "elevenlabs" | "timesfm" | "systemone" | "claude-code")) {
+            return Err(format!("fournisseur « {} » : famille d'API « {} » inconnue", p.id, crate::clean(api, 30, false)));
+        }
+        // sans machine connue, rien ne peut s'y rattacher : permis seulement pour ce qu'on ne sait pas appeler
+        if p.hosts.is_empty() && !p.apis.is_empty() {
+            return Err(format!("fournisseur « {} » : `hosts` manque", p.id));
+        }
+        // « européen » veut dire souverain : jamais accordé à un niveau de confiance moindre
+        if p.europe != (p.trust == "5") {
+            return Err(format!("fournisseur « {} » : `europe` va avec la confiance 5, et seulement elle", p.id));
+        }
+        if p.name.trim().is_empty() || p.country.trim().is_empty() {
+            return Err(format!("fournisseur « {} » : nom ou pays vide", p.id));
+        }
+    }
+    for m in &catalog.model {
+        let label = crate::clean(&m.name, 60, false);
+        if m.name.trim().is_empty() || m.id.trim().is_empty() {
+            return Err(format!("modèle « {label} » : nom ou identifiant vide"));
+        }
+        if !catalog.provider.iter().any(|p| p.id == m.provider) {
+            return Err(format!("modèle « {label} » : fournisseur « {} » inconnu", crate::clean(&m.provider, 40, false)));
+        }
+        if !(1..=10).contains(&m.rank) {
+            return Err(format!("modèle « {label} » : `rank` va de 1 à 10"));
+        }
+        if !matches!(m.nature.as_str(), "LLM" | "Vision" | "Voice" | "Image" | "Embedding" | "Forecast" | "Decision") {
+            return Err(format!("modèle « {label} » : nature « {} » inconnue", crate::clean(&m.nature, 30, false)));
+        }
+        if [m.price_in, m.price_out, m.unit_price].into_iter().flatten().any(|price| !(0.0..=100_000.0).contains(&price)) {
+            return Err(format!("modèle « {label} » : prix hors de toute vraisemblance"));
+        }
+        if catalog.model.iter().filter(|other| other.provider == m.provider && other.id == m.id && other.nature == m.nature && other.speech == m.speech).count() > 1 {
+            return Err(format!("modèle « {} » déclaré deux fois chez « {} »", crate::clean(&m.id, 80, false), m.provider));
+        }
+    }
+    Ok(())
+}
+
+/// Vérifie un catalogue candidat sans le charger, et dit ce qu'il change par rapport à celui de
+/// cet exécutable. C'est le contrôle à passer avant de le proposer au dépôt.
+pub fn audit(text: &str) -> Result<String, String> {
+    let candidate: Catalog = toml::from_str(text).map_err(|e| format!("catalogue illisible : {e}"))?;
+    check(&candidate)?;
+    coherent(&candidate)?;
+    let current: Catalog = toml::from_str(SOURCE).map_err(|e| e.to_string())?;
+    let key = |m: &Model| format!("{} / {}", m.provider, m.id);
+    let mut lines = vec![format!("catalogue valide : {} fournisseurs, {} modèles", candidate.provider.len(), candidate.model.len())];
+    let mut list = |title: &str, items: Vec<String>| {
+        if !items.is_empty() {
+            lines.push(format!("{title} ({}) :", items.len()));
+            lines.extend(items.into_iter().map(|item| format!("  {item}")));
+        }
+    };
+    list("fournisseurs ajoutés", candidate.provider.iter().filter(|p| !current.provider.iter().any(|c| c.id == p.id)).map(|p| p.id.clone()).collect());
+    list("fournisseurs retirés", current.provider.iter().filter(|p| !candidate.provider.iter().any(|c| c.id == p.id)).map(|p| p.id.clone()).collect());
+    list("modèles ajoutés", candidate.model.iter().filter(|m| !current.model.iter().any(|c| key(c) == key(m))).map(key).collect());
+    list("modèles retirés", current.model.iter().filter(|m| !candidate.model.iter().any(|c| key(c) == key(m))).map(key).collect());
+    let moved = |m: &Model| current.model.iter().find(|c| key(c) == key(m) && c.nature == m.nature && c.speech == m.speech).filter(|c| (c.price_in, c.price_out, c.unit_price) != (m.price_in, m.price_out, m.unit_price)).map(|_| key(m));
+    list("prix modifiés", candidate.model.iter().filter_map(moved).collect());
+    Ok(lines.join("\n"))
 }
 
 impl Provider {
@@ -301,19 +372,16 @@ mod tests {
         for nature in ["Forecast", "Decision"] {
             assert!(catalog.model.iter().any(|m| m.nature == nature), "{nature}");
         }
-        for p in &catalog.provider {
-            assert!(matches!(p.trust.as_str(), "1" | "2" | "3" | "4" | "5" | "L"), "{}", p.id);
-            assert!(p.apis.iter().all(|a| matches!(a.as_str(), "anthropic" | "openai" | "elevenlabs" | "timesfm" | "systemone" | "claude-code")), "{}", p.id);
-            // sans machine connue, rien ne peut s'y rattacher : permis seulement pour ce qu'on ne sait pas appeler
-            assert!(!p.hosts.is_empty() || p.apis.is_empty(), "{}", p.id);
-            // « européen » veut dire souverain : jamais accordé à un niveau de confiance moindre
-            assert_eq!(p.europe, p.trust == "5", "{}", p.id);
-        }
-        for m in &catalog.model {
-            assert!(catalog.provider.iter().any(|p| p.id == m.provider), "{} : fournisseur inconnu", m.name);
-            assert!((1..=10).contains(&m.rank), "{}", m.name);
-            assert!(matches!(m.nature.as_str(), "LLM" | "Vision" | "Voice" | "Image" | "Embedding" | "Forecast" | "Decision"), "{}", m.name);
-        }
+        coherent(catalog).unwrap();
+        assert!(audit(SOURCE).unwrap().starts_with("catalogue valide"));
+        // un candidat est comparé à celui de l'exécutable ; une incohérence est dite, pas chargée
+        let fewer = SOURCE.replacen("rank = ", "rank = 1", 0);
+        assert_eq!(audit(&fewer).unwrap().lines().count(), 1, "identique : rien à signaler");
+        let added = format!("{SOURCE}\n[[model]]\nname = \"Neuf\"\nid = \"neuf-1\"\nprovider = \"mistral\"\nnature = \"LLM\"\nrank = 5\n");
+        assert!(audit(&added).unwrap().contains("modèles ajoutés (1) :\n  mistral / neuf-1"));
+        assert!(audit(&added.replace("provider = \"mistral\"\nnature = \"LLM\"\nrank = 5", "provider = \"inconnu\"\nnature = \"LLM\"\nrank = 5")).unwrap_err().contains("fournisseur « inconnu » inconnu"));
+        assert!(audit(&added.replace("rank = 5\n", "rank = 11\n")).is_err());
+        assert!(audit(&format!("{added}{}", added.rsplit_once("\n[[model]]").map(|(_, m)| format!("\n[[model]]{m}")).unwrap())).unwrap_err().contains("déclaré deux fois"));
     }
 
     #[test]

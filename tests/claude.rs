@@ -123,6 +123,25 @@ async fn the_claude_command_serves_a_model_through_our_own_tools() {
     api.say("encore").await;
     assert!(api.wait_message("encore").await.contains("écho (suite, sonnet)"));
 
+    // une tâche planifiée : créée par l'API, gardée, remise au maître comme une consigne de la personne
+    assert_eq!(api.post("/api/tasks", json!({ "name": "x", "text": "y", "kind": "daily", "time": "99:00" })).await.0, 400);
+    let (status, task) = api.post("/api/tasks", json!({ "name": "Ronde", "text": "consigne-de-ronde", "kind": "daily", "time": "07:30", "tz_offset_min": 60 })).await;
+    assert_eq!((status, &task["enabled"], &task["last_run_ms"]), (200, &json!(true), &Value::Null), "{task}");
+    let id = task["id"].as_str().unwrap();
+    assert!(task["next_run_ms"].as_u64().unwrap() > task["created_ms"].as_u64().unwrap());
+    assert_eq!(api.post(&format!("/api/tasks/{id}/run"), json!({})).await.0, 200);
+    assert!(api.wait("input", "de la tâche planifiée « Ronde » : consigne-de-ronde").await.len() > 10);
+    assert!(api.wait_message("consigne-de-ronde").await.contains("tâche-planifiée=\"Ronde\""), "le maître la reçoit comme une consigne de la personne");
+    let (_, changed) = api.post(&format!("/api/tasks/{id}"), json!({ "name": "Ronde du soir", "text": "autre", "kind": "hours", "hours": 6, "enabled": false })).await;
+    assert_eq!((&changed["id"], &changed["enabled"], changed["last_run_ms"].is_u64()), (&json!(id), &json!(false), true), "{changed}");
+    let listed = api.get("/api/tasks").await;
+    assert_eq!((listed["tasks"].as_array().unwrap().len(), &listed["tasks"][0]["name"]), (1, &json!("Ronde du soir")));
+    assert_eq!(api.post(&format!("/api/tasks/{id}/delete"), json!({})).await.0, 200);
+    assert_eq!(api.post(&format!("/api/tasks/{id}/run"), json!({})).await.0, 400);
+    assert!(api.get("/api/tasks").await["tasks"].as_array().unwrap().is_empty());
+    // sans jeton : rien
+    assert_eq!(api.http.get(format!("{}/api/tasks", api.base)).send().await.unwrap().status(), 401);
+
     // un outil : servi par le pont, exécuté par le maître avec ses droits
     api.say(&format!("OUTIL read_file {}", json!({ "path": work.join("note.txt") }))).await;
     let read = api.wait_message("réponse=hirondelle").await;

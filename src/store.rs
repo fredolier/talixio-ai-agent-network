@@ -56,6 +56,9 @@ impl Store {
              CREATE TABLE IF NOT EXISTS permanent (
                  agent_id TEXT PRIMARY KEY, name TEXT NOT NULL, request TEXT NOT NULL, created_ms INTEGER NOT NULL
              );
+             CREATE TABLE IF NOT EXISTS tasks (
+                 id TEXT PRIMARY KEY, task TEXT NOT NULL, created_ms INTEGER NOT NULL
+             );
              CREATE TABLE IF NOT EXISTS journal (
                  id INTEGER PRIMARY KEY, agent_id TEXT NOT NULL, agent_name TEXT NOT NULL,
                  ts_ms INTEGER NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL
@@ -243,6 +246,26 @@ impl Store {
         let Ok(mut query) = db.prepare("SELECT agent_id, name, request FROM permanent ORDER BY created_ms, agent_id LIMIT 64") else { return Vec::new() };
         let rows = query.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)));
         rows.map(|rows| rows.flatten().collect()).unwrap_or_default()
+    }
+
+    /// Les tâches planifiées, de la plus ancienne à la plus récente.
+    pub fn tasks(&self) -> Vec<crate::schedule::Task> {
+        let db = self.db.lock().unwrap();
+        let Ok(mut query) = db.prepare("SELECT task FROM tasks ORDER BY created_ms, id LIMIT 256") else { return Vec::new() };
+        let rows = query.query_map([], |row| row.get::<_, String>(0));
+        rows.map(|rows| rows.flatten().filter_map(|text| serde_json::from_str(&text).ok()).collect()).unwrap_or_default()
+    }
+
+    pub fn task_save(&self, task: &crate::schedule::Task) -> Result<(), String> {
+        let text = serde_json::to_string(task).map_err(|e| e.to_string())?;
+        let db = self.db.lock().unwrap();
+        db.execute("INSERT INTO tasks (id, task, created_ms) VALUES (?1, ?2, ?3) ON CONFLICT(id) DO UPDATE SET task = ?2", params![task.id, text, task.created_ms as i64])
+            .map(|_| ())
+            .map_err(err)
+    }
+
+    pub fn task_delete(&self, id: &str) -> Result<(), String> {
+        self.db.lock().unwrap().execute("DELETE FROM tasks WHERE id = ?1", params![id]).map(|_| ()).map_err(err)
     }
 
     /// Ce que le maître a demandé à l'enfant qu'il vient de créer.

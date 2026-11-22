@@ -145,6 +145,7 @@ Demandé le 2026-11-20. Rien n'est codé.
 | P2 | Interface web soignée, faite avec la bibliothèque shadcn/ui personnalisée, à l'identité propre : la grappe en direct, chaque agent avec nom, rôle, machine, IP, état ; le fil des messages ; le dialogue avec le maître ; les commandes et à qui elles sont confiées ; les fournisseurs et modèles ; les rôles. | ✅ servie par le maître à `/` (React, shadcn/ui, Tailwind ; décision 22) : Grappe, Dialogue, Journal, Commandes, Modèles, Rôles, Nouveautés ; clair et sombre ; téléphone. Reste : revue de sécurité indépendante de l'interface |
 | P3 | Vue de la grappe et du journal en ligne de commande. | ✅ |
 | P5 | Notes de version, tenues à chaque version, lisibles en ligne de commande et dans l'interface web. | 🟡 `releases.toml` embarqué, `talixio-agent releases`, `GET /api/releases` ; écran « Nouveautés » de l'interface |
+| P6 | Tâches planifiées : le maître lance seul un travail régulier ; une page les montre toutes et permet de les créer, modifier, lancer, suspendre et supprimer. | ✅ décision 33 ; page « Tâches » |
 | P4 | Pilotage depuis un téléphone (Android) : discuter avec le maître, voir la grappe, être prévenu. | 🟡 l'interface s'adapte au téléphone et porte un manifeste d'application ; l'installation demande un certificat reconnu ; pas encore de notification |
 
 ## 4. Décisions
@@ -448,6 +449,21 @@ Demandé le 2026-11-20. Rien n'est codé.
       comme `ANTHROPIC_BASE_URL` change le service que `claude` appelle. Le détenteur du jeton
       d'un tour (le pont, donc `claude`) peut poser des appels d'outils pour ce tour et en
       reçoit les résultats, rien d'autre.
+33. **Tâches planifiées : une consigne de la personne, écrite d'avance.** Le maître la reçoit à
+    heure fixe (chaque jour, chaque semaine, toutes les N heures) comme un message ordinaire :
+    elle ne lui donne aucun droit de plus. Créées, modifiées, lancées et supprimées par l'API de
+    pilotage seulement (page « Tâches ») ; gardées dans la base du maître ; aucun outil ne
+    permet à un agent d'en créer ni d'en changer. Trente-deux au plus. L'heure est celle de la
+    personne (décalage du navigateur, fixé à la création : il ne suit pas le changement d'heure).
+    Une échéance manquée pendant un arrêt part une fois au retour. Pas de dépendance ajoutée :
+    le calcul des dates est fait à la main (`src/schedule.rs`).
+34. **Un exemple complet vit dans le dépôt** (`examples/catalogue`) : une équipe de trois agents
+    aux droits opposés (collecteur avec le web, rédacteur avec l'écriture, vérificateur en
+    lecture seule) tient à jour le catalogue des modèles. Tout y est de la configuration : règles
+    de commandes, script `lire-web` qui borne le web à une liste de sites, consigne à planifier.
+    Deux commandes de l'exécutable le servent : `catalog show` (le catalogue embarqué) et
+    `catalog check <fichier>` (validité, et ce qui change), qui donne au vérificateur un critère
+    mesurable. Le résultat reste une proposition : c'est une personne qui le copie dans le dépôt.
 20. **Les notes de version ont une source unique**, `releases.toml`, embarquée dans l'exécutable.
     Chaque version y ajoute une entrée ; un test refuse une version sans note.
 
@@ -496,7 +512,8 @@ n'est accepté que d'un enfant en mission, 20 au plus entre deux consignes, 20 0
 | Outil | Condition |
 |---|---|
 | `read_file`, `list_dir` | au moins un dossier lisible |
-| `write_file` | au moins un dossier inscriptible |
+| `write_file`, `make_dir` | au moins un dossier inscriptible |
+| `list_provider_models` | le maître seul : la liste des modèles qu'un fournisseur connecté annonce, demandée avec la clé du maître |
 | `run_command` | au moins une commande autorisée |
 | `spawn_agent`, `send_to_agent`, `stop_agent`, `list_agents` | droit de créer des enfants |
 | `ask_parent`, `finish_mission` | l'agent a un parent |
@@ -530,6 +547,8 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 | POST | `/api/models/activate` `{ "provider", "model", "alias"?, "calls"? }` | Active un modèle d'un fournisseur connecté d'ici ; rend `{ alias, nature, default, max_calls }` (`default` : il est devenu le modèle du maître, qui n'en avait pas). |
 | POST | `/api/models/{alias}/deactivate` | Désactive un modèle activé d'ici. Refusé tant qu'un agent le détient. Si c'était le modèle du maître, il n'en a plus. |
 | POST | `/bridge` | Hors de l'API de pilotage : le rappel du pont d'outils de `claude` (décision 32). Jeton d'un tour en cours, tiré pour lui ; ne permet que de poser les appels d'outils de ce tour. |
+| GET, POST | `/api/tasks` | Les tâches planifiées (décision 33) ; POST en crée une : `name`, `text`, `kind` (`hours`, `daily`, `weekly`), `time` (`HH:MM`), `weekday` (0 : lundi), `hours`, `tz_offset_min`, `enabled`. |
+| POST | `/api/tasks/{id}`, `/api/tasks/{id}/delete`, `/api/tasks/{id}/run` | Modifie, supprime, ou remet tout de suite la consigne au maître (l'échéance prévue ne bouge pas). |
 | POST | `/api/models/{alias}/default` | Donne au maître ce modèle pour réfléchir (décision 31). Refusé si la configuration fixe `model`, si l'alias n'est pas dans ses droits ou ne tient pas une conversation. |
 | GET | `/api/roles` | Le répertoire des rôles (500 fiches au plus). |
 

@@ -157,3 +157,27 @@ export interface ModelsData {
   /** Les alias activés depuis l'interface : eux seuls se désactivent d'ici. */
   activated?: string[]
 }
+
+/** Une tâche planifiée : une consigne que le maître reçoit seul, à heure fixe. */
+export interface Task {
+  id: string
+  name: string
+  text: string
+  kind: 'hours' | 'daily' | 'weekly'
+  hours?: number
+  /** Minutes après minuit, à l'heure locale de qui l'a créée. */
+  minute?: number
+  /** 0 : lundi … 6 : dimanche. */
+  weekday?: number
+  tz_offset_min: number
+  enabled: boolean
+  next_run_ms: number
+  last_run_ms: number | null
+  created_ms: number
+}
+
+export interface TasksData {
+  tasks: Task[]
+  now_ms: number
+  max: number
+}

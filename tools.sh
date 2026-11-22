@@ -16,6 +16,7 @@
 #   TALIXIO_PORT     port sur cette machine (7700)
 #   TALIXIO_BIND     adresse d'écoute sur cette machine (127.0.0.1 : cette machine seule)
 #   TALIXIO_CONFIG   votre talixio.toml, monté à la place de docker/talixio.toml
+#   TALIXIO_TOOLS    un dossier de scripts pour les agents, monté en lecture seule sur /outils
 #   TALIXIO_NAME     nom du conteneur (talixio) ; le volume de données est <nom>-data
 #   CLAUDE_CODE_OAUTH_TOKEN   facultatif, pour « claude » : le jeton tiré par `claude setup-token`,
 #                             à la place de « ./tools.sh login »
@@ -81,6 +82,11 @@ run() {
         [ -f "$TALIXIO_CONFIG" ] || die "configuration introuvable : $TALIXIO_CONFIG"
         config=(-v "$(cd "$(dirname "$TALIXIO_CONFIG")" && pwd)/$(basename "$TALIXIO_CONFIG"):/config/talixio.toml:ro")
     fi
+    if [ -n "${TALIXIO_TOOLS:-}" ]; then
+        [ -d "$TALIXIO_TOOLS" ] || die "dossier d'outils introuvable : $TALIXIO_TOOLS"
+        # en lecture seule : un agent ne doit pas pouvoir réécrire ce qu'il a le droit de lancer
+        config+=(-v "$(cd "$TALIXIO_TOOLS" && pwd):/outils:ro")
+    fi
     if [ "$BIND" != 127.0.0.1 ] && [ "$BIND" != localhost ]; then
         echo "Attention : le maître sera joignable depuis $BIND, pas seulement depuis cette machine." >&2
     fi
@@ -117,5 +123,5 @@ case "${1:-}" in
         rm -f "$TOKEN_FILE"
         echo "Effacé."
         ;;
-    *) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+    *) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

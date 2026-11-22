@@ -28,6 +28,8 @@ pub enum Input {
     Child { id: String, name: String, kind: ReportKind, text: String },
     /// Le système lui-même (un enfant perdu, par exemple).
     System(String),
+    /// Une tâche planifiée : une consigne de la personne, écrite d'avance, arrivée à son heure.
+    Task { name: String, text: String },
 }
 
 pub struct Node {

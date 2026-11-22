@@ -71,7 +71,11 @@ pub async fn start_listener(
             .route("/api/providers/{id}/oauth/finish", post(oauth_finish))
             .route("/api/models/activate", post(model_activate))
             .route("/api/models/{alias}/deactivate", post(model_deactivate))
-            .route("/api/models/{alias}/default", post(model_default));
+            .route("/api/models/{alias}/default", post(model_default))
+            .route("/api/tasks", get(tasks).post(task_create))
+            .route("/api/tasks/{id}", post(task_update))
+            .route("/api/tasks/{id}/delete", post(task_delete))
+            .route("/api/tasks/{id}/run", post(task_run));
     }
     let router = router.layer(axum::middleware::map_response(harden));
     let app = router.with_state(App {
@@ -334,4 +338,40 @@ async fn model_default(State(app): State<App>, headers: HeaderMap, Path(alias): 
         return denied;
     }
     changed(crate::connect::choose(&app.node, &alias).await)
+}
+
+/// Les tâches planifiées du maître : des consignes écrites d'avance, qu'il reçoit à heure fixe.
+async fn tasks(State(app): State<App>, headers: HeaderMap) -> Response {
+    if let Err(denied) = authorize(&app, &headers) {
+        return denied;
+    }
+    Json(crate::schedule::list(&app.node)).into_response()
+}
+
+async fn task_create(State(app): State<App>, headers: HeaderMap, Json(body): Json<Value>) -> Response {
+    if let Err(denied) = authorize(&app, &headers) {
+        return denied;
+    }
+    changed(crate::schedule::create(&app.node, &body))
+}
+
+async fn task_update(State(app): State<App>, headers: HeaderMap, Path(id): Path<String>, Json(body): Json<Value>) -> Response {
+    if let Err(denied) = authorize(&app, &headers) {
+        return denied;
+    }
+    changed(crate::schedule::update(&app.node, &id, &body))
+}
+
+async fn task_delete(State(app): State<App>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if let Err(denied) = authorize(&app, &headers) {
+        return denied;
+    }
+    changed(crate::schedule::delete(&app.node, &id))
+}
+
+async fn task_run(State(app): State<App>, headers: HeaderMap, Path(id): Path<String>) -> Response {
+    if let Err(denied) = authorize(&app, &headers) {
+        return denied;
+    }
+    changed(crate::schedule::run_now(&app.node, &id))
 }

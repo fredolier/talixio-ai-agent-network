@@ -80,6 +80,7 @@ fn note_input(node: &Node, input: &Input) {
         Input::Parent(text) => format!("du parent : {text}"),
         Input::Child { name, kind, text, .. } => format!("de l'enfant {name} ({kind:?}) : {text}"),
         Input::System(text) => format!("système : {text}"),
+        Input::Task { name, text } => format!("de la tâche planifiée « {name} » : {text}"),
     });
     let mut mission = node.mission.lock().unwrap();
     match input {
@@ -88,7 +89,7 @@ fn note_input(node: &Node, input: &Input) {
             mission.awaiting_parent = false;
             mission.nudges = 0;
         }
-        Input::Child { .. } | Input::User(_) => mission.nudges = 0,
+        Input::Child { .. } | Input::User(_) | Input::Task { .. } => mission.nudges = 0,
         Input::System(_) => {}
     }
 }
@@ -204,6 +205,8 @@ fn render(node: &Node, input: &Input) -> String {
             (format!("source=\"enfant\" agent=\"{name}\" id=\"{id}\" type=\"{kind}\""), text)
         }
         Input::System(text) => ("source=\"système\"".to_string(), text),
+        // la personne l'a écrite d'avance : c'est sa consigne
+        Input::Task { name, text } => (format!("source=\"utilisateur\" tâche-planifiée=\"{name}\""), text),
     };
     frame_message(&node.nonce, &source, text)
 }

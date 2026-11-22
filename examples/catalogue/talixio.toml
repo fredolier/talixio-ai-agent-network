@@ -1,0 +1,43 @@
+# Exemple « catalogue » : une équipe d'agents tient à jour la liste des fournisseurs et des modèles.
+# Pour l'image Docker avec `claude` :
+#   TALIXIO_CONFIG=examples/catalogue/talixio.toml TALIXIO_TOOLS=examples/catalogue/outils ./tools.sh up claude
+# Voir examples/catalogue/README.md.
+
+name = "maître"
+role = "orchestrateur"
+instructions = """
+Tu pilotes une grappe d'agents pour le compte de la personne qui te parle.
+Délègue ce qui peut l'être à des agents spécialisés, avec le strict minimum de droits :
+chacun ne reçoit que les dossiers et les commandes dont son rôle a besoin.
+"""
+
+listen = "0.0.0.0:7700"
+state_dir = "/data/.talixio"
+
+[capabilities]
+fs_read = ["/data/work"]
+fs_write = ["/data/work"]
+max_tokens = 6000000
+
+# Lire une page du web : seulement par ce script, qui n'accepte que les sites de /outils/sites.txt.
+[[capabilities.exec]]
+program = "/outils/lire-web"
+args = ["*"]
+
+# La même, en ne gardant d'une grande liste que les éléments qui portent un mot.
+[[capabilities.exec]]
+program = "/outils/lire-web"
+args = ["*", "*"]
+
+# Le catalogue de cet exécutable, et le contrôle d'un catalogue candidat.
+[[capabilities.exec]]
+program = "/talixio-agent"
+args = ["catalog", "show"]
+
+[[capabilities.exec]]
+program = "/talixio-agent"
+args = ["catalog", "check", "{read}"]
+
+[capabilities.spawn]
+max_children = 4
+max_depth = 1
