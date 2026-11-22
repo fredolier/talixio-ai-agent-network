@@ -6,7 +6,7 @@ copiez dans le dépôt.
 
 | Agent | Modèle | Ce qu'il peut | Ce qu'il ne peut pas |
 |---|---|---|---|
-| collecteur | haiku | lire le web, par `lire-web` et `lire-page`, sur les seuls sites de `outils/sites.txt` ; écrire ses relevés | toucher au catalogue |
+| collecteur | haiku | lire le web, par `lire-web` et `lire-page`, sur les seuls sites de `sites.txt` ; écrire ses relevés | toucher au catalogue |
 | rédacteur | sonnet | lire les relevés, écrire le catalogue, lancer `catalog check` | lire le web |
 | vérificateur | opus | lire, lancer `catalog check` | écrire, lire le web |
 
@@ -14,23 +14,45 @@ Le maître coordonne. Il relève lui-même ce que les fournisseurs connectés an
 (`list_provider_models`, avec sa clé, qui ne sort pas) et ne conclut que si le vérificateur n'a
 plus d'objection.
 
-Rien n'est programmé pour cet exemple : tout est dans ce dossier.
+Les scripts et les rôles forment le paquet « catalogue » (`packs/catalogue` dans le dépôt, livré
+dans l'exécutable). C'est vous qui l'installez ; le maître ne peut ni l'installer ni le modifier,
+et il vérifie l'empreinte de chaque fichier à son démarrage, puis celle de chaque script avant de
+le lancer.
 
-- `talixio.toml` : les droits du maître, dont les commandes permises.
-- `outils/lire-web` : le seul accès au web. Une adresse https, un site de la liste, pas de
-  redirection suivie, taille et durée bornées. `outils/sites.txt` : la liste, à compléter.
-- `outils/lire-page` : la même lecture, avec un vrai navigateur (Chromium piloté par Playwright),
-  pour les pages qui se construisent par leurs scripts : les grilles de prix des fournisseurs.
-  La page et ses cadres restent sur les sites de la liste ; ce qu'elle charge pour se construire
-  doit venir d'un nom public, en https ; ni image, ni téléchargement ; profil jeté à chaque
-  lecture ; 60 s au plus. Les lignes de tableau sont rendues sur une ligne.
-- `cible-navigateur.toml` : la cible Docker où tourne le collecteur quand il a le navigateur.
-- `consigne.md` : la consigne à remettre au maître, à coller dans une tâche planifiée.
+```bash
+talixio-agent pack show catalogue
+```
+
+- `lire-web` : le seul accès au web. Une adresse https, un site de la liste, pas de redirection
+  suivie, taille et durée bornées. `sites.txt` : la liste.
+- `lire-page` : la même lecture, avec un vrai navigateur (Chromium piloté par Playwright), pour
+  les pages qui se construisent par leurs scripts : les grilles de prix des fournisseurs. La page
+  et ses cadres restent sur les sites de la liste ; ce qu'elle charge pour se construire doit
+  venir d'un nom public, en https ; ni image, ni téléchargement ; profil jeté à chaque lecture ;
+  60 s au plus. Les lignes de tableau sont rendues sur une ligne.
+- les rôles « collecteur », « rédacteur », « vérificateur » : leurs consignes et leurs commandes.
+- `consigne.md` : la consigne à remettre au maître, à coller dans une tâche planifiée
+  (`talixio-agent pack show catalogue --file consigne.md`).
+
+Dans ce dossier : `talixio.toml` (les droits du maître, la cible Docker du collecteur) et
+`cible-navigateur.toml` (la même cible pour un maître installé sur la machine).
+
+Pour changer la liste des sites : copiez `packs/catalogue` dans un dossier à vous
+(`mes-paquets/catalogue`), modifiez `sites.txt`, puis
+`TALIXIO_PACKS_FROM=mes-paquets ./tools.sh pack install catalogue --replace`.
 
 ## Le lancer dans Docker
 
 ```bash
-TALIXIO_CONFIG=examples/catalogue/talixio.toml TALIXIO_TOOLS=examples/catalogue/outils ./tools.sh up claude
+./tools.sh build claude
+```
+
+```bash
+./tools.sh pack install catalogue
+```
+
+```bash
+TALIXIO_CONFIG=examples/catalogue/talixio.toml ./tools.sh run claude
 ```
 
 (Ainsi, sans navigateur : le collecteur lit le web avec `lire-web` seul. Avec navigateur : voir plus bas.)
@@ -68,7 +90,7 @@ maître crée et retire lui-même.
 ```
 
 ```bash
-TALIXIO_DOCKER=1 TALIXIO_CONFIG=examples/catalogue/talixio.toml TALIXIO_TOOLS=examples/catalogue/outils ./tools.sh up claude
+TALIXIO_DOCKER=1 TALIXIO_CONFIG=examples/catalogue/talixio.toml ./tools.sh run claude
 ```
 
 `TALIXIO_DOCKER=1` donne au maître le socket Docker de la machine, et le place avec ses agents dans
@@ -79,8 +101,9 @@ libres. Dans la configuration, `network` et `volume` portent le nom du maître (
 `talixio-data` ; avec `TALIXIO_NAME=x` : `x-net`, `x-data`). Aucun agent
 ne reçoit le socket, et il est interdit d'office à leurs outils.
 
-L'image `talixio-navigateur` porte l'agent, Chromium et les scripts de `outils/` tels qu'ils
-étaient à la construction : reconstruisez-la après avoir changé `sites.txt` ou mis le maître à jour.
+L'image `talixio-navigateur` porte l'agent, Chromium et les paquets installés tels qu'ils étaient
+à la construction : reconstruisez-la après avoir installé ou remplacé un paquet, ou mis le maître
+à jour. Si elle date, l'agent refuse de lancer un script dont l'empreinte n'est plus la bonne.
 
 Un maître installé sur la machine (`talixio-agent service install`) fait la même chose sans
 socket partagé : ajoutez `cible-navigateur.toml` à sa configuration, avec vos chemins.

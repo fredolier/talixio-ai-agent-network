@@ -54,6 +54,12 @@ enum Command {
         #[command(subcommand)]
         action: CatalogAction,
     },
+    /// Les paquets (commandes et rôles) : les lister, les regarder, les installer pour le maître.
+    /// À lancer par la personne qui exploite la grappe, jamais par le maître.
+    Pack {
+        #[command(subcommand)]
+        action: PackAction,
+    },
     /// Affiche les notes de version de cet exécutable.
     Releases {
         /// Seulement la dernière version.
@@ -82,6 +88,59 @@ enum CatalogAction {
     Check { file: PathBuf },
     /// Affiche le catalogue de cet exécutable, au format du fichier.
     Show,
+}
+
+#[derive(clap::Args)]
+struct PackDir {
+    /// Dossier des paquets installés : celui que `packs_dir` désigne dans la configuration du maître.
+    #[arg(long, env = "TALIXIO_PACKS")]
+    dir: PathBuf,
+}
+
+#[derive(clap::Args)]
+struct PackFrom {
+    /// Un dossier de paquets (un sous-dossier par paquet). Par défaut : ceux de cet exécutable.
+    #[arg(long)]
+    from: Option<PathBuf>,
+}
+
+#[derive(Subcommand)]
+enum PackAction {
+    /// Liste les paquets disponibles.
+    List {
+        #[command(flatten)]
+        from: PackFrom,
+    },
+    /// Montre ce qu'un paquet donnerait : commandes, rôles, fichiers. Avec --file : un de ses fichiers.
+    Show {
+        name: String,
+        #[arg(long)]
+        file: Option<String>,
+        #[command(flatten)]
+        from: PackFrom,
+    },
+    /// Installe un paquet. Le maître le prend à son prochain démarrage.
+    Install {
+        name: String,
+        /// Remplace le paquet s'il est déjà installé.
+        #[arg(long)]
+        replace: bool,
+        #[command(flatten)]
+        from: PackFrom,
+        #[command(flatten)]
+        dir: PackDir,
+    },
+    /// Retire un paquet installé.
+    Remove {
+        name: String,
+        #[command(flatten)]
+        dir: PackDir,
+    },
+    /// Liste les paquets installés et vérifie leurs empreintes, comme le maître à son démarrage.
+    Verify {
+        #[command(flatten)]
+        dir: PackDir,
+    },
 }
 
 #[derive(Subcommand)]
@@ -149,6 +208,50 @@ async fn main() -> Result<()> {
         }
         Command::Catalog { action: CatalogAction::Show } => {
             print!("{}", talixio_agent::catalog::SOURCE);
+            Ok(())
+        }
+        Command::Pack { action } => {
+            use talixio_agent::pack::{self, Pack};
+            match action {
+                PackAction::List { from } => {
+                    for p in Pack::available(from.from.as_deref())? {
+                        println!("{}  (version {})\n    {}", p.manifest.name, p.manifest.version, p.manifest.description);
+                    }
+                    println!("\nRegarder : talixio-agent pack show <nom>. Installer : talixio-agent pack install <nom> --dir <dossier>.");
+                }
+                PackAction::Show { name, file: None, from } => print!("{}", Pack::find(from.from.as_deref(), &name)?.describe()),
+                PackAction::Show { name, file: Some(file), from } => {
+                    let p = Pack::find(from.from.as_deref(), &name)?;
+                    let bytes = p.files.get(&file).with_context(|| format!("le paquet « {name} » n'a pas ce fichier"))?;
+                    print!("{}", String::from_utf8_lossy(bytes));
+                }
+                PackAction::Install { name, replace, from, dir } => {
+                    let p = Pack::find(from.from.as_deref(), &name)?;
+                    let dest = p.install(&dir.dir, replace)?;
+                    print!("{}", p.describe());
+                    println!("\nInstallé dans {}. Le maître le prend à son prochain démarrage (réglage packs_dir).", dest.display());
+                    println!("Ce dossier ne doit pas être inscriptible par le compte du maître.");
+                }
+                PackAction::Remove { name, dir } => {
+                    pack::remove(&dir.dir, &name)?;
+                    println!("Paquet « {name} » retiré. Le maître le perd à son prochain démarrage.");
+                }
+                PackAction::Verify { dir } => {
+                    let installed = pack::load_installed(&dir.dir, false)?;
+                    if installed.names.is_empty() {
+                        println!("Aucun paquet installé dans {}.", dir.dir.display());
+                    }
+                    for name in &installed.names {
+                        println!("{name} : intact");
+                    }
+                    for (name, role) in &installed.roles {
+                        println!("  rôle {name} ({})", role.pack);
+                    }
+                    for rule in &installed.exec {
+                        println!("  commande {}", rule.describe());
+                    }
+                }
+            }
             Ok(())
         }
         Command::Releases { last } => {
@@ -369,6 +472,9 @@ async fn run_root(config: &Path) -> Result<()> {
     talixio_agent::model::cli::set_callback(addr, &fingerprint);
     eprintln!("[{}] agent maître {} — API sur https://{addr}", node.name, node.id);
     eprintln!("[{}] empreinte du certificat : {fingerprint}", node.name);
+    if !cfg.pack_names.is_empty() {
+        eprintln!("[{}] paquets installés, empreintes vérifiées : {}", node.name, cfg.pack_names.join(", "));
+    }
     eprintln!("[{}] jeton de l'API : {}", node.name, cfg.state_dir.join("api-token").display());
 
     tokio::spawn(link::run_child_monitor(node.clone()));

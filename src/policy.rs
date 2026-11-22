@@ -53,6 +53,10 @@ pub struct ExecRule {
     /// Dossier d'exécution. Absent : le dossier temporaire du système.
     #[serde(default)]
     pub cwd: Option<PathBuf>,
+    /// Empreinte SHA-256 du programme (commande d'un paquet installé) : vérifiée à chaque
+    /// lancement. Posée par le maître au chargement de ses paquets, jamais par un agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -223,7 +227,11 @@ impl Capabilities {
         }
         for rule in &child.exec {
             let covered = self.exec.iter().any(|own| {
-                own.program == rule.program && own.cwd == rule.cwd && (own.args.is_none() || own.args == rule.args)
+                own.program == rule.program
+                    && own.cwd == rule.cwd
+                    && (own.args.is_none() || own.args == rule.args)
+                    // une empreinte ne se retire pas en route : l'enfant garde celle de son parent
+                    && (own.sha256.is_none() || own.sha256 == rule.sha256)
             });
             if !covered {
                 return Err(format!("commande « {} » : hors de vos propres droits", rule.describe()));
@@ -370,7 +378,7 @@ mod tests {
     use super::*;
 
     fn rule(program: &str, args: Option<&[&str]>) -> ExecRule {
-        ExecRule { program: abs(program), args: args.map(|a| a.iter().map(|s| s.to_string()).collect()), cwd: None }
+        ExecRule { program: abs(program), args: args.map(|a| a.iter().map(|s| s.to_string()).collect()), cwd: None, sha256: None }
     }
 
     /// Les chemins des tests sont écrits à la façon POSIX ; sous Windows, un chemin n'est absolu

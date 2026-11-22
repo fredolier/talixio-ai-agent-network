@@ -457,7 +457,8 @@ Demandé le 2026-11-20. Rien n'est codé.
     personne (décalage du navigateur, fixé à la création : il ne suit pas le changement d'heure).
     Une échéance manquée pendant un arrêt part une fois au retour. Pas de dépendance ajoutée :
     le calcul des dates est fait à la main (`src/schedule.rs`).
-34. **Un exemple complet vit dans le dépôt** (`examples/catalogue`) : une équipe de trois agents
+34. **Un exemple complet vit dans le dépôt** (`examples/catalogue`, et depuis la décision 37 le
+    paquet `packs/catalogue` pour ses scripts et ses rôles) : une équipe de trois agents
     aux droits opposés (collecteur avec le web, rédacteur avec l'écriture, vérificateur en
     lecture seule) tient à jour le catalogue des modèles. Tout y est de la configuration : règles
     de commandes, script `lire-web` qui borne le web à une liste de sites, consigne à planifier.
@@ -499,6 +500,31 @@ Demandé le 2026-11-20. Rien n'est codé.
     terme : le maître dans une machine virtuelle. Non essayé : Docker sans droits
     d'administrateur (« rootless »), où le compte sans droit du conteneur n'ouvre sans doute
     pas le socket.
+37. **Les paquets : commandes et rôles installés par l'exploitant, jamais par le maître**
+    (demandé : « un CLI qui permettrait d'ajouter les commandes, les rôles […] à partir d'un
+    catalogue », « indépendant du maître », « on vérifie […] qu'on n'a rien modifié »). Un paquet
+    est un dossier : un manifeste (`pack.toml`), des scripts, des textes. Il donne des commandes
+    (un script du paquet, avec ses arguments permis, jamais libres) et des rôles (consignes,
+    commandes employées, modèle et cible conseillés). `talixio-agent pack list | show | install |
+    remove | verify` : les paquets viennent de l'exécutable (le paquet « catalogue », ancien
+    exemple) ou d'un dossier (`--from`) ; à terme, d'un service de téléchargement.
+    - **Séparation** : le maître n'a aucun outil ni aucune route pour installer. Il lit le
+      dossier (`packs_dir`) à son démarrage, et **refuse de démarrer** s'il peut l'écrire
+      (`packs_unprotected = true` pour un essai) ou si un fichier ne répond plus à l'empreinte
+      SHA-256 notée à l'installation (`pack.lock`). Le dossier est interdit à ses outils de
+      fichiers. Dans Docker : `./tools.sh pack …` écrit le dossier sur la machine, à votre
+      compte ; le maître le reçoit monté en lecture seule.
+    - **Revérifié à chaque appel** : la règle d'une commande de paquet porte l'empreinte de son
+      programme (`sha256`), qui suit la règle de parent en enfant sans que le modèle la recopie
+      et ne peut pas être retirée en route ; l'agent qui lance la commande, où qu'il soit,
+      relit le programme et refuse s'il a changé. Une empreinte ne s'écrit pas dans la
+      configuration.
+    - **Rôles** : le maître voit les rôles installés dans ses consignes ; `spawn_agent` avec le
+      nom d'un rôle installé donne à l'enfant les consignes et les commandes du rôle. Dossiers,
+      budget et mission restent choisis par le maître, dans ses propres droits.
+    - Non fait : interface de navigation (TUI), service de téléchargement et signature des
+      paquets (l'empreinte protège ce qui est installé, pas ce qu'on installe : `pack show`
+      d'abord), cibles de déploiement dans un paquet, rôles installés dans la page « Rôles ».
 20. **Les notes de version ont une source unique**, `releases.toml`, embarquée dans l'exécutable.
     Chaque version y ajoute une entrée ; un test refuse une version sans note.
 

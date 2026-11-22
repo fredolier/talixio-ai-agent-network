@@ -8,6 +8,9 @@
 #   ./tools.sh run [claude]     lance seulement (l'image doit exister)
 #   ./tools.sh build navigateur   construit l'image des AGENTS qui lisent le web avec un navigateur
 #                                 (talixio-navigateur ; pas une image du maître : voir examples/catalogue)
+#   ./tools.sh pack list|show <nom>|install <nom>|remove <nom>|verify
+#                            les paquets (commandes et rôles) du maître : c'est vous qui les
+#                            installez, jamais lui. Pris au prochain « run ».
 #   ./tools.sh token         affiche le jeton de l'interface
 #   ./tools.sh logs          suit le journal du maître
 #   ./tools.sh status        dit si le maître tourne, et où
@@ -23,6 +26,8 @@
 #   TALIXIO_DOCKER=1 le maître peut lancer ses agents dans d'autres conteneurs (image « claude ») :
 #                    il reçoit le socket Docker de cette machine. ATTENTION : qui prend le maître
 #                    commande alors Docker, donc cette machine. Voir docs/SPEC.md, décision 36.
+#   TALIXIO_PACKS    dossier des paquets installés, sur cette machine (~/.config/talixio/<nom>-packs)
+#   TALIXIO_PACKS_FROM   un dossier de paquets à vous (un sous-dossier par paquet), pour « pack »
 #   TALIXIO_BUILD_ARGS   options de plus pour « docker build » (derrière un mandataire, par exemple)
 #   CLAUDE_CODE_OAUTH_TOKEN   facultatif, pour « claude » : le jeton tiré par `claude setup-token`,
 #                             à la place de « ./tools.sh login »
@@ -39,6 +44,8 @@ PORT="${TALIXIO_PORT:-7700}"
 BIND="${TALIXIO_BIND:-127.0.0.1}"
 VOLUME="$NAME-data"
 TOKEN_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/talixio/$NAME-api-token"
+# les paquets installés : sur cette machine, à votre compte ; le maître ne les voit qu'en lecture seule
+PACKS="${TALIXIO_PACKS:-${XDG_CONFIG_HOME:-$HOME/.config}/talixio/$NAME-packs}"
 
 die() { echo "tools.sh : $*" >&2; exit 1; }
 
@@ -72,10 +79,15 @@ build() {
         # l'image des agents à navigateur : l'agent (celui de l'image « claude », même version que
         # le maître), Chromium, et les scripts du dossier d'outils ; aucune clé
         build claude
-        local tools="${TALIXIO_TOOLS:-examples/catalogue/outils}"
+        # les paquets installés entrent dans l'image au même chemin que chez le maître (/packs) :
+        # l'agent y vérifie l'empreinte de chaque commande avant de la lancer
+        local empty; empty="$(mktemp -d)"
+        local tools="${TALIXIO_TOOLS:-$empty}" packs="$PACKS"
         [ -d "$tools" ] || die "dossier d'outils introuvable : $tools"
+        [ -d "$packs" ] || packs="$empty"
         # shellcheck disable=SC2086
-        docker build ${TALIXIO_BUILD_ARGS:-} -f docker/Dockerfile.navigateur --build-context "outils=$tools" -t talixio-navigateur docker
+        docker build ${TALIXIO_BUILD_ARGS:-} -f docker/Dockerfile.navigateur --build-context "outils=$tools" --build-context "paquets=$packs" -t talixio-navigateur docker
+        rmdir "$empty"
         echo "Image talixio-navigateur construite : à donner à une cible « docker » du maître (examples/catalogue)."
         return
     fi
@@ -106,6 +118,11 @@ run() {
         case "$(cd "$TALIXIO_TOOLS" && pwd)" in *:*) die "dossier d'outils refusé : « : » dans son chemin" ;; esac
         # en lecture seule : un agent ne doit pas pouvoir réécrire ce qu'il a le droit de lancer
         config+=(-v "$(cd "$TALIXIO_TOOLS" && pwd):/outils:ro")
+    fi
+    if [ -d "$PACKS" ]; then
+        case "$PACKS" in *:*) die "dossier de paquets refusé : « : » dans son chemin" ;; esac
+        # en lecture seule : le maître lance ses paquets, il ne les modifie pas
+        config+=(-v "$PACKS:/packs:ro")
     fi
     if [ "$BIND" != 127.0.0.1 ] && [ "$BIND" != localhost ]; then
         echo "Attention : le maître sera joignable depuis $BIND, pas seulement depuis cette machine." >&2
@@ -148,8 +165,32 @@ agents_down() {
     } | sort -u | while read -r id; do docker rm -f "$id" >/dev/null 2>&1 || true; done
 }
 
+# Les paquets : la commande `pack` de l'exécutable de l'image, lancée à votre compte sur le dossier
+# de cette machine. Le maître n'y est pour rien, et ne reçoit le dossier qu'en lecture seule.
+pack() {
+    local image=talixio-agent:claude
+    docker image inspect "$image" >/dev/null 2>&1 || image=talixio-agent
+    docker image inspect "$image" >/dev/null 2>&1 || die "aucune image du maître : ./tools.sh build"
+    case "$PACKS" in *:*) die "dossier de paquets refusé : « : » dans son chemin" ;; esac
+    mkdir -p "$PACKS"
+    # vos propres paquets : TALIXIO_PACKS_FROM, un dossier avec un sous-dossier par paquet
+    local from=()
+    if [ -n "${TALIXIO_PACKS_FROM:-}" ]; then
+        [ -d "$TALIXIO_PACKS_FROM" ] || die "dossier de paquets introuvable : $TALIXIO_PACKS_FROM"
+        case "$(cd "$TALIXIO_PACKS_FROM" && pwd)" in *:*) die "dossier de paquets refusé : « : » dans son chemin" ;; esac
+        from=(-v "$(cd "$TALIXIO_PACKS_FROM" && pwd):/from:ro")
+        case "${1:-}" in list|show|install) set -- "$@" --from /from ;; esac
+    fi
+    docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
+        -v "$PACKS:/packs" ${from[@]+"${from[@]}"} -e TALIXIO_PACKS=/packs --entrypoint /talixio-agent "$image" pack "$@"
+    case "${1:-}" in
+        install|remove) echo "Avec tools.sh : le dossier est sur cette machine, $PACKS (dans le maître : /packs, en lecture seule). À prendre en compte : ./tools.sh run [claude] (et ./tools.sh build navigateur si vos agents tournent en conteneur)." ;;
+    esac
+}
+
 case "${1:-}" in
     build) build "${2:-}" ;;
+    pack) shift; pack "$@" ;;
     run) run "${2:-}" ;;
     up) build "${2:-}"; run "${2:-}" ;;
     token) api_token; echo "$TALIXIO_API_TOKEN" ;;
@@ -176,5 +217,5 @@ case "${1:-}" in
             echo "Effacé."
         fi
         ;;
-    *) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+    *) sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

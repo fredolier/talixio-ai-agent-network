@@ -24,6 +24,34 @@ pub fn check_private(path: &Path) -> Result<(), String> {
     imp::check_private(path)
 }
 
+/// Droits d'un fichier installé pour être lu ou lancé par d'autres comptes (sans effet sous Windows).
+pub fn set_mode(path: &Path, mode: u32) -> anyhow::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))?;
+    }
+    #[cfg(not(unix))]
+    let _ = (path, mode);
+    Ok(())
+}
+
+/// Ce compte peut-il écrire ce fichier ou ce dossier ? Sous Unix : la réponse du système, montage
+/// en lecture seule compris (root peut tout, sauf là). Sous Windows : l'attribut de lecture seule.
+pub fn writable(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let Ok(c) = std::ffi::CString::new(path.as_os_str().as_bytes()) else { return true };
+        // SAFETY : `c` est une chaîne C valide pour la durée de l'appel.
+        unsafe { libc::access(c.as_ptr(), libc::W_OK) == 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::metadata(path).map(|m| !m.permissions().readonly()).unwrap_or(true)
+    }
+}
+
 /// Options d'ouverture qui ne suivent pas un lien en bout de chemin, et ne restent pas
 /// bloquées sur un tube.
 pub fn no_follow(options: &mut OpenOptions) {

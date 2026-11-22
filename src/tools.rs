@@ -708,6 +708,8 @@ async fn run_command(node: &Arc<Node>, input: &Value) -> Result<String, String> 
         _ => return Err("« args » doit être une liste de chaînes".into()),
     };
     let (rule, args) = node.caps.check_exec(program, &args, &node.deny)?;
+    // la commande d'un paquet : son programme doit être encore celui qui a été installé
+    crate::pack::check_program(rule)?;
     let cwd = rule.cwd.clone().unwrap_or_else(std::env::temp_dir);
 
     let mut command = Command::new(program);
@@ -793,6 +795,19 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value, resumed: Option<&str>) -> 
         Value::Null => Capabilities::default(),
         value => serde_json::from_value(value.clone()).map_err(|e| format!("droits invalides : {e}"))?,
     };
+    // un rôle installé (paquet) : ses consignes et les règles de ses commandes viennent du paquet
+    let template = node.pack_roles.get(&role);
+    if let Some(template) = template {
+        for rule in &template.exec {
+            if !caps.exec.iter().any(|r| r.program == rule.program && r.args == rule.args) {
+                caps.exec.push(rule.clone());
+            }
+        }
+    }
+    // l'empreinte d'une commande suit sa règle : l'agent n'a pas à la recopier
+    for rule in caps.exec.iter_mut().filter(|r| r.sha256.is_none()) {
+        rule.sha256 = node.caps.exec.iter().find(|own| own.program == rule.program && own.sha256.is_some()).and_then(|own| own.sha256.clone());
+    }
     let model = input["model"].as_str().map(str::to_string).unwrap_or_else(|| node.model());
     if node.natures().get(&model).is_some_and(|nature| nature != "llm" && nature != "vision") {
         return Err(format!("le modèle d'un agent doit tenir une conversation : « {model} » est de nature « {} »", node.natures()[&model]));
@@ -866,7 +881,11 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value, resumed: Option<&str>) -> 
         agent_id: resumed.map(str::to_string).unwrap_or_else(|| format!("a-{}", &random_hex(1)[..20])),
         name: name.clone(),
         role: role.clone(),
-        instructions: text(input, "instructions")?.to_string(),
+        instructions: match template {
+            // les consignes du rôle d'abord, puis ce que le parent ajoute
+            Some(template) => format!("{}\n\n{}", template.role.instructions.trim(), input["instructions"].as_str().unwrap_or("").trim()).trim().to_string(),
+            None => text(input, "instructions")?.to_string(),
+        },
         model: model.clone(),
         capabilities: caps.clone(),
         parent_id: node.id.clone(),

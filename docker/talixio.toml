@@ -13,6 +13,9 @@ Délègue ce qui peut l'être à des agents spécialisés, avec le strict minimu
 # Dans un conteneur, écouter sur toutes ses interfaces : c'est `docker run -p` qui choisit qui y accède.
 listen = "0.0.0.0:7700"
 state_dir = "/data/.talixio"
+# Les paquets que vous installez (./tools.sh pack install <nom>) : commandes et rôles. Le maître
+# les lit et les vérifie à son démarrage ; il ne peut pas les modifier.
+packs_dir = "/packs"
 
 # Les agents ne lisent et n'écrivent que dans /data/work. Aucune commande n'est autorisée :
 # l'image ne contient d'ailleurs aucun programme à lancer.

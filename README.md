@@ -104,6 +104,32 @@ docker logs talixio
 docker rm -f talixio
 ```
 
+## Paquets : commandes et rôles
+
+Un paquet donne au maître des commandes (des scripts, avec leurs arguments permis) et des rôles
+(des consignes toutes faites pour un agent). C'est vous qui les installez ; le maître ne peut ni
+s'en ajouter ni les modifier, et il vérifie leurs empreintes à chaque démarrage.
+
+```bash
+./tools.sh pack list
+```
+
+```bash
+./tools.sh pack show catalogue
+```
+
+```bash
+./tools.sh pack install catalogue
+```
+
+```bash
+./tools.sh run claude
+```
+
+Hors de Docker : `talixio-agent pack install catalogue --dir /opt/talixio/packs` sous un autre
+compte que celui du maître (avec `sudo`, par exemple), et `packs_dir = "/opt/talixio/packs"` dans
+`talixio.toml`. Voir `examples/catalogue`.
+
 ## En service
 
 Pour que le maître reparte seul au démarrage de la machine et après une panne, depuis le dossier

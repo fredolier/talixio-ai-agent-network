@@ -4,7 +4,7 @@
 # (cible `docker` de la configuration du maître), jetable et fermé, sans clé ni accès au maître
 # autre que son lien ; le navigateur y exécute les scripts des pages loin de tout le reste.
 #
-#   ./tools.sh build navigateur        (qui donne le dossier de scripts : --build-context outils=…)
+#   ./tools.sh build navigateur        (qui donne les paquets installés et le dossier de scripts : --build-context paquets=… outils=…)
 #
 # L'image porte aussi l'exécutable de l'agent (pris dans l'image `claude`, la même version que le
 # maître) et les scripts (`/outils`, immuables : le système du conteneur est en lecture seule).
@@ -31,6 +31,8 @@ RUN apt-get update \
 COPY --from=maitre /talixio-agent /talixio-agent
 # le dossier de scripts donné à la construction (--build-context outils=…)
 COPY --from=outils . /outils
-RUN chmod -R a+rX,go-w /outils
+# les paquets installés (--build-context paquets=…), au même chemin que chez le maître
+COPY --from=paquets . /packs
+RUN chmod -R a+rX,go-w /outils /packs
 USER 65532:65532
 ENV HOME=/tmp PATH=/usr/local/bin:/usr/bin:/bin

@@ -1,9 +1,9 @@
 # Exemple « catalogue » : une équipe d'agents tient à jour la liste des fournisseurs et des modèles.
 # Le maître dans Docker, ses agents à navigateur dans des conteneurs voisins :
-#   ./tools.sh build navigateur
-#   TALIXIO_DOCKER=1 TALIXIO_CONFIG=examples/catalogue/talixio.toml TALIXIO_TOOLS=examples/catalogue/outils ./tools.sh up claude
+#   ./tools.sh build claude && ./tools.sh pack install catalogue && ./tools.sh build navigateur
+#   TALIXIO_DOCKER=1 TALIXIO_CONFIG=examples/catalogue/talixio.toml ./tools.sh run claude
 # Sans TALIXIO_DOCKER=1, le maître ne peut pas lancer de conteneur : le collecteur tourne alors à
-# côté de lui, avec `lire-web` seul (pas de navigateur dans l'image du maître).
+# côté de lui, sans navigateur (il n'y en a pas dans l'image du maître).
 # Voir examples/catalogue/README.md.
 
 name = "maître"
@@ -16,22 +16,15 @@ chacun ne reçoit que les dossiers et les commandes dont son rôle a besoin.
 
 listen = "0.0.0.0:7700"
 state_dir = "/data/.talixio"
+# Le paquet « catalogue » (./tools.sh pack install catalogue) donne les commandes de lecture du
+# web et les trois rôles. Le maître ne peut ni l'installer ni le modifier.
+packs_dir = "/packs"
 
 [capabilities]
 fs_read = ["/data/work"]
 fs_write = ["/data/work"]
 # une passe complète avec un aller-retour de correction a épuisé 6 millions lors d'un essai
 max_tokens = 12000000
-
-# Lire une page du web : seulement par ce script, qui n'accepte que les sites de /outils/sites.txt.
-[[capabilities.exec]]
-program = "/outils/lire-web"
-args = ["*"]
-
-# La même, en ne gardant d'une grande liste que les éléments qui portent un mot.
-[[capabilities.exec]]
-program = "/outils/lire-web"
-args = ["*", "*"]
 
 # Le catalogue de cet exécutable, et le contrôle d'un catalogue candidat.
 [[capabilities.exec]]
@@ -48,7 +41,7 @@ max_depth = 1
 targets = ["local", "navigateur"]
 
 # Le conteneur du collecteur : jetable, en lecture seule, sans capacité, dans le réseau du maître.
-# Il ne voit que ses scripts (dans l'image) et son dossier de relevés (un sous-dossier du volume
+# Il ne voit que les paquets installés (dans l'image, sous /packs) et son dossier de relevés (un sous-dossier du volume
 # du maître, que le maître crée avant de le lancer). Ni clé, ni le reste du volume.
 [targets.navigateur]
 kind = "docker"
@@ -65,18 +58,18 @@ fs_read = ["/releves"]
 fs_write = ["/releves"]
 
 [[targets.navigateur.capabilities.exec]]
-program = "/outils/lire-web"
+program = "/packs/catalogue/lire-web"
 args = ["*"]
 
 [[targets.navigateur.capabilities.exec]]
-program = "/outils/lire-web"
+program = "/packs/catalogue/lire-web"
 args = ["*", "*"]
 
 [[targets.navigateur.capabilities.exec]]
-program = "/outils/lire-page"
+program = "/packs/catalogue/lire-page"
 args = ["*"]
 
 [[targets.navigateur.capabilities.exec]]
-program = "/outils/lire-page"
+program = "/packs/catalogue/lire-page"
 args = ["*", "*"]
 

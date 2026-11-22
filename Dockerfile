@@ -17,6 +17,7 @@ RUN apk add --no-cache build-base
 WORKDIR /src
 COPY Cargo.toml Cargo.lock catalog.toml releases.toml ./
 COPY src src
+COPY packs packs
 COPY web/dist web/dist
 RUN cargo build --release --locked \
  && strip target/release/talixio-agent \

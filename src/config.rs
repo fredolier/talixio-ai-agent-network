@@ -56,6 +56,19 @@ pub struct RootConfig {
     /// Cibles de déploiement : d'autres machines (SSH) ou des conteneurs (Docker).
     #[serde(default)]
     pub targets: BTreeMap<String, Target>,
+    /// Dossier des paquets installés par l'exploitant (`talixio-agent pack install`) : commandes
+    /// et rôles. Le maître le lit, le vérifie, et ne doit pas pouvoir l'écrire.
+    #[serde(default)]
+    pub packs_dir: Option<PathBuf>,
+    /// Pour un essai seulement : accepter un dossier de paquets que le maître peut écrire.
+    #[serde(default)]
+    pub packs_unprotected: bool,
+    /// Les rôles des paquets installés (jamais lus dans le fichier).
+    #[serde(skip)]
+    pub pack_roles: BTreeMap<String, crate::pack::InstalledRole>,
+    /// Les paquets installés, nom et version (jamais lus dans le fichier).
+    #[serde(skip)]
+    pub pack_names: Vec<String>,
 }
 
 /// Une cible de déploiement : où et comment lancer un enfant ailleurs que sur la machine du
@@ -341,6 +354,22 @@ impl RootConfig {
         let text = std::fs::read_to_string(path).with_context(|| format!("lecture de {}", path.display()))?;
         let mut cfg: RootConfig =
             toml::from_str(&text).with_context(|| format!("{} n'est pas une configuration valide", path.display()))?;
+        // une empreinte ne s'écrit pas à la main : elle vient des paquets installés
+        let rules = cfg.capabilities.exec.iter().chain(cfg.targets.values().flat_map(|t| &t.capabilities.exec));
+        if rules.clone().any(|rule| rule.sha256.is_some()) {
+            bail!("`sha256` ne s'écrit pas dans la configuration : il est posé par les paquets installés (packs_dir)");
+        }
+        // les paquets installés par l'exploitant : vérifiés contre leurs empreintes, et hors de
+        // portée d'écriture du maître, sans quoi il ne démarre pas
+        if let Some(dir) = &cfg.packs_dir {
+            if !dir.is_absolute() {
+                bail!("packs_dir doit être un chemin absolu");
+            }
+            let installed = crate::pack::load_installed(dir, !cfg.packs_unprotected).context("paquets installés")?;
+            cfg.capabilities.exec.extend(installed.exec);
+            cfg.pack_roles = installed.roles;
+            cfg.pack_names = installed.names;
+        }
         // sans `model`, le maître reçoit le sien depuis l'interface
         if !cfg.model.is_empty() {
             let Some(model) = cfg.models.get(&cfg.model) else {
@@ -411,6 +440,10 @@ impl RootConfig {
         }
         if let Some(dir) = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from).filter(|d| d.is_absolute()) {
             paths.push(dir.canonicalize().unwrap_or(dir));
+        }
+        // les paquets installés : ni lus ni écrits par un outil de fichiers, seulement lancés
+        if let Some(dir) = self.packs_dir.as_ref().and_then(|d| d.canonicalize().ok()) {
+            paths.push(dir);
         }
         // le socket Docker : qui l'ouvre commande la machine. Jamais par un outil d'agent.
         if cfg!(unix) {

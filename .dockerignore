@@ -6,6 +6,7 @@
 !catalog.toml
 !releases.toml
 !src
+!packs
 !web/dist
 !docker/talixio.toml
 !docker/chromium-seccomp.json

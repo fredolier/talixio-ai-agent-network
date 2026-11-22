@@ -292,6 +292,20 @@ fn system_prompt(node: &Node) -> String {
              fin de tour lui est affiché.\n",
         ),
     }
+    if !node.pack_roles.is_empty() {
+        prompt.push_str("\n# Rôles installés\nInstallés par la personne qui exploite la grappe ; toi, tu ne peux ni en ajouter ni les modifier. Pour créer un agent d'un de ces rôles : spawn_agent avec `role` égal à son nom. Ses consignes et ses commandes viennent alors du rôle : ne les recopie pas (`instructions` devient facultatif, pour un complément) ; donne-lui seulement ses dossiers, son budget, sa mission.\n");
+        for (name, role) in &node.pack_roles {
+            let mut hints = Vec::new();
+            if let Some(model) = &role.role.model {
+                hints.push(format!("modèle conseillé : {model}"));
+            }
+            if let Some(target) = &role.role.target {
+                hints.push(format!("cible conseillée : {target}"));
+            }
+            let hints = if hints.is_empty() { String::new() } else { format!(" ({})", hints.join(" ; ")) };
+            prompt.push_str(&format!("- {name} : {}{hints}\n", role.role.description));
+        }
+    }
     if !node.instructions.trim().is_empty() {
         prompt.push_str(&format!("\n# Tes consignes\n{}\n", node.instructions.trim()));
     }

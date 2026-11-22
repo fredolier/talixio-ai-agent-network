@@ -7,6 +7,28 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.17.0"
+date = "2026-11-22"
+title = "Des paquets de commandes et de rôles, installés par vous"
+summary = "Une commande à part liste, montre et installe des commandes et des rôles pour le maître, qui ne peut ni s'en ajouter ni les modifier."
+
+[[release.changes]]
+kind = "nouveau"
+text = "`talixio-agent pack list`, `show`, `install`, `remove`, `verify` (dans Docker : `./tools.sh pack …`). Un paquet donne des commandes (ses scripts, avec leurs arguments permis) et des rôles (consignes toutes faites). Le premier, « catalogue », est livré dans l'exécutable."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Le maître connaît les rôles installés : créer un agent avec le nom d'un de ces rôles lui donne ses consignes et ses commandes."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Le maître vérifie l'empreinte SHA-256 de chaque fichier de ses paquets au démarrage et refuse de démarrer si l'un a changé, ou s'il peut lui-même écrire leur dossier. Chaque commande de paquet est revérifiée avant chaque lancement, chez l'agent qui la lance."
+
+[[release.changes]]
+kind = "attention"
+text = "L'exemple « catalogue » passe par son paquet : `./tools.sh pack install catalogue`, puis `./tools.sh build navigateur`. Les scripts ne sont plus sous `/outils` mais sous `/packs/catalogue` ; `TALIXIO_TOOLS` n'est plus nécessaire pour cet exemple."
+
+[[release]]
 version = "0.16.1"
 date = "2026-11-22"
 title = "Conteneurs voisins : corrections de la revue de sécurité"

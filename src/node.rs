@@ -89,6 +89,8 @@ pub struct Node {
     pub advertise: Option<String>,
     /// Cibles de déploiement. Seul le maître en a : lui seul écoute hors de sa machine.
     pub targets: BTreeMap<String, Target>,
+    /// Rôles des paquets installés. Seul le maître en a.
+    pub pack_roles: BTreeMap<String, crate::pack::InstalledRole>,
     /// Signale que l'arbre a changé et doit être renvoyé au parent.
     pub tree_dirty: Notify,
     /// Où en est la mission confiée par le parent.
@@ -359,6 +361,7 @@ impl Node {
             log_max_bytes: cfg.log_max_bytes,
             advertise: cfg.advertise.clone(),
             targets: cfg.targets.clone(),
+            pack_roles: cfg.pack_roles.clone(),
             tree_dirty: Notify::new(),
             mission: Mutex::new(Mission::default()),
         };
@@ -405,6 +408,7 @@ impl Node {
             log_max_bytes: boot.log_max_bytes,
             advertise: None,
             targets: BTreeMap::new(),
+            pack_roles: BTreeMap::new(),
             tree_dirty: Notify::new(),
             mission: Mutex::new(Mission::default()),
         };

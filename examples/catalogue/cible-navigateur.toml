@@ -2,12 +2,16 @@
 # machine : `talixio-agent service install`) : le collecteur tourne alors dans un conteneur
 # jetable et fermé, avec un navigateur, loin du maître et de ses clés.
 #
-# 1. Construire l'image des agents à navigateur :   ./tools.sh build navigateur
-# 2. Remplacer les trois chemins /chemin/vers/… ci-dessous par les vôtres (chemins absolus).
+# 1. Installer le paquet :   talixio-agent pack install catalogue --dir /opt/talixio/packs
+#    (sous un autre compte que celui du maître, ou avec sudo : il ne doit pas pouvoir l'écrire),
+#    et dans la configuration du maître :   packs_dir = "/opt/talixio/packs"
+#    Construire l'image des agents à navigateur :   ./tools.sh build navigateur
+# 2. Remplacer les chemins /chemin/vers/… ci-dessous par les vôtres (chemins absolus). Le dossier
+#    des paquets est monté au même chemin que sur la machine : les commandes y gardent leur nom.
 # 3. Ajouter « navigateur » aux cibles permises :   [capabilities.spawn] targets = ["local", "navigateur"]
 # 4. Le maître doit être joignable depuis le conteneur :   listen = "0.0.0.0:7700"
 #
-# Ce que l'agent voit dans son conteneur : /outils (les scripts, en lecture seule) et /releves
+# Ce que l'agent voit dans son conteneur : les paquets (en lecture seule) et /releves
 # (son dossier de travail). Rien d'autre de la machine. Le système du conteneur est en lecture
 # seule, sans aucune capacité ; Chromium y garde son bac à sable grâce au filtre `seccomp`.
 
@@ -18,7 +22,7 @@ user = "65532:65532"
 memory = "2g"
 seccomp = "/chemin/vers/talixio-ai-agent-network/docker/chromium-seccomp.json"
 mounts = [
-  { host = "/chemin/vers/talixio-ai-agent-network/examples/catalogue/outils", container = "/outils" },
+  { host = "/opt/talixio/packs", container = "/opt/talixio/packs" },
   { host = "/chemin/vers/travail/catalogue/releves", container = "/releves", write = true },
 ]
 
@@ -28,17 +32,17 @@ fs_read = ["/releves"]
 fs_write = ["/releves"]
 
 [[targets.navigateur.capabilities.exec]]
-program = "/outils/lire-web"
+program = "/opt/talixio/packs/catalogue/lire-web"
 args = ["*"]
 
 [[targets.navigateur.capabilities.exec]]
-program = "/outils/lire-web"
+program = "/opt/talixio/packs/catalogue/lire-web"
 args = ["*", "*"]
 
 [[targets.navigateur.capabilities.exec]]
-program = "/outils/lire-page"
+program = "/opt/talixio/packs/catalogue/lire-page"
 args = ["*"]
 
 [[targets.navigateur.capabilities.exec]]
-program = "/outils/lire-page"
+program = "/opt/talixio/packs/catalogue/lire-page"
 args = ["*", "*"]

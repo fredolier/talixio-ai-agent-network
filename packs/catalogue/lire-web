@@ -1,8 +1,8 @@
 #!/bin/bash
 # Lit une page du web pour un agent, et rien d'autre : une adresse https, sur un site de la
 # liste (sites.txt, à côté de ce script), sans suivre de redirection, taille et durée bornées.
-# L'agent n'a pas `curl` : il n'a que ce script. Posez ce dossier hors de portée des agents
-# (dans Docker : monté en lecture seule sur /outils).
+# L'agent n'a pas `curl` : il n'a que ce script, installé avec son paquet dans un dossier que
+# le maître ne peut pas écrire (`talixio-agent pack install catalogue`).
 #
 #   lire-web https://exemple.fr/prix          le contenu, balises retirées si c'est une page
 #   lire-web https://exemple.fr/api.json      tel quel si c'est du JSON

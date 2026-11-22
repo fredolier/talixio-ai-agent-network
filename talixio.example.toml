@@ -163,6 +163,11 @@ args = ["-l", "{read}"]
 #
 # Puis : targets = ["local", "vm-build", "bac"] dans [capabilities.spawn].
 
+# Paquets installés par vous (`talixio-agent pack list`, `pack show <nom>`, `pack install <nom>
+# --dir <dossier>`) : des commandes et des rôles. Le maître vérifie leurs empreintes au démarrage,
+# et refuse de démarrer s'il peut écrire ce dossier : installez sous un autre compte (sudo).
+# packs_dir = "/opt/talixio/packs"
+
 [capabilities.spawn]
 max_children = 5   # enfants directs en vie
 max_depth = 2      # niveaux sous le maître
