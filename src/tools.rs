@@ -1015,7 +1015,11 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value, resumed: Option<&str>) -> 
     node.emit("spawn", format!("agent {name} ({}) créé — rôle : {}{}", boot.agent_id, boot.role, if permanent { " — permanent" } else { "" }));
     node.tree_dirty.notify_one();
     let from_role = match template {
-        Some(template) => format!(" Rôle installé « {} » : ses consignes et ses commandes ({}) lui ont été données.", boot.role, template.exec.len()),
+        Some(template) => {
+            // au journal : de quel paquet, à quel contenu, cet agent tient son rôle
+            node.emit("spawn", format!("agent {name} : rôle installé « {} », paquet {} {} (identifiant {})", boot.role, template.pack, template.version, template.pack_id));
+            format!(" Rôle installé « {} » : ses consignes et ses commandes ({}) lui ont été données.", boot.role, template.exec.len())
+        }
         None => String::new(),
     };
     Ok(format!(

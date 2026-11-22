@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, forgetToken, keepToken, savedToken, Unauthorized } from './api'
-import type { ActivityEvent, Agent, ModelsData, Release, RoleEntry } from './types'
+import type { ActivityEvent, Agent, InstalledRole, ModelsData, Release, RoleEntry } from './types'
 
 const KEPT = 5000
 /** Le fournisseur dont l'autorisation dans le navigateur est en cours, le temps de l'aller-retour. */
@@ -13,6 +13,7 @@ export interface Cluster {
   offline: boolean
   models: ModelsData | null
   roles: RoleEntry[] | null
+  installedRoles: InstalledRole[]
   releases: { version: string; releases: Release[] } | null
   refresh: () => void
   /** Ce que le retour d'une autorisation dans le navigateur a donné. */
@@ -34,6 +35,7 @@ export function useCluster() {
   const [offline, setOffline] = useState(false)
   const [models, setModels] = useState<Cluster['models']>(null)
   const [roles, setRoles] = useState<RoleEntry[] | null>(null)
+  const [installedRoles, setInstalledRoles] = useState<InstalledRole[]>([])
   const [releases, setReleases] = useState<Cluster['releases']>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const after = useRef(0)
@@ -66,7 +68,12 @@ export function useCluster() {
       }
       // le répertoire des rôles bouge peu : une lecture sur six
       if (round.current++ % 6 === 0) {
-        api<{ roles: RoleEntry[] }>(token, '/api/roles').then((r) => setRoles(r.roles)).catch(() => {})
+        api<{ roles: RoleEntry[]; installed?: InstalledRole[] }>(token, '/api/roles')
+          .then((r) => {
+            setRoles(r.roles)
+            setInstalledRoles(r.installed ?? [])
+          })
+          .catch(() => {})
       }
     } catch (error) {
       if (error instanceof Unauthorized) logout(error.message)
@@ -125,6 +132,7 @@ export function useCluster() {
           offline,
           models,
           roles,
+          installedRoles,
           releases,
           refresh,
           notice,

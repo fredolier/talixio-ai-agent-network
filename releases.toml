@@ -7,6 +7,20 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.19.0"
+date = "2026-11-22"
+title = "Les rôles installés dans l'interface"
+summary = "La page « Rôles » montre les rôles venus des paquets : d'où ils viennent et ce qu'ils donnent à un agent."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Page « Rôles » : les rôles installés (paquet, version, identifiant, description, commandes, consignes) avant les agents créés, avec le nombre d'agents qui en sont issus. Lecture seule : l'installation reste à `talixio-agent pack install`."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Le journal note, à la création d'un agent par un rôle installé, le paquet, sa version et son identifiant."
+
+[[release]]
 version = "0.18.0"
 date = "2026-11-22"
 title = "Un compte dédié, et des fichiers que le maître ne peut pas modifier"

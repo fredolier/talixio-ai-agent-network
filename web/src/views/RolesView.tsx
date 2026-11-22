@@ -19,16 +19,68 @@ export function RolesView({ cluster }: { cluster: Cluster }) {
     }
     return [...byRole]
   }, [cluster.roles, filter])
+  const installed = useMemo(() => {
+    const wanted = filter.trim().toLowerCase()
+    return cluster.installedRoles.filter((role) => !wanted || `${role.name} ${role.description} ${role.instructions}`.toLowerCase().includes(wanted))
+  }, [cluster.installedRoles, filter])
+  const made = (name: string) => (cluster.roles ?? []).filter((entry) => entry.role === name).length
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         eyebrow="Maîtrise · Rôles"
-        title="Les rôles créés dans la grappe"
-        lead="Chaque agent créé, par le maître ou plus bas, est inscrit ici avec ce qui lui a été accordé. Le répertoire survit aux redémarrages."
+        title="Les rôles de la grappe"
+        lead="Les rôles installés par l'exploitant, que le maître peut donner à un agent, puis chaque agent créé, par le maître ou plus bas, avec ce qui lui a été accordé. Le répertoire survit aux redémarrages."
       >
         <Input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Chercher un rôle, un nom, une consigne…" aria-label="Chercher un rôle" className="w-full sm:w-72" />
       </PageHeader>
+      {installed.length > 0 && (
+        <section aria-labelledby="roles-installes" className="flex flex-col gap-3">
+          <div>
+            <h2 id="roles-installes" className="text-base font-semibold">Rôles installés</h2>
+            <p className="mt-0.5 max-w-2xl text-sm text-muted-foreground">
+              Venus de paquets posés sur la machine par <span className="font-mono text-[12.5px]">talixio-agent pack install</span>. Le maître peut les donner, pas les modifier : consignes et commandes sont vérifiées par empreinte.
+            </p>
+          </div>
+          <ul className="grid items-start gap-3 lg:grid-cols-2">
+            {installed.map((role) => (
+              <li key={role.name} className="rounded-lg border bg-card px-5 py-4">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <h3 className="font-mono text-sm font-semibold">{role.name}</h3>
+                  <span className="ml-auto text-xs text-muted-foreground">{made(role.name) ? `${plural(made(role.name), 'agent')} créé${made(role.name) > 1 ? 's' : ''}` : 'pas encore employé'}</span>
+                </div>
+                <p className="mt-1.5">{role.description}</p>
+                <dl className="mt-3 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-2">
+                  <Field label="Paquet">
+                    {role.pack} · version {role.version} · <span className="font-mono text-[12.5px]" title={`Identifiant du paquet (empreinte de son contenu) : ${role.pack_id}`}>{role.pack_id.slice(0, 12)}</span>
+                  </Field>
+                  {(role.model || role.target) && (
+                    <Field label="Conseillé">{[role.model && `modèle ${role.model}`, role.target && `cible ${role.target}`].filter(Boolean).join(' · ')}</Field>
+                  )}
+                  <Field label="Commandes">
+                    {role.exec.length ? (
+                      <ul className="flex flex-col gap-1">
+                        {role.exec.map((rule, index) => (
+                          <li key={index} title={rule.program}><RuleLine rule={{ ...rule, program: rule.program.split('/').pop() ?? rule.program }} /></li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <span className="text-muted-foreground">aucune</span>
+                    )}
+                  </Field>
+                  <Field label="Consignes">
+                    <details>
+                      <summary className="cursor-pointer text-muted-foreground">Lire les consignes données à l'agent</summary>
+                      <p className="mt-2 whitespace-pre-wrap">{role.instructions}</p>
+                    </details>
+                  </Field>
+                </dl>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {installed.length > 0 && <h2 className="text-base font-semibold">Agents créés</h2>}
       {!cluster.roles ? (
         <Skeleton className="h-40 rounded-lg" />
       ) : groups.length === 0 ? (

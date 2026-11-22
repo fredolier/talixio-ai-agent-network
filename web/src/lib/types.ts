@@ -6,6 +6,21 @@ export interface ExecRule {
   program: string
   args?: string[] | null
   cwd?: string | null
+  /** Commande d'un paquet : l'empreinte du fichier installé, vérifiée avant chaque lancement. */
+  sha256?: string | null
+}
+
+/** Un rôle installé par l'exploitant (paquet), que le maître peut donner à un agent. */
+export interface InstalledRole {
+  name: string
+  pack: string
+  version: string
+  pack_id: string
+  description: string
+  instructions: string
+  model: string | null
+  target: string | null
+  exec: ExecRule[]
 }
 
 export interface Capabilities {

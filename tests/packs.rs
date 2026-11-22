@@ -165,6 +165,16 @@ async fn un_paquet_installe_sert_et_reste_verifie() {
     let rule = &tree["children"][0]["capabilities"]["exec"][0];
     assert_eq!(rule["program"], program.to_str().unwrap());
     assert_eq!(rule["sha256"].as_str().unwrap().len(), 64, "{rule}");
+    // le rôle installé est montré à l'exploitant avec son paquet et l'identifiant de celui-ci,
+    // et le journal dit de quel paquet l'agent tient son rôle
+    let roles = api.get("/api/roles").await;
+    let shown = &roles["installed"][0];
+    assert_eq!(shown["name"], "bonjour/salueur", "{roles}");
+    assert_eq!(shown["pack"], "bonjour");
+    let id = shown["pack_id"].as_str().unwrap();
+    assert!(id.len() == 64 && pin.contains(id), "{shown}");
+    assert_eq!(shown["exec"][0]["sha256"], rule["sha256"]);
+    api.wait_event("le paquet au journal", |e| e["kind"] == "spawn" && e["text"].as_str().is_some_and(|t| t.contains("rôle installé « bonjour/salueur », paquet bonjour") && t.contains(id))).await;
 
     // le script est modifié sous le maître en marche : la commande est refusée
     std::fs::write(&program, "#!/bin/sh\necho pirate\n").unwrap();

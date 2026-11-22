@@ -95,6 +95,9 @@ pub struct Pack {
 #[derive(Clone, Debug)]
 pub struct InstalledRole {
     pub pack: String,
+    /// La version et l'identifiant (empreinte du contenu) du paquet dont il vient.
+    pub version: String,
+    pub pack_id: String,
     pub role: Role,
     pub exec: Vec<ExecRule>,
 }
@@ -431,14 +434,14 @@ pub fn load_installed(dir: &Path, strict: bool) -> Result<Installed> {
                 sha256: Some(sha256_hex(&pack.files[&command.program])),
             });
         }
+        let id = pack.id();
         for role in &pack.manifest.roles {
             // toujours « paquet/rôle » : un rôle installé ne prend pas la place d'un rôle que le
             // maître nomme lui-même
             let exec = rules.iter().filter(|r| role.commands.iter().any(|c| r.program.file_name().is_some_and(|f| f == c.as_str()))).cloned().collect();
-            installed.roles.insert(format!("{name}/{}", role.name), InstalledRole { pack: name.clone(), role: role.clone(), exec });
+            installed.roles.insert(format!("{name}/{}", role.name), InstalledRole { pack: name.clone(), version: pack.manifest.version.clone(), pack_id: id.clone(), role: role.clone(), exec });
         }
         installed.exec.extend(rules);
-        let id = pack.id();
         installed.names.push(format!("{name} {} ({})", pack.manifest.version, &id[..12]));
         installed.ids.insert(name, id);
     }

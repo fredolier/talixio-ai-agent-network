@@ -562,6 +562,14 @@ Demandé le 2026-11-20. Rien n'est codé.
     là où ils sont). `--print` montre tout sans rien faire. macOS et Windows : pas encore. Dans
     Docker, l'équivalent existe déjà (dossier des paquets monté en lecture seule, décision 37).
 
+39. **Les rôles installés se voient dans l'interface** (2026-11-22). `GET /api/roles` rend, en
+    plus du répertoire des agents créés, `installed` : pour chaque rôle installé, son nom
+    (« paquet/rôle »), son paquet, la version et l'identifiant de celui-ci, sa description, ses
+    consignes, le modèle et la cible conseillés, ses commandes avec leur empreinte. La page
+    « Rôles » les montre avant les agents créés, avec le nombre d'agents qui en sont issus. Lecture
+    seule : rien ne s'installe ni ne se modifie depuis l'interface (décision 37). À la création
+    d'un agent par un rôle installé, le journal note le paquet, sa version et son identifiant.
+
 ## 5. Architecture
 
 ```

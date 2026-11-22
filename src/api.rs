@@ -142,14 +142,33 @@ async fn models(State(app): State<App>, headers: HeaderMap) -> Response {
     Json(body).into_response()
 }
 
-/// Le répertoire des rôles : chaque agent créé dans la grappe, avec ce qu'on lui a accordé.
+/// Le répertoire des rôles : chaque agent créé dans la grappe, avec ce qu'on lui a accordé ; et
+/// les rôles installés par l'exploitant (paquets), que le maître peut donner à un agent.
 async fn roles(State(app): State<App>, headers: HeaderMap) -> Response {
     if let Err(response) = authorize(&app, &headers) {
         return response;
     }
     let store = app.node.store.clone();
     let roles = tokio::task::spawn_blocking(move || store.roles()).await.unwrap_or_default();
-    Json(json!({ "roles": roles })).into_response()
+    let installed: Vec<_> = app
+        .node
+        .pack_roles
+        .iter()
+        .map(|(name, role)| {
+            json!({
+                "name": name,
+                "pack": role.pack,
+                "version": role.version,
+                "pack_id": role.pack_id,
+                "description": role.role.description,
+                "instructions": role.role.instructions,
+                "model": role.role.model,
+                "target": role.role.target,
+                "exec": role.exec,
+            })
+        })
+        .collect();
+    Json(json!({ "roles": roles, "installed": installed })).into_response()
 }
 
 /// Les notes de version, pour l'interface : la version qui tourne, puis toutes les notes.
