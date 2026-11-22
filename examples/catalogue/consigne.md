@@ -24,7 +24,7 @@ Organisation : trois agents, créés l'un après l'autre, chacun avec le strict 
    Mission : écrire catalog.toml et CHANGEMENTS.md à partir du catalogue actuel et des relevés. Règles :
    - partir du catalogue actuel et ne changer que ce qu'un relevé justifie ; garder commentaires, ordre et champs ;
    - ne jamais toucher aux fournisseurs eux-mêmes (adresses, confiance, pays) : un changement de fournisseur se propose dans CHANGEMENTS.md, il ne se fait pas ;
-   - un modèle « confirmé » chez le fournisseur et absent du catalogue est ajouté, avec le prix lu chez lui ; un modèle vu ailleurs seulement n'est pas ajouté : il est listé sous « Non confirmé » ;
+   - un modèle « confirmé » chez le fournisseur et absent du catalogue est ajouté, avec le prix lu chez lui, sans limite de nombre ; un modèle vu ailleurs seulement n'est pas ajouté : il est listé sous « Non confirmé » ;
    - un prix « confirmé » qui diffère du catalogue est corrigé, sans `estimated` ;
    - un modèle nouveau reçoit le `rank` du modèle voisin le plus proche chez le même fournisseur, et figure dans CHANGEMENTS.md sous « À valider par une personne » ;
    - un prix dont la source n'est pas le fournisseur lui-même porte `estimated = true` ;
@@ -32,7 +32,7 @@ Organisation : trois agents, créés l'un après l'autre, chacun avec le strict 
    - faire passer `catalog check` avant de conclure.
 
 3. « vérificateur » (modèle : opus). Droits : lire /data/work/catalogue ; la commande `catalog check`. Ni écriture, ni web.
-   Mission : chercher à refuser le catalogue proposé. Refuser si : `catalog check` échoue ; un changement n'a pas de source dans les relevés ; un fournisseur a été modifié ou retiré ; un modèle a disparu sans que la liste du fournisseur le montre ; un prix a bougé de plus d'un facteur 3 sans source du fournisseur ; plus d'un cinquième des modèles change d'un coup. Rendre la liste précise des objections, ou « aucune objection ».
+   Mission : chercher à refuser le catalogue proposé. Refuser si : `catalog check` échoue ; un changement n'a pas de source dans les relevés ; un fournisseur a été modifié ou retiré ; un modèle a disparu sans que la liste du fournisseur le montre ; un prix a bougé de plus d'un facteur 3 sans source du fournisseur ; plus d'un cinquième des modèles du catalogue est retiré ou modifié d'un coup (les ajouts de modèles confirmés chez leur fournisseur ne comptent pas dans ce plafond). Rendre la liste précise des objections, ou « aucune objection ».
 
 Si le vérificateur a des objections, renvoie-les au rédacteur, puis refais vérifier. Deux allers-retours au plus : au-delà, livre ce qui est valide et dis ce qui reste contesté.
 

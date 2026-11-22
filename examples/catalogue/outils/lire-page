@@ -11,8 +11,9 @@
 //   - ce que la page charge pour se construire (scripts, styles, données) : en https, sur un nom
 //     public ; jamais une adresse chiffrée, un nom local, ni une adresse privée ;
 //   - tout ce que le navigateur envoie, quel qu'en soit l'auteur (page, redirection, tâche de
-//     fond), sort par un mandataire tenu par ce script : https seulement, port 443, vers
-//     l'adresse publique qu'il a lui-même résolue et contrôlée ; rien vers cette machine ;
+//     fond), sort par un mandataire tenu par ce script : https seulement, port 443, vers un
+//     nom que ce script a approuvé, à l'adresse publique qu'il a lui-même résolue ; rien vers
+//     cette machine ; une redirection vers un site que la liste ne porte pas ne part pas ;
 //   - ni image, ni police, ni média, ni téléchargement, ni connexion permanente, ni WebRTC ;
 //   - rien n'est gardé d'une lecture à l'autre (profil neuf, jeté à la fin) ; 60 s au plus.
 // Le bac à sable de Chromium reste en place. Réglages de l'exploitant, facultatifs, dans
@@ -71,6 +72,12 @@ function inside(address) {
   return low === '::' || low === '::1' || /^f[cdef]/.test(low) || low.startsWith('::ffff:') || low.startsWith('64:ff9b:') || low.startsWith('2002:');
 }
 
+// Les noms que ce script a lui-même approuvés pour cette lecture : le mandataire n'ouvre qu'eux
+// et les sites de la liste. Une redirection, une tâche de fond ou le navigateur lui-même ne
+// peuvent donc rien envoyer à un nom que le contrôle des requêtes n'a pas vu passer.
+const opened = new Set();
+// les premiers noms refusés par le mandataire : pour dire où un site a voulu mener
+const turned = [];
 const judged = new Map();
 // Les adresses publiques d'un nom, ou rien : ni adresse chiffrée, ni nom local, ni nom qui mène
 // à l'intérieur. Le résultat est gardé : c'est à ces adresses-là qu'on se connectera.
@@ -97,12 +104,25 @@ function gate() {
   server.on('connect', async (request, socket) => {
     socket.on('error', () => {});
     const found = /^([a-z0-9.-]+):443$/i.exec(request.url || '');
-    const list = found ? await addresses(found[1]) : [];
-    if (!list.length) return socket.end('HTTP/1.1 403 Forbidden\r\n\r\n');
-    const upstream = net.connect({ host: list[0], port: 443 });
-    upstream.on('error', () => socket.destroy());
-    upstream.once('connect', () => { socket.write('HTTP/1.1 200 Connection Established\r\n\r\n'); upstream.pipe(socket); socket.pipe(upstream); });
-    socket.on('close', () => upstream.destroy());
+    const name = found ? found[1].toLowerCase() : '';
+    const list = found && (opened.has(name) || allowed(name)) ? await addresses(name) : [];
+    if (!list.length) {
+      // (sans les noms que Chromium appelle de lui-même, refusés comme les autres)
+      if (name && !/(^|\.)(accounts\.google\.com|googleapis\.com|gvt1\.com|clients[0-9]*\.google\.com)$/.test(name) && !turned.includes(name) && turned.length < 3) turned.push(name);
+      return socket.end('HTTP/1.1 403 Forbidden\r\n\r\n');
+    }
+    // les adresses contrôlées, l'une après l'autre (une IPv6 sans route ne rend pas le site illisible)
+    const reach = (index) => {
+      if (index >= list.length || socket.destroyed) return socket.destroy();
+      const upstream = net.connect({ host: list[index], port: 443, timeout: 8000 });
+      let joined = false;
+      upstream.on('timeout', () => upstream.destroy());
+      upstream.on('error', () => {});
+      upstream.on('close', () => (joined ? socket.destroy() : reach(index + 1)));
+      upstream.once('connect', () => { joined = true; upstream.setTimeout(0); socket.write('HTTP/1.1 200 Connection Established\r\n\r\n'); upstream.pipe(socket); socket.pipe(upstream); });
+      socket.on('close', () => upstream.destroy());
+    };
+    reach(0);
   });
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
 }
@@ -141,7 +161,7 @@ async function main() {
     if (context.routeWebSocket) await context.routeWebSocket(/.*/, (socket) => socket.close());
     // ce dont une page n'a pas besoin pour montrer ses prix : ni fenêtre, ni tâche de fond partagée, ni pair à pair
     await context.addInitScript(() => {
-      for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel', 'SharedWorker', 'WebTransport', 'WebSocket', 'EventSource']) {
+      for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel', 'Worker', 'SharedWorker', 'WebTransport', 'WebSocket', 'EventSource']) {
         try { Object.defineProperty(window, name, { value: undefined, configurable: false, writable: false }); } catch { /* déjà absent */ }
       }
       try { window.open = () => null; } catch { /* figé */ }
@@ -157,10 +177,13 @@ async function main() {
           try { if (request.frame() === page.mainFrame()) away = target.hostname.toLowerCase(); } catch { /* une fenêtre que la page a voulu ouvrir : pas de cadre */ }
           return route.abort();
         }
+        opened.add(target.hostname.toLowerCase());
         return route.continue();
       }
       if (!['script', 'stylesheet', 'xhr', 'fetch'].includes(request.resourceType())) return route.abort();
-      return (await outside(target)) ? route.continue() : route.abort();
+      if (!(await outside(target))) return route.abort();
+      opened.add(target.hostname.toLowerCase());
+      return route.continue();
     });
     const page = await context.newPage();
     page.on('dialog', (dialog) => dialog.dismiss().catch(() => {}));
@@ -170,9 +193,11 @@ async function main() {
       response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     } catch (error) {
       if (away) {
-        console.log(allowed(away) ? `le site répond par une redirection vers ${away}` : 'le site répond par une redirection vers un site hors de la liste');
+        console.log('le site répond par une redirection vers un site hors de la liste');
         return;
       }
+      // un nom de machine seulement (lettres, chiffres, points, tirets) : de quoi compléter la liste, rien de plus
+      if (turned.length) { console.log(`le site renvoie vers ${turned[0]}, qui n'est pas dans la liste des sites permis`); return; }
       refuse('lecture impossible');
     }
     // où que le site ait mené (redirection, script), on ne rend que le texte d'une page de la liste

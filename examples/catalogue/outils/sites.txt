@@ -16,6 +16,7 @@ platform.openai.com
 developers.openai.com
 openai.com
 ai.google.dev
+aistudio.google.com
 www.ovhcloud.com
 endpoints.ai.cloud.ovh.net
 oai.endpoints.kepler.ai.cloud.ovh.net

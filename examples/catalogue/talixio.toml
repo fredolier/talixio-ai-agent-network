@@ -20,7 +20,8 @@ state_dir = "/data/.talixio"
 [capabilities]
 fs_read = ["/data/work"]
 fs_write = ["/data/work"]
-max_tokens = 6000000
+# une passe complète avec un aller-retour de correction a épuisé 6 millions lors d'un essai
+max_tokens = 12000000
 
 # Lire une page du web : seulement par ce script, qui n'accepte que les sites de /outils/sites.txt.
 [[capabilities.exec]]
