@@ -6,12 +6,17 @@
 #
 #   ./tools.sh build navigateur        (ou : docker build -f docker/Dockerfile.navigateur -t talixio-navigateur .)
 #
-# L'image ne contient ni l'agent ni les scripts : le maître y monte son exécutable, et la cible
-# montre le dossier des scripts en lecture seule. Le bac à sable de Chromium demande au noyau de
-# créer des espaces de noms, ce que le filtre ordinaire de Docker refuse : la cible donne
-# `seccomp = ".../docker/chromium-seccomp.json"`, qui est ce filtre plus ces seuls appels.
+# L'image porte aussi l'exécutable de l'agent (pris dans l'image `claude`, la même version que le
+# maître) et les scripts (`/outils`, immuables : le système du conteneur est en lecture seule).
+# Un maître en conteneur lance l'agent tel quel (`agent_in_image = true`) ; un maître installé
+# sur la machine monte son propre exécutable par-dessus. Le bac à sable de Chromium demande au
+# noyau de créer des espaces de noms, ce que le filtre ordinaire de Docker refuse : la cible donne
+# `seccomp = ".../chromium-seccomp.json"`, qui est ce filtre plus ces seuls appels.
 # Sur Debian, avec le Chromium que Playwright fournit et essaie (celui d'Alpine est arrêté par
 # son propre bac à sable sur les noyaux récents). Comptez 1,2 Go d'image.
+
+ARG BASE=talixio-agent:claude
+FROM ${BASE} AS maitre
 
 FROM debian:stable-slim
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
@@ -23,5 +28,9 @@ RUN apt-get update \
  && playwright install --with-deps --only-shell chromium \
  && npm cache clean --force && rm -rf /var/lib/apt/lists/* \
  && useradd --uid 65532 --create-home --home-dir /home/talixio talixio
+COPY --from=maitre /talixio-agent /talixio-agent
+# le dossier de scripts donné à la construction (--build-context outils=…)
+COPY --from=outils . /outils
+RUN chmod -R a+rX,go-w /outils
 USER 65532:65532
 ENV HOME=/tmp PATH=/usr/local/bin:/usr/bin:/bin

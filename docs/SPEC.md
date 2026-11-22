@@ -480,6 +480,22 @@ Demandé le 2026-11-20. Rien n'est codé.
     Limites : ce conteneur garde le réseau (limite 8) ; un nom public qui change d'adresse entre
     le contrôle et la connexion n'est pas arrêté ; un site peut refuser un navigateur piloté ;
     un maître lui-même dans Docker ne peut pas encore lancer de conteneur (Q12).
+36. **Un maître en conteneur lance ses agents dans des conteneurs voisins** (demandé :
+    « créer des Docker avec des agents dedans, avec un contexte isolé »). Sur option explicite
+    (`TALIXIO_DOCKER=1 ./tools.sh up claude`), le maître reçoit le socket Docker de la machine,
+    qu'il ouvre par le groupe qui le détient, et tourne avec ses agents dans un réseau Docker à
+    part. La cible `docker` reçoit ce qu'il faut pour ne dépendre d'aucun chemin de la machine,
+    que le maître en conteneur ne connaît pas : `network` (l'agent joint le maître dans ce
+    réseau), `agent_in_image` (l'exécutable de l'agent est dans l'image, construite à partir de
+    celle du maître), et des montages par `volume` et `subpath` (un sous-dossier du volume du
+    maître, jamais le volume entier, où sont ses clés). Le conteneur d'un agent reste celui de
+    la décision 19 : jetable, lecture seule, aucune capacité, jamais le socket. **Prix, accepté
+    pour un premier temps** : qui prend le process du maître commande Docker, donc la machine
+    en root (limite 9). Le socket est interdit d'office aux outils des agents, aucune règle de
+    commande ne donne `docker` par défaut, et le client Docker sans socket ne peut rien. À
+    terme : le maître dans une machine virtuelle. Non essayé : Docker sans droits
+    d'administrateur (« rootless »), où le compte sans droit du conteneur n'ouvre sans doute
+    pas le socket.
 20. **Les notes de version ont une source unique**, `releases.toml`, embarquée dans l'exécutable.
     Chaque version y ajoute une entrée ; un test refuse une version sans note.
 
@@ -583,7 +599,7 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 | Q9 | Android (P4) : piloter depuis le téléphone, ou y faire tourner un agent ? | Piloter : l'interface web, installable comme application (PWA), suffit ; elle demande HTTPS et un maître joignable depuis le téléphone, donc l'étape 2. Agent sur le téléphone : Rust se compile pour Android, mais le système arrête les process d'arrière-plan et enferme chaque application ; à n'étudier que si un usage le demande. |
 | Q10 | Catalogue de fournisseurs et capacités image et voix (F1–F4). | Fait pour l'essentiel (décisions 25 et 26, v0.9.0 et v0.10.0 : on se connecte et on active depuis la page). Reste ouvert : comptage en argent (B4) ; mise à jour du catalogue depuis les fournisseurs ; essai chez de vrais fournisseurs. Notes de l'étude : Format de l'assistant relu (`src/ModelCatalog.php`, `Sovereign.php`, `Routing.php`, `Pricing.php`) : une table de fournisseurs (identifiant, nom, pays, niveau de confiance, adresse, mode de facturation) et une table de modèles (identifiant exact de l'API, fournisseur, nature `LLM`, `Vision`, `Voice`, `Image`, `Embedding`, prix par million de tokens ou par unité : minute, image). Usages liés à un modèle : `fast`, `standard`, `deep`, `voice`, `vision`, `embedding` ; effort et tokens de réflexion portés par le palier. À reprendre ici : `[providers.<nom>]` (adresse, type d'API, fichier de clé) et des modèles par nature, avec prix ; droits de la forme `fournisseur/modèle`. À savoir : l'assistant ne tient ni taille de contexte ni effort par modèle, ne compte que les tokens (minutes et images sont affichées, pas comptées), et n'appelle aucune API d'image ni de synthèse vocale : seules la transcription (`POST /audio/transcriptions`) et les embeddings existent. Image et synthèse sont donc à écrire, pas à reprendre. Côté maître, du code par nature : nouveaux messages du lien, tailles bornées autrement (un son ou une image pèse lourd), comptage en argent (B4), nouveaux outils chez l'agent. Nouvelle surface : revue de sécurité avant de coder. |
 | Q11 | Se connecter par abonnement (Claude Pro/Max, ChatGPT) plutôt que par clé d'API ? | **Tranchée (2026-11-21) : oui, par la commande officielle `claude` seulement (décision 32).** D'abord écartée (« pas de dépendances, un seul exécutable »), puis demandée : l'abonnement Max doit pouvoir servir. Talixio reste un exécutable seul ; `claude` est un programme externe facultatif. Pour mémoire : L'assistant le fait pour Claude seulement, en pilotant la commande officielle `claude` (`setup-token`, puis `claude -p` à chaque tour, les outils exposés en MCP). Ici, cela demande d'installer cette commande à côté du maître, qui ne serait plus un exécutable seul, et un connecteur d'une autre nature (la commande tient elle-même la boucle d'outils). Le jeton d'abonnement ne doit pas servir à appeler l'API directement : les conditions d'Anthropic réservent cet usage à ses propres outils. Rien d'équivalent chez OpenAI dans l'assistant. |
-| Q12 | Un maître lui-même dans Docker doit-il pouvoir lancer des agents dans d'autres conteneurs ? Comment ? | **Ouverte (2026-11-22), demandée.** Trois voies. (a) Montrer au maître le socket Docker de la machine : les agents deviennent des conteneurs voisins. Simple, mais qui prend le maître prend la machine en root, sauf avec un Docker sans droits d'administrateur (« rootless »), où il ne prend que son compte. (b) Docker dans Docker : demande un conteneur privilégié, donc pire que (a), pour une isolation moindre. (c) Maître installé sur la machine (`service install`) : marche aujourd'hui, essayé. Proposition : (a), en option explicite de `tools.sh`, en recommandant un Docker rootless. À faire pour (a) : l'exécutable de l'agent et les montages sont aujourd'hui des chemins de la machine, que le maître en conteneur ne connaît pas (exécutable à prendre dans une image, dossiers dans le volume du maître) ; un réseau Docker dédié pour le lien ; le socket dans les chemins interdits aux agents. Nouvelle surface : revue de sécurité avant livraison. |
+| Q12 | Un maître lui-même dans Docker doit-il pouvoir lancer des agents dans d'autres conteneurs ? Comment ? | **Tranchée (2026-11-22) : oui, par le socket Docker de la machine (décision 36)**, « dans un premier temps » ; à terme, le maître ira dans une machine virtuelle. Écartés : Docker dans Docker (conteneur privilégié, pire pour une isolation moindre). Le maître installé sur la machine reste possible. |
 | Q11 | Répertoire des rôles (R1–R3). | Une table SQLite chez le maître. Écriture : à chaque `spawn_agent`, le rôle remonte par le lien, de parent en parent ; à chaque fin de mission, son résultat. Lecture : un outil `find_role` (recherche par mots, puis par embeddings quand F1 existera), dont la demande remonte au maître comme une demande de modèle. Sécurité, à trancher avant de coder : un rôle enregistré contient des instructions écrites par un agent, donc un texte qui peut avoir été empoisonné et que d'autres agents reliront. Il doit être présenté comme une donnée à évaluer, jamais comme une consigne ; ne jamais porter de droits (les droits restent accordés par le parent, dans la limite des siens) ; et un rôle « approuvé » par l'humain doit se distinguer d'un rôle seulement observé. Fuite : un agent d'une branche lit ce qu'une autre branche a écrit ; prévoir de quoi cloisonner. |
 
 ## 7. Sécurité
@@ -619,9 +635,15 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 7. **Le compte du maître détient la clé SSH** : qui prend le maître prend les machines cibles,
    dans la limite de leurs comptes dédiés. Le fichier de clé est interdit aux outils des agents.
 8. **Un conteneur garde le réseau** : il doit joindre le maître. Il peut donc aussi joindre le
-   reste du réseau de la machine. À fermer par un réseau Docker dédié, côté machine.
+   reste du réseau de la machine. À fermer par un réseau Docker dédié, côté machine. Avec
+   `network` (décision 36), les agents sont dans le réseau du maître : ils s'y voient entre eux
+   et voient l'API du maître, que gardent son jeton et le secret du lien ; ils gardent la sortie
+   vers internet, dont leur travail a besoin.
 9. **Lancer `docker` revient à être root sur la machine** : le maître d'une cible Docker doit
-   être tenu pour tel. Le socket Docker n'est jamais montré à un conteneur d'agent.
+   être tenu pour tel. Le socket Docker n'est jamais montré à un conteneur d'agent. Un maître
+   en conteneur qui a reçu le socket (décision 36) n'est plus enfermé par son conteneur : qui
+   prend son process sort sur la machine. Accepté pour un premier temps, sur option explicite ;
+   la suite prévue est le maître dans une machine virtuelle.
 11. **Les modèles de service n'ont été essayés qu'avec de faux fournisseurs.** Les connecteurs
     suivent la forme publique des API (OpenAI, ElevenLabs) et celle des services de l'assistant
     (prévision, décision) ; le premier essai réel peut demander un ajustement.

@@ -33,6 +33,8 @@ Rien n'est programmé pour cet exemple : tout est dans ce dossier.
 TALIXIO_CONFIG=examples/catalogue/talixio.toml TALIXIO_TOOLS=examples/catalogue/outils ./tools.sh up claude
 ```
 
+(Ainsi, sans navigateur : le collecteur lit le web avec `lire-web` seul. Avec navigateur : voir plus bas.)
+
 ```bash
 ./tools.sh login
 ```
@@ -58,19 +60,27 @@ nouveaux modèles), puis copiez `catalog.toml` à la racine du dépôt.
 ## Avec un navigateur : le collecteur dans son conteneur
 
 Les grilles de prix officielles ne se lisent qu'avec un navigateur. Il n'est pas ajouté à l'image
-du maître : c'est le collecteur qui est lancé dans un conteneur à part, fait pour ça.
+du maître : c'est le collecteur qui est lancé dans un conteneur à part, fait pour ça, que le
+maître crée et retire lui-même.
 
 ```bash
 ./tools.sh build navigateur
 ```
 
-Puis ajoutez `cible-navigateur.toml` à la configuration du maître, avec vos chemins. La consigne
-en tient compte : si la cible « navigateur » existe, le collecteur y est créé.
+```bash
+TALIXIO_DOCKER=1 TALIXIO_CONFIG=examples/catalogue/talixio.toml TALIXIO_TOOLS=examples/catalogue/outils ./tools.sh up claude
+```
 
-Aujourd'hui, il faut pour cela un maître qui peut lancer `docker` : installé sur la machine
-(`talixio-agent service install`), pas lui-même dans un conteneur. Qui peut lancer `docker` est
-maître de la machine : un Docker sans droits d'administrateur (« rootless ») limite ce risque au
-compte du maître.
+`TALIXIO_DOCKER=1` donne au maître le socket Docker de la machine, et le place avec ses agents dans
+un réseau à part (`talixio-net`). **Qui prend le maître commande alors Docker, donc la machine** :
+c'est le prix de cette commodité, à ne payer que sur une machine d'essai ou dédiée. Aucun agent
+ne reçoit le socket, et il est interdit d'office à leurs outils.
+
+L'image `talixio-navigateur` porte l'agent, Chromium et les scripts de `outils/` tels qu'ils
+étaient à la construction : reconstruisez-la après avoir changé `sites.txt` ou mis le maître à jour.
+
+Un maître installé sur la machine (`talixio-agent service install`) fait la même chose sans
+socket partagé : ajoutez `cible-navigateur.toml` à sa configuration, avec vos chemins.
 
 ## Ce qu'il faut savoir
 

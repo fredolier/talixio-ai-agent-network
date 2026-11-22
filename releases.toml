@@ -7,6 +7,32 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.16.0"
+date = "2026-11-22"
+title = "Le maître dans Docker lance ses agents dans des conteneurs voisins"
+summary = "Sur option, le maître en conteneur crée lui-même les conteneurs de ses agents, chacun isolé, sans rien installer de plus sur la machine."
+
+[[release.changes]]
+kind = "nouveau"
+text = "`TALIXIO_DOCKER=1 ./tools.sh up claude` : le maître reçoit le socket Docker de la machine et lance les agents des cibles `docker` dans des conteneurs voisins, dans un réseau à part. `stop` et `purge` retirent aussi ces conteneurs."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Cible `docker` : `network` (l'agent rejoint le maître dans ce réseau), `agent_in_image` (l'exécutable de l'agent vient de l'image) et montages d'un sous-dossier de volume (`volume`, `subpath`), pour ne dépendre d'aucun chemin de la machine."
+
+[[release.changes]]
+kind = "nouveau"
+text = "L'image `talixio-navigateur` porte l'agent et les scripts du dossier d'outils ; l'exemple « catalogue » lance son collecteur dans un conteneur de cette image."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Le socket Docker est interdit d'office aux outils des agents, et n'est jamais monté dans le conteneur d'un agent."
+
+[[release.changes]]
+kind = "attention"
+text = "Avec `TALIXIO_DOCKER=1`, qui prend le maître commande Docker, donc la machine : à réserver à une machine d'essai ou dédiée. Sans cette option, rien ne change. L'image `talixio-navigateur` est à reconstruire (`./tools.sh build navigateur`) : elle contient maintenant l'agent."
+
+[[release]]
 version = "0.15.0"
 date = "2026-11-22"
 title = "Un vrai navigateur pour les agents"

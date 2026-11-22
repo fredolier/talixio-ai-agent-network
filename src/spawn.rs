@@ -182,15 +182,37 @@ pub fn docker_args(id: &str, target: &Target, exe: &std::path::Path) -> Vec<Stri
     if let Some(seccomp) = &target.seccomp {
         args.push(format!("--security-opt=seccomp={}", seccomp.display()));
     }
-    args.push("--add-host=host.docker.internal:host-gateway".into());
+    match &target.network {
+        // le maître est dans ce réseau : l'agent le joint par son adresse là-bas
+        Some(network) => args.push(format!("--network={network}")),
+        None => args.push("--add-host=host.docker.internal:host-gateway".into()),
+    }
     // le dossier d'état vit en mémoire et disparaît avec le conteneur
     let user = target.user.as_deref().unwrap_or("65534:65534");
     args.push(format!("--user={user}"));
     args.push(format!("--tmpfs=/state:mode=700,uid={}", user.split(':').next().unwrap_or("65534")));
-    args.extend(["--volume".into(), format!("{}:/talixio-agent:ro", exe.display())]);
+    if !target.agent_in_image {
+        args.extend(["--volume".into(), format!("{}:/talixio-agent:ro", exe.display())]);
+    }
     for mount in &target.mounts {
-        let mode = if mount.write { "rw" } else { "ro" };
-        args.extend(["--volume".into(), format!("{}:{}:{mode}", mount.host.display(), mount.container.display())]);
+        match (&mount.host, &mount.volume) {
+            (Some(host), _) => {
+                let mode = if mount.write { "rw" } else { "ro" };
+                args.extend(["--volume".into(), format!("{}:{}:{mode}", host.display(), mount.container.display())]);
+            }
+            (None, Some(volume)) => {
+                // jamais créé au passage (« volume-nocopy », et un volume absent fait échouer le sous-dossier)
+                let mut spec = format!("type=volume,src={volume},dst={},volume-nocopy", mount.container.display());
+                if let Some(subpath) = &mount.subpath {
+                    spec.push_str(&format!(",volume-subpath={subpath}"));
+                }
+                if !mount.write {
+                    spec.push_str(",readonly");
+                }
+                args.extend(["--mount".into(), spec]);
+            }
+            (None, None) => {}
+        }
     }
     args.push("--entrypoint=/talixio-agent".into());
     args.push(target.image.clone().unwrap_or_default());
@@ -319,6 +341,17 @@ mod tests {
     }
 
     #[test]
+    fn un_maitre_en_conteneur_lance_un_conteneur_voisin() {
+        // ni chemin de la machine, ni passage par elle : réseau du maître, agent dans l'image, dossier pris dans le volume
+        let t = target("kind = 'docker'\nimage = 'talixio-navigateur'\nuser = '65532:65532'\nnetwork = 'talixio-net'\nagent_in_image = true\nmounts = [{ volume = 'talixio-data', subpath = 'work/releves', container = '/releves', write = true }, { volume = 'autre', container = '/lu' }]").unwrap();
+        let args = docker_args("abc", &t, std::path::Path::new("/talixio-agent"));
+        for wanted in ["--network=talixio-net", "type=volume,src=talixio-data,dst=/releves,volume-nocopy,volume-subpath=work/releves", "type=volume,src=autre,dst=/lu,volume-nocopy,readonly", "--cap-drop=ALL", "--read-only", "--entrypoint=/talixio-agent"] {
+            assert!(args.iter().any(|a| a == wanted), "{wanted} manque dans {args:?}");
+        }
+        assert!(!args.iter().any(|a| a.contains("host-gateway") || a.contains(":/talixio-agent:ro") || a.contains("docker.sock") || a.contains("privileged")), "{args:?}");
+    }
+
+    #[test]
     fn rien_dans_une_cible_ne_passe_pour_une_option_ou_une_commande() {
         for bad in [
             "kind = 'ssh'\nhost = '-oProxyCommand=x'\nuser = 'a'\nremote_dir = '/opt/t'",
@@ -342,6 +375,16 @@ mod tests {
             "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmemory = '0g'",
             "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmemory = '2'",
             "kind = 'ssh'\nhost = 'vm'\nuser = 'a'\nremote_dir = '/opt/t'\nmemory = '2g'",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nnetwork = 'host'",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nnetwork = 'container:talixio'",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nnetwork = 'net --privileged'",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ volume = '/var/run/docker.sock', container = '/s' }]",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ volume = 'data', subpath = '../autre', container = '/s' }]",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ volume = 'data,readonly=false', container = '/s' }]",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ volume = 'data', subpath = 'a,dst=/etc', container = '/s' }]",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ volume = 'data', host = '/srv', container = '/s' }]",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ container = '/s' }]",
+            "kind = 'ssh'\nhost = 'vm'\nuser = 'a'\nremote_dir = '/opt/t'\nnetwork = 'net'",
             "kind = 'telnet'",
         ] {
             assert!(target(bad).is_err(), "aurait dû être refusé : {bad}");

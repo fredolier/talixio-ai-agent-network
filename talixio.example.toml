@@ -153,6 +153,10 @@ args = ["-l", "{read}"]
 # mounts = [{ host = "/srv/projet", container = "/data" }]   # write = true pour l'écriture
 # memory = "2g"                         # facultatif ; 1 Go sinon
 # seccomp = "/opt/talixio/chromium-seccomp.json"   # facultatif : pour une image avec navigateur (examples/catalogue)
+# Pour un maître lui-même en conteneur, qui a reçu le socket Docker (TALIXIO_DOCKER=1 ./tools.sh) :
+# network = "talixio-net"               # le réseau Docker du maître : l'agent l'y rejoint
+# agent_in_image = true                 # l'exécutable de l'agent est dans l'image (/talixio-agent)
+# mounts = [{ volume = "talixio-data", subpath = "work/projet", container = "/data" }]   # un sous-dossier du volume du maître
 #
 # [targets.bac.capabilities]
 # fs_read = ["/data"]

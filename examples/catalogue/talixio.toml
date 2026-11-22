@@ -1,9 +1,9 @@
 # Exemple « catalogue » : une équipe d'agents tient à jour la liste des fournisseurs et des modèles.
-# Pour l'image Docker avec `claude` :
-#   TALIXIO_CONFIG=examples/catalogue/talixio.toml TALIXIO_TOOLS=examples/catalogue/outils ./tools.sh up claude
-# Il faut l'image avec `claude` : l'image ordinaire est vide, sans bash ni curl pour `lire-web`.
-# Le navigateur (`lire-page`) n'est pas ici : il vit dans le conteneur de l'agent qui s'en sert,
-# voir cible-navigateur.toml.
+# Le maître dans Docker, ses agents à navigateur dans des conteneurs voisins :
+#   ./tools.sh build navigateur
+#   TALIXIO_DOCKER=1 TALIXIO_CONFIG=examples/catalogue/talixio.toml TALIXIO_TOOLS=examples/catalogue/outils ./tools.sh up claude
+# Sans TALIXIO_DOCKER=1, le maître ne peut pas lancer de conteneur : le collecteur tourne alors à
+# côté de lui, avec `lire-web` seul (pas de navigateur dans l'image du maître).
 # Voir examples/catalogue/README.md.
 
 name = "maître"
@@ -45,3 +45,38 @@ args = ["catalog", "check", "{read}"]
 [capabilities.spawn]
 max_children = 4
 max_depth = 1
+targets = ["local", "navigateur"]
+
+# Le conteneur du collecteur : jetable, en lecture seule, sans capacité, dans le réseau du maître.
+# Il ne voit que ses scripts (dans l'image) et son dossier de relevés (un sous-dossier du volume
+# du maître, que le maître crée avant de le lancer). Ni clé, ni le reste du volume.
+[targets.navigateur]
+kind = "docker"
+image = "talixio-navigateur"
+user = "65532:65532"
+memory = "2g"
+network = "talixio-net"
+agent_in_image = true
+seccomp = "/config/chromium-seccomp.json"
+mounts = [{ volume = "talixio-data", subpath = "work/catalogue/releves", container = "/releves", write = true }]
+
+[targets.navigateur.capabilities]
+fs_read = ["/releves"]
+fs_write = ["/releves"]
+
+[[targets.navigateur.capabilities.exec]]
+program = "/outils/lire-web"
+args = ["*"]
+
+[[targets.navigateur.capabilities.exec]]
+program = "/outils/lire-web"
+args = ["*", "*"]
+
+[[targets.navigateur.capabilities.exec]]
+program = "/outils/lire-page"
+args = ["*"]
+
+[[targets.navigateur.capabilities.exec]]
+program = "/outils/lire-page"
+args = ["*", "*"]
+

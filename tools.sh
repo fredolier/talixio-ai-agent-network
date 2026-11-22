@@ -20,6 +20,9 @@
 #   TALIXIO_CONFIG   votre talixio.toml, monté à la place de docker/talixio.toml
 #   TALIXIO_TOOLS    un dossier de scripts pour les agents, monté en lecture seule sur /outils
 #   TALIXIO_NAME     nom du conteneur (talixio) ; le volume de données est <nom>-data
+#   TALIXIO_DOCKER=1 le maître peut lancer ses agents dans d'autres conteneurs (image « claude ») :
+#                    il reçoit le socket Docker de cette machine. ATTENTION : qui prend le maître
+#                    commande alors Docker, donc cette machine. Voir docs/SPEC.md, décision 36.
 #   TALIXIO_BUILD_ARGS   options de plus pour « docker build » (derrière un mandataire, par exemple)
 #   CLAUDE_CODE_OAUTH_TOKEN   facultatif, pour « claude » : le jeton tiré par `claude setup-token`,
 #                             à la place de « ./tools.sh login »
@@ -66,9 +69,13 @@ api_token() {
 
 build() {
     if [ "${1:-}" = navigateur ]; then
-        # l'image des agents à navigateur : ni maître, ni clé, ni script dedans
+        # l'image des agents à navigateur : l'agent (celui de l'image « claude », même version que
+        # le maître), Chromium, et les scripts du dossier d'outils ; aucune clé
+        build claude
+        local tools="${TALIXIO_TOOLS:-examples/catalogue/outils}"
+        [ -d "$tools" ] || die "dossier d'outils introuvable : $tools"
         # shellcheck disable=SC2086
-        docker build ${TALIXIO_BUILD_ARGS:-} -f docker/Dockerfile.navigateur -t talixio-navigateur docker
+        docker build ${TALIXIO_BUILD_ARGS:-} -f docker/Dockerfile.navigateur --build-context "outils=$tools" -t talixio-navigateur docker
         echo "Image talixio-navigateur construite : à donner à une cible « docker » du maître (examples/catalogue)."
         return
     fi
@@ -103,12 +110,23 @@ run() {
     if [ "$BIND" != 127.0.0.1 ] && [ "$BIND" != localhost ]; then
         echo "Attention : le maître sera joignable depuis $BIND, pas seulement depuis cette machine." >&2
     fi
+    local siblings=()
+    if [ "${TALIXIO_DOCKER:-}" = 1 ]; then
+        [ "${1:-}" = claude ] || die "TALIXIO_DOCKER=1 demande l'image « claude » (l'image ordinaire n'a pas de client Docker)"
+        local socket="${TALIXIO_DOCKER_SOCKET:-/var/run/docker.sock}"
+        [ -S "$socket" ] || die "socket Docker introuvable : $socket (TALIXIO_DOCKER_SOCKET pour un autre)"
+        # un réseau à part : le maître et ses agents s'y joignent, sans passer par la machine
+        docker network inspect "$NAME-net" >/dev/null 2>&1 || docker network create "$NAME-net" >/dev/null
+        # le compte sans droit du maître n'ouvre le socket que par le groupe qui le détient
+        siblings=(--network "$NAME-net" -v "$socket:/var/run/docker.sock" --group-add "$(stat -c %g "$socket")")
+        echo "Attention : le maître reçoit le socket Docker ($socket). Qui prend le maître commande Docker, donc cette machine." >&2
+    fi
     # un seul maître de ce nom : l'ancien conteneur est remplacé, ses données restent dans le volume
     docker rm -f "$NAME" >/dev/null 2>&1 || true
     docker run -d --name "$NAME" --restart unless-stopped \
         -p "$BIND:$PORT:7700" -v "$VOLUME:/data" \
         --cap-drop ALL --security-opt no-new-privileges --pids-limit "$PIDS" --memory "$MEMORY" \
-        "${env[@]}" ${config[@]+"${config[@]}"} "$IMAGE" >/dev/null
+        "${env[@]}" ${config[@]+"${config[@]}"} ${siblings[@]+"${siblings[@]}"} "$IMAGE" >/dev/null
     echo "Le maître tourne : https://$BIND:$PORT"
     echo "(certificat fabriqué par le maître : le navigateur demande confirmation)"
     echo "Jeton de l'interface : ./tools.sh token"
@@ -116,6 +134,12 @@ run() {
         [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || echo "Connectez votre abonnement, une fois : ./tools.sh login"
         echo "Puis « Fournisseurs », « Claude (abonnement) », « Connecter »."
     fi
+}
+
+# Les conteneurs d'agents que ce maître a lancés (TALIXIO_DOCKER=1) : ceux de son réseau, sauf lui.
+agents_down() {
+    docker network inspect "$NAME-net" >/dev/null 2>&1 || return 0
+    docker ps -aq --filter "network=$NAME-net" --filter "name=^talixio-a-" | while read -r id; do docker rm -f "$id" >/dev/null 2>&1 || true; done
 }
 
 case "${1:-}" in
@@ -126,15 +150,17 @@ case "${1:-}" in
     login) docker exec -it "$NAME" claude auth login ;;
     logs) docker logs -f "$NAME" ;;
     status) docker ps -a --filter "name=^$NAME\$" --format '{{.Names}} : {{.Status}} ({{.Image}}, {{.Ports}})' | grep . || echo "$NAME : pas de conteneur" ;;
-    stop) docker rm -f "$NAME" >/dev/null 2>&1 && echo "$NAME arrêté ; ses données restent dans le volume $VOLUME" || echo "$NAME ne tournait pas" ;;
+    stop) agents_down; docker rm -f "$NAME" >/dev/null 2>&1 && echo "$NAME arrêté ; ses données restent dans le volume $VOLUME" || echo "$NAME ne tournait pas" ;;
     purge)
         printf "Effacer le conteneur %s ET ses données (volume %s : journal, mémoire, clés saisies) ? [oui/non] " "$NAME" "$VOLUME"
         read -r answer
         [ "$answer" = oui ] || die "rien n'a été effacé"
+        agents_down
         docker rm -f "$NAME" >/dev/null 2>&1 || true
+        docker network rm "$NAME-net" >/dev/null 2>&1 || true
         docker volume rm "$VOLUME" >/dev/null 2>&1 || true
         rm -f "$TOKEN_FILE"
         echo "Effacé."
         ;;
-    *) sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+    *) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

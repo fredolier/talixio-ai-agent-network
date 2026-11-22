@@ -79,6 +79,14 @@ pub struct Target {
     /// Docker : dossiers de la machine montrés au conteneur.
     #[serde(default)]
     pub mounts: Vec<Mount>,
+    /// Docker : réseau Docker où placer le conteneur. À donner quand le maître tourne lui-même
+    /// dans un conteneur de ce réseau : l'agent le joint alors directement, sans passer par la machine.
+    pub network: Option<String>,
+    /// Docker : l'exécutable de l'agent est déjà dans l'image (`/talixio-agent`), au lieu d'être
+    /// monté depuis la machine. Pour un maître en conteneur, dont l'exécutable n'est pas un
+    /// fichier de la machine.
+    #[serde(default)]
+    pub agent_in_image: bool,
     /// Docker : mémoire du conteneur, « 512m » ou « 2g ». Par défaut 1 Go.
     pub memory: Option<String>,
     /// Docker : filtre d'appels système à la place de celui de Docker (un fichier de la machine).
@@ -95,7 +103,12 @@ pub struct Target {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Mount {
-    pub host: PathBuf,
+    /// Un dossier de la machine qui lance le conteneur…
+    pub host: Option<PathBuf>,
+    /// … ou un volume Docker (celui du maître, quand il tourne lui-même dans un conteneur et ne
+    /// connaît pas les chemins de la machine), et le sous-dossier du volume à montrer.
+    pub volume: Option<String>,
+    pub subpath: Option<String>,
     pub container: PathBuf,
     #[serde(default)]
     pub write: bool,
@@ -149,8 +162,8 @@ impl Target {
                 if self.image.is_some() || !self.mounts.is_empty() {
                     bail!("cible ssh : `image` et `mounts` ne valent que pour docker");
                 }
-                if self.memory.is_some() || self.seccomp.is_some() {
-                    bail!("cible ssh : `memory` et `seccomp` ne valent que pour docker");
+                if self.memory.is_some() || self.seccomp.is_some() || self.network.is_some() || self.agent_in_image {
+                    bail!("cible ssh : `memory`, `seccomp`, `network` et `agent_in_image` ne valent que pour docker");
                 }
             }
             "docker" => {
@@ -168,8 +181,30 @@ impl Target {
                     if !inside.starts_with('/') || !plain(&inside[1..], "/._-") || inside.contains("..") {
                         bail!("cible docker : montage invalide ({})", mount.container.display());
                     }
-                    if !mount.host.is_absolute() || !plain_host_path(mount.host.to_str().unwrap_or("")) {
-                        bail!("cible docker : montage invalide ({})", mount.host.display());
+                    match (&mount.host, &mount.volume) {
+                        (Some(host), None) if mount.subpath.is_none() => {
+                            if !host.is_absolute() || !plain_host_path(host.to_str().unwrap_or("")) {
+                                bail!("cible docker : montage invalide ({})", host.display());
+                            }
+                        }
+                        (None, Some(volume)) => {
+                            // un nom de volume, jamais un chemin : « / » ferait un montage de dossier
+                            if !plain(volume, "._-") || volume.starts_with('.') {
+                                bail!("cible docker : volume invalide ({volume})");
+                            }
+                            if let Some(subpath) = &mount.subpath {
+                                if subpath.starts_with('/') || subpath.contains("..") || !plain(subpath, "/._-") {
+                                    bail!("cible docker : sous-dossier de volume invalide ({subpath})");
+                                }
+                            }
+                        }
+                        _ => bail!("cible docker : un montage donne `host` (un dossier de la machine) ou `volume` (avec `subpath` au besoin), pas les deux"),
+                    }
+                }
+                if let Some(network) = &self.network {
+                    // un réseau nommé, créé par l'exploitant : ni « host », ni celui d'un autre conteneur
+                    if !plain(network, "._-") || matches!(network.as_str(), "host" | "none" | "bridge" | "default") {
+                        bail!("cible docker : `network` doit être le nom d'un réseau Docker dédié");
                     }
                 }
                 if let Some(memory) = &self.memory {
@@ -353,6 +388,15 @@ impl RootConfig {
         }
         if let Some(dir) = std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from).filter(|d| d.is_absolute()) {
             paths.push(dir.canonicalize().unwrap_or(dir));
+        }
+        // le socket Docker : qui l'ouvre commande la machine. Jamais par un outil d'agent.
+        if cfg!(unix) {
+            for socket in ["/var/run/docker.sock", "/run/docker.sock"] {
+                paths.push(PathBuf::from(socket));
+                if let Ok(real) = Path::new(socket).canonicalize() {
+                    paths.push(real);
+                }
+            }
         }
         Ok(paths)
     }

@@ -851,6 +851,8 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value, resumed: Option<&str>) -> 
     let parent_addr = match target.as_ref().map(|t| t.kind.as_str()) {
         None => node.dial_addr(false)?,
         // depuis un conteneur, la machine du parent s'appelle host.docker.internal
+        // dans le réseau Docker du maître, son adresse là-bas se joint directement
+        Some("docker") if target.as_ref().is_some_and(|t| t.network.is_some()) => node.dial_addr(true)?,
         Some("docker") => {
             let addr = node.dial_addr(true)?;
             format!("host.docker.internal:{}", addr.rsplit(':').next().unwrap_or(""))

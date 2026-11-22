@@ -25,11 +25,15 @@ RUN cargo build --release --locked && strip target/release/talixio-agent
 
 FROM alpine:3
 # ce que l'installation de `claude` demande sur Alpine, et un compte sans droit
-RUN apk add --no-cache bash curl ca-certificates libgcc libstdc++ ripgrep \
+# (docker-cli : le client seul, sans démon. Il ne sert que si le maître reçoit le socket Docker de
+# la machine, ce que seul `TALIXIO_DOCKER=1 ./tools.sh` fait ; sans socket, il ne peut rien.)
+RUN apk add --no-cache bash curl ca-certificates libgcc libstdc++ ripgrep docker-cli \
  && adduser -D -u 65532 -h /home/talixio talixio \
  && mkdir -p /data/work && chown -R 65532:65532 /data && chmod -R 700 /data
 COPY --from=construction /src/target/release/talixio-agent /talixio-agent
 COPY docker/talixio.toml /config/talixio.toml
+# le filtre d'appels système des conteneurs d'agents à navigateur : lu par le client Docker, ici
+COPY docker/chromium-seccomp.json /config/chromium-seccomp.json
 USER 65532:65532
 ENV HOME=/home/talixio PATH=/home/talixio/.local/bin:/usr/local/bin:/usr/bin:/bin
 # la connexion de `claude` vit dans le volume : elle survit au remplacement du conteneur.

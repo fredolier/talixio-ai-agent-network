@@ -8,3 +8,4 @@
 !src
 !web/dist
 !docker/talixio.toml
+!docker/chromium-seccomp.json
