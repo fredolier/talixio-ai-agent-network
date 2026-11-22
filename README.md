@@ -1,11 +1,122 @@
 # Talixio Agent Network
 
-Des agents IA autonomes, en grappe. Chaque agent est un petit process Rust avec un modèle, des
-instructions et des droits limités. Un agent peut créer des enfants et leur confier des missions ;
-un enfant ne parle qu'à son parent et n'a jamais plus de droits que lui.
+[![tests](https://github.com/fredolier/talixio-ai-agent-network/actions/workflows/ci.yml/badge.svg)](https://github.com/fredolier/talixio-ai-agent-network/actions/workflows/ci.yml)
+[![licence : AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue.svg)](LICENSE)
 
-- Spécification : [docs/SPEC.md](docs/SPEC.md)
-- Planning et avancement : [docs/PLAN.md](docs/PLAN.md)
+**Des agents IA autonomes qui travaillent en équipe, sans jamais avoir plus de droits que ce que
+vous leur avez donné.**
+
+Un agent « maître » reçoit votre demande, crée d'autres agents, leur confie des missions et vous
+rend compte. Chaque agent est un petit process avec un modèle, des consignes et des droits
+limités. Tout est dans un seul exécutable Rust, `talixio-agent`, que l'on pose sur une machine,
+dans un conteneur ou derrière un `ssh`.
+
+![La grappe dans l'interface](docs/images/interface-grappe.png)
+
+> **État du projet : jeune.** Le cœur fonctionne et il est testé sous Linux, macOS et Windows à
+> chaque changement, mais plusieurs modes n'ont pas encore servi en conditions réelles. Lisez
+> [« Limites actuelles »](#limites-actuelles) avant de lui confier quoi que ce soit d'important.
+
+*In English: Talixio Agent Network runs autonomous AI agents as a tree of small, least-privilege
+processes. A root agent spawns children, hands them missions with measurable success criteria,
+and reports back. Everything is denied by default, a child never holds more rights than its
+parent, model keys stay with the root agent, and every tool call is checked again. One static
+Rust binary; web UI, CLI and JSON API included. The documentation is in French for now.*
+
+## Pourquoi
+
+Un agent IA qui agit sur une machine pose toujours la même question : que peut-il faire au
+juste, et qui l'a décidé ? La plupart des outils répondent par la confiance dans le modèle. Ici
+la réponse est dans le programme :
+
+- **Tout est refusé par défaut.** Un agent ne lit, n'écrit et ne lance que ce qui est écrit dans
+  ses droits : des dossiers, des commandes avec leurs arguments permis, des modèles, un budget.
+- **Un enfant n'a jamais plus de droits que son parent.** Les droits ne font que se réduire en
+  descendant l'arbre, et chaque appel d'outil est revérifié par le programme, quoi que le
+  modèle demande.
+- **Les clés des modèles restent chez le maître.** Les autres agents passent par lui : aucun
+  n'a de clé à voler, et chacun est compté (tokens, appels).
+- **Le maître ne se donne pas de pouvoirs.** Ses commandes et ses rôles viennent de paquets que
+  vous installez vous-même, vérifiés par empreinte à chaque démarrage et à chaque lancement.
+- **Tout se voit.** L'arbre des agents, leurs droits, leurs échanges et leurs dépenses sont dans
+  l'interface et dans un journal.
+
+## Comment ça marche
+
+```mermaid
+flowchart TD
+    V([Vous : navigateur, ligne de commande, API]) -->|HTTPS + jeton| M
+    M["Maître (niveau 0)<br/>clés des modèles, API, interface, journal"]
+    M -->|lien chiffré| A["Agent collecteur<br/>lit le web, écrit dans un dossier"]
+    M -->|lien chiffré| B["Agent rédacteur<br/>lit ce dossier, écrit un rapport"]
+    M -->|ssh ou conteneur| C["Agent sur une autre machine"]
+    A --> A1["Sous-agent<br/>droits encore réduits"]
+    M -.->|appels aux modèles| F[(Fournisseurs de modèles)]
+```
+
+1. **Vous parlez au maître**, dans l'interface web, en ligne de commande ou par l'API.
+2. **Le maître décide de déléguer** : il crée un agent avec un rôle, une mission, un critère de
+   réussite mesurable, un modèle, un budget et des droits pris dans les siens.
+3. **L'agent travaille seul** avec ses outils (lire, écrire, lancer une commande permise, créer
+   ses propres enfants s'il en a le droit) et ne parle qu'à son parent.
+4. **Il rend compte** : mission réussie ou non, avec la preuve. Le parent vérifie, relance,
+   arrête, ou conclut à son tour.
+5. **Vous suivez et vous arrêtez** ce que vous voulez, à tout moment.
+
+Un agent peut tourner sur la machine du maître, dans un conteneur Docker (lecture seule, sans
+capacité, sans réseau si vous le voulez) ou sur une autre machine par `ssh`. Les modèles viennent
+d'un catalogue de fournisseurs embarqué (Anthropic, OpenAI, Mistral, OVHcloud, Scaleway, Gemini,
+OpenRouter… avec leur pays et leur niveau de confiance), ou de votre abonnement Claude par la
+commande officielle `claude`.
+
+## À quoi ça sert
+
+Quelques usages visés ; les deux premiers ont été essayés, les autres sont ce pour quoi l'outil
+est conçu.
+
+- **Veille et tenue à jour d'un document.** Trois agents (collecteur, rédacteur, vérificateur)
+  relèvent sur le web les modèles et les prix des fournisseurs et proposent une mise à jour du
+  catalogue : c'est l'exemple fourni, [`examples/catalogue`](examples/catalogue).
+- **Lire le web avec un vrai navigateur**, dans un conteneur à part, sur une liste de sites
+  permise.
+- **Audit puis correction, séparés.** Un agent diagnostique une machine en lecture seule et rend
+  compte ; son parent décide ensuite d'envoyer un agent correcteur, avec d'autres droits.
+- **Tâches planifiées.** Une mission relancée chaque jour ou chaque semaine (page « Tâches »).
+- **Agents permanents.** Un agent qui revient avec sa mémoire à chaque redémarrage du maître.
+- **Équipe pour une mission longue**, où chaque agent a un modèle à sa mesure : un petit modèle
+  pour collecter, un grand pour vérifier.
+
+Ce que ce n'est pas : un assistant personnel (voir
+[Talixio AI Assistant](https://github.com/fredolier/talixio-ai-assistant)), ni un bac à sable
+complet. Le cloisonnement entre agents d'un même compte est fait par le programme, pas encore
+par le système : voir les limites.
+
+## Démarrer en cinq minutes
+
+Avec Docker, sans rien installer d'autre et sans clé de modèle :
+
+```bash
+git clone https://github.com/fredolier/talixio-ai-agent-network && cd talixio-ai-agent-network
+```
+
+```bash
+./tools.sh up
+```
+
+```bash
+./tools.sh token
+```
+
+Ouvrez `https://127.0.0.1:7700` (le certificat est fabriqué par le maître : le navigateur demande
+confirmation), entrez le jeton, connectez un fournisseur dans « Fournisseurs » (OVHcloud se
+connecte sans clé, pour essayer), activez un modèle dans « Modèles », puis parlez au maître dans
+« Dialogue ». La suite de cette page détaille chaque mode.
+
+## Sommaire
+
+- [Installer](#installer) · [Dans Docker](#dans-docker) · [Paquets : commandes et rôles](#paquets--commandes-et-rôles) · [En service](#en-service)
+- [Compiler](#compiler) · [Lancer le maître](#lancer-le-maître) · [Piloter](#piloter) · [Tester](#tester)
+- [Limites actuelles](#limites-actuelles) · [Documentation](#documentation) · [Contribuer](#contribuer) · [Sécurité](#sécurité) · [Licence](#licence)
 
 ## Installer
 
@@ -349,12 +460,55 @@ cargo test
 
 ## Limites actuelles
 
-- Déploiement par SSH et dans Docker (`[targets]`, voir `talixio.example.toml`) : écrit et testé avec des
-  programmes factices, pas encore essayé sur une vraie machine. La cible doit avoir le même processeur que
-  le maître ; avec l'exécutable statique, la distribution n'a plus d'importance.
-- Le cloisonnement est fait par le process lui-même, pas encore par le système d'exploitation :
-  une commande autorisée s'exécute avec tous les droits du compte. N'autoriser que des commandes
-  inoffensives, et lancer le maître sous un compte dédié sans privilèges (voir la spécification, §7).
-- Les modèles de service (voix, image, prévision, décision…) n'ont été essayés qu'avec de faux fournisseurs : le premier
-  essai chez un vrai fournisseur peut demander un ajustement.
-- Testé en intégration continue sous Linux, macOS et Windows ; pas encore essayé sur un poste Windows ou macOS réel, ni avec un vrai `ssh` ou un vrai Docker.
+- **Projet jeune, peu éprouvé hors de ses tests.** Les essais réels à ce jour : un maître dans
+  Docker avec l'abonnement Claude et avec OVHcloud, l'exemple « catalogue » à trois agents, des
+  agents lancés dans des conteneurs voisins. Le reste est couvert par des tests automatiques.
+- **Le cloisonnement entre agents d'un même compte est fait par le programme, pas encore par le
+  système d'exploitation** : une commande autorisée s'exécute avec tous les droits du compte.
+  N'autorisez que des commandes écrites au plus serré, et faites tourner le maître sous le compte
+  dédié ou dans un conteneur (voir la spécification, §7).
+- **Pas encore essayé en conditions réelles** : le déploiement par `ssh` sur une vraie machine
+  (testé avec un faux `ssh`) ; le service sous un vrai systemd, launchd ou Windows ; un poste
+  Windows ou macOS réel (l'intégration continue y passe) ; un dépôt de paquets servi en https ;
+  les modèles de service (voix, image, prévision, décision) chez un vrai fournisseur.
+- **Une cible distante doit avoir le même processeur que le maître** ; avec l'exécutable
+  statique, la distribution n'a plus d'importance.
+- **Pas de dépôt officiel de paquets** pour l'instant : seuls ceux de l'exécutable, les vôtres,
+  ou ceux d'un éditeur dont vous avez la clé publique.
+- **Documentation en français** seulement.
+
+## Documentation
+
+| Document | Contenu |
+|---|---|
+| [docs/SPEC.md](docs/SPEC.md) | Exigences, décisions d'architecture (numérotées, datées, motivées), questions ouvertes, et le compte rendu de chaque revue de sécurité (§7). |
+| [docs/PLAN.md](docs/PLAN.md) | Tâches, étape en cours, journal de ce qui a été fait. |
+| [docs/EXIGENCES.md](docs/EXIGENCES.md) | Chaque demande, sa source, et l'état de ses critères. |
+| [docs/VERIFICATION.md](docs/VERIFICATION.md) | Une vérification indépendante des exigences. |
+| [talixio.example.toml](talixio.example.toml) | La configuration du maître, commentée. |
+| [examples/catalogue](examples/catalogue) | Un exemple complet à trois agents. |
+| `talixio-agent releases` | Les notes de version ([releases.toml](releases.toml)), aussi dans l'interface. |
+
+## Contribuer
+
+Les rapports de bogue, les questions et les propositions sont bienvenus : voir
+[CONTRIBUTING.md](CONTRIBUTING.md). En bref : `cargo test` et `cargo clippy --all-targets` doivent
+passer, la documentation suit le code dans le même changement, et toute nouvelle surface (outil,
+route, mode de déploiement) passe par une revue de sécurité.
+
+## Sécurité
+
+Une faille ne se signale pas dans un ticket public : voir [SECURITY.md](SECURITY.md). Ce contre
+quoi le projet se défend, ses limites connues et le détail des quinze revues de sécurité déjà
+faites sont dans [docs/SPEC.md](docs/SPEC.md), §7.
+
+## Licence
+
+Copyright (C) 2026 Talixio. Ce programme est un logiciel libre : vous pouvez le redistribuer et le
+modifier selon les termes de la GNU Affero General Public License, version 3 (`AGPL-3.0-only`),
+dans [`LICENSE`](LICENSE). Il est fourni sans aucune garantie. Si vous faites tourner une version
+modifiée pour d'autres personnes à travers un réseau, vous devez leur en offrir le code source.
+
+L'interface embarque les polices Instrument Sans et JetBrains Mono, sous licence SIL Open Font
+License 1.1. Les bibliothèques Rust et JavaScript employées gardent leurs propres licences
+(MIT, Apache-2.0, BSD, ISC pour l'essentiel), listées dans `Cargo.lock` et `web/package-lock.json`.

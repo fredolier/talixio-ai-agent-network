@@ -3,3 +3,4 @@
 /.talixio/
 .env
 *.profraw
+*.bundle

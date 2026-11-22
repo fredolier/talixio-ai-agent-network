@@ -2,6 +2,11 @@
 name = "talixio-agent"
 version = "0.21.1"
 edition = "2021"
+license = "AGPL-3.0-only"
+repository = "https://github.com/fredolier/talixio-ai-agent-network"
+readme = "README.md"
+keywords = ["ai", "agents", "llm", "security", "sandbox"]
+categories = ["command-line-utilities"]
 description = "Agents IA autonomes en grappe : chaque agent est un petit process, aux droits limités, qui ne parle qu'à son parent"
 publish = false
 
