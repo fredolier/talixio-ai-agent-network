@@ -188,6 +188,26 @@ impl PackFrom {
     }
 }
 
+/// Une source de paquets ouverte une fois : le dépôt signé (index déjà vérifié), ou le dossier local.
+struct Opened(Option<(Box<dyn talixio_agent::depot::Fetch>, talixio_agent::depot::Depot)>, Option<PathBuf>);
+
+impl talixio_agent::tui::Source for Opened {
+    fn list(&self) -> Result<Vec<(String, String, String, String)>> {
+        use talixio_agent::pack::Pack;
+        Ok(match &self.0 {
+            Some((_, depot)) => depot.entries.iter().map(|e| (e.name.clone(), e.version.clone(), e.description.clone(), e.id.clone())).collect(),
+            None => Pack::available(self.1.as_deref())?.into_iter().map(|p| (p.manifest.name.clone(), p.manifest.version.clone(), p.manifest.description.clone(), p.id())).collect(),
+        })
+    }
+
+    fn load(&self, name: &str) -> Result<talixio_agent::pack::Pack> {
+        match &self.0 {
+            Some((fetch, depot)) => depot.pack(fetch.as_ref(), name),
+            None => talixio_agent::pack::Pack::find(self.1.as_deref(), name),
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum PackAction {
     /// Liste les paquets disponibles.
@@ -225,6 +245,13 @@ enum PackAction {
     },
     /// Liste les paquets installés et vérifie leurs empreintes, comme le maître à son démarrage.
     Verify {
+        #[command(flatten)]
+        dir: PackDir,
+    },
+    /// Parcourt les paquets à l'écran : les lire, les installer, les retirer.
+    Tui {
+        #[command(flatten)]
+        from: PackFrom,
         #[command(flatten)]
         dir: PackDir,
     },
@@ -357,6 +384,15 @@ async fn run() -> Result<()> {
                     println!("\nInstallé dans {}. Le maître le prend à son prochain démarrage (réglage packs_dir).", dest.display());
                     println!("Ce dossier ne doit pas être inscriptible par le compte du maître.");
                     println!("Pour que le maître n'accepte que ce contenu-là, dans sa configuration : [packs] {} = \"{}\"", p.manifest.name, p.id());
+                }
+                PackAction::Tui { from, dir } => {
+                    // sans dossier d'installation connu, on ne fait que lire
+                    let dir = match dir.path() {
+                        Ok(dir) => Some(dir),
+                        Err(_) if dir.dir.is_none() && !Path::new(talixio_agent::service::SYSTEM_PACKS).is_dir() => None,
+                        Err(error) => return Err(error),
+                    };
+                    talixio_agent::tui::run(&Opened(from.open()?, from.from.clone()), dir)?;
                 }
                 PackAction::Keygen { out } => {
                     use std::io::Write;

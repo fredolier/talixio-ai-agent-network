@@ -131,6 +131,9 @@ Hors de Docker : le plus simple est le compte dédié (voir « En service »), a
 catalogue --dir /opt/talixio/packs` sous un autre compte que celui du maître, et
 `packs_dir = "/opt/talixio/packs"` dans `talixio.toml`. Voir `examples/catalogue`.
 
+Pour parcourir plutôt que taper : `./tools.sh pack tui` (ou `talixio-agent pack tui`). La liste
+à gauche, ce que le paquet donnerait à droite ; `i` installe, `r` retire, `v` vérifie, `q` quitte.
+
 ### Dépôt de paquets
 
 Des paquets peuvent venir d'un dépôt : un dossier de fichiers derrière https, dont l'index est

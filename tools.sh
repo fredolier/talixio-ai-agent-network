@@ -8,7 +8,7 @@
 #   ./tools.sh run [claude]     lance seulement (l'image doit exister)
 #   ./tools.sh build navigateur   construit l'image des AGENTS qui lisent le web avec un navigateur
 #                                 (talixio-navigateur ; pas une image du maître : voir examples/catalogue)
-#   ./tools.sh pack list|show <nom>|install <nom>|remove <nom>|verify
+#   ./tools.sh pack tui|list|show <nom>|install <nom>|remove <nom>|verify
 #                            les paquets (commandes et rôles) du maître : c'est vous qui les
 #                            installez, jamais lui. Pris au prochain « run ».
 #   ./tools.sh token         affiche le jeton de l'interface
@@ -182,12 +182,15 @@ pack() {
         [ -d "$TALIXIO_PACKS_FROM" ] || die "dossier de paquets introuvable : $TALIXIO_PACKS_FROM"
         case "$(cd "$TALIXIO_PACKS_FROM" && pwd)" in *:*) die "dossier de paquets refusé : « : » dans son chemin" ;; esac
         from=(-v "$(cd "$TALIXIO_PACKS_FROM" && pwd):/from:ro")
-        case "${1:-}" in list|show|install) set -- "$@" --from /from ;; esac
+        case "${1:-}" in list|show|install|tui) set -- "$@" --from /from ;; esac
     fi
-    docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
+    # l'écran des paquets demande un terminal
+    local tty=()
+    [ "${1:-}" = tui ] && tty=(-it -e "TERM=${TERM:-xterm}")
+    docker run --rm ${tty[@]+"${tty[@]}"} --network none --cap-drop ALL --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
         -v "$PACKS:/packs" ${from[@]+"${from[@]}"} -e TALIXIO_PACKS=/packs --entrypoint /talixio-agent "$image" pack "$@"
     case "${1:-}" in
-        install|remove) echo "Avec tools.sh : le dossier est sur cette machine, $PACKS (dans le maître : /packs, en lecture seule). À prendre en compte : ./tools.sh run [claude] (et ./tools.sh build navigateur si vos agents tournent en conteneur)." ;;
+        install|remove|tui) echo "Avec tools.sh : le dossier est sur cette machine, $PACKS (dans le maître : /packs, en lecture seule). À prendre en compte : ./tools.sh run [claude] (et ./tools.sh build navigateur si vos agents tournent en conteneur)." ;;
     esac
 }
 

@@ -602,6 +602,19 @@ Demandé le 2026-11-20. Rien n'est codé.
       `tools.sh pack` (conteneur sans réseau), un dépôt https ne se lit pas encore. Dépôt
       officiel : voir Q13.
 
+41. **L'écran des paquets** (2026-11-22, « peut-être un CLI ou un TUI pour qu'on puisse un peu
+    naviguer »). `talixio-agent pack tui` : la liste des paquets à gauche (✓ installé au même
+    contenu, ≠ installé avec un autre contenu), ce que le paquet choisi donnerait à droite
+    (le texte de `pack show`), et `i` installer, `r` retirer, `v` vérifier, `q` quitter. Rien ne
+    s'installe ni ne se retire sans un « o » à la question posée. Mêmes sources (`--from`,
+    `--depot` et `--key`) et même dossier (`--dir`, `TALIXIO_PACKS`, ou `/opt/talixio/packs` en
+    root) que les autres commandes `pack`, dont il n'est qu'une façade (`src/tui.rs`) : mêmes
+    contrôles, et rien que le maître puisse lancer lui-même. Sans dossier d'installation connu,
+    il ne fait que lire. Tout texte affiché est nettoyé des caractères de commande. Il tourne
+    hors de Docker sur le dossier des paquets de la machine, ou par `./tools.sh pack tui` ; en
+    sortant, il rappelle de relancer le maître si quelque chose a changé. Dépendance ajoutée :
+    `crossterm` (compilée dans l'exécutable, toujours unique).
+
 ## 5. Architecture
 
 ```

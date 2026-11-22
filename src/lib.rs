@@ -23,6 +23,7 @@ pub mod spawn;
 pub mod store;
 pub mod tls;
 pub mod tools;
+pub mod tui;
 
 pub fn now_ms() -> u64 {
     std::time::SystemTime::now()

@@ -7,6 +7,16 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.21.0"
+date = "2026-11-22"
+title = "Un écran pour parcourir les paquets"
+summary = "`talixio-agent pack tui` : la liste des paquets, ce que chacun donnerait, et l'installation au bout d'une touche."
+
+[[release.changes]]
+kind = "nouveau"
+text = "`talixio-agent pack tui` (ou `./tools.sh pack tui`) : parcourir les paquets, lire leurs commandes et leurs rôles, installer (i), retirer (r), vérifier (v). Rien ne se fait sans confirmation ; mêmes sources et mêmes contrôles que `pack install`."
+
+[[release]]
 version = "0.20.0"
 date = "2026-11-22"
 title = "Des paquets à télécharger, signés"
