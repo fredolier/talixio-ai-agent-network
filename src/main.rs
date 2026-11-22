@@ -136,9 +136,56 @@ impl PackDir {
 
 #[derive(clap::Args)]
 struct PackFrom {
-    /// Un dossier de paquets (un sous-dossier par paquet). Par défaut : ceux de cet exécutable.
-    #[arg(long)]
+    /// Un dossier de paquets à vous (un sous-dossier par paquet), lu tel quel, sans signature.
+    /// Par défaut : les paquets de cet exécutable.
+    #[arg(long, conflicts_with_all = ["depot", "key"])]
     from: Option<PathBuf>,
+    /// Un dépôt signé : https://…, ou un dossier écrit par `pack publish`. Demande `--key`.
+    #[arg(long)]
+    depot: Option<String>,
+    /// La clé publique de l'éditeur du dépôt, à laquelle vous faites confiance.
+    #[arg(long, env = "TALIXIO_PACK_KEY", requires = "depot")]
+    key: Vec<String>,
+}
+
+impl PackFrom {
+    /// Le dépôt signé, s'il en est demandé un : son index est vérifié ici. La nature de la
+    /// source vient de l'option, jamais de ce que le dossier ou le serveur contient.
+    fn open(&self) -> Result<Option<(Box<dyn talixio_agent::depot::Fetch>, talixio_agent::depot::Depot)>> {
+        use talixio_agent::depot::{self, DirFetch, HttpsFetch};
+        let Some(depot) = &self.depot else {
+            if let Some(dir) = &self.from {
+                eprintln!("Source locale, NON signée : {}. N'installez de là que ce que vous y avez mis vous-même.", dir.display());
+            }
+            return Ok(None);
+        };
+        let fetch: Box<dyn depot::Fetch> = if depot.starts_with("http://") {
+            bail!("un dépôt de paquets ne se lit qu'en https");
+        } else if depot.starts_with("https:") {
+            Box::new(HttpsFetch::new(depot)?)
+        } else {
+            Box::new(DirFetch(depot.into()))
+        };
+        let opened = depot::open(fetch.as_ref(), &self.key)?;
+        eprintln!("Dépôt {depot} : index du {}, signé par la clé {}.", depot::day(opened.issued), opened.signer);
+        Ok(Some((fetch, opened)))
+    }
+
+    /// Nom, version et description de chaque paquet disponible.
+    fn list(&self) -> Result<Vec<(String, String, String)>> {
+        use talixio_agent::pack::Pack;
+        Ok(match self.open()? {
+            Some((_, depot)) => depot.entries.into_iter().map(|e| (e.name, e.version, e.description)).collect(),
+            None => Pack::available(self.from.as_deref())?.into_iter().map(|p| (p.manifest.name, p.manifest.version, p.manifest.description)).collect(),
+        })
+    }
+
+    fn find(&self, name: &str) -> Result<talixio_agent::pack::Pack> {
+        match self.open()? {
+            Some((fetch, depot)) => depot.pack(fetch.as_ref(), name),
+            None => talixio_agent::pack::Pack::find(self.from.as_deref(), name),
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -162,6 +209,9 @@ enum PackAction {
         /// Remplace le paquet s'il est déjà installé.
         #[arg(long)]
         replace: bool,
+        /// Accepte de remplacer un paquet par celui d'un index plus ancien du même dépôt.
+        #[arg(long)]
+        allow_older: bool,
         #[command(flatten)]
         from: PackFrom,
         #[command(flatten)]
@@ -177,6 +227,25 @@ enum PackAction {
     Verify {
         #[command(flatten)]
         dir: PackDir,
+    },
+    /// Pour qui publie des paquets : fabrique une clé de signature. La partie privée va dans le
+    /// fichier (fermé aux autres comptes) ; la partie publique est affichée, à donner aux lecteurs.
+    Keygen {
+        /// Fichier où écrire la clé privée. Il ne doit pas exister.
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Pour qui publie des paquets : écrit un dépôt signé, à déposer tel quel derrière https.
+    Publish {
+        /// Le dossier des paquets à publier (un sous-dossier par paquet).
+        #[arg(long)]
+        from: PathBuf,
+        /// Le dossier du dépôt à écrire : neuf, ou vide.
+        #[arg(long)]
+        out: PathBuf,
+        /// La clé privée, écrite par `pack keygen`.
+        #[arg(long)]
+        key_file: PathBuf,
     },
 }
 
@@ -230,7 +299,15 @@ struct Remote {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() {
+    if let Err(error) = run().await {
+        // une erreur peut recopier un morceau de fichier ou de réponse : rien qui commande le terminal
+        eprintln!("Error: {}", talixio_agent::clean(&format!("{error:?}"), 20_000, true));
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<()> {
     match Cli::parse().command {
         Command::Root { config, workdir } => {
             if let Some(dir) = workdir {
@@ -256,26 +333,58 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Command::Pack { action } => {
-            use talixio_agent::pack::{self, Pack};
+            use talixio_agent::pack;
             match action {
                 PackAction::List { from } => {
-                    for p in Pack::available(from.from.as_deref())? {
-                        println!("{}  (version {})\n    {}", p.manifest.name, p.manifest.version, p.manifest.description);
+                    for (name, version, description) in from.list()? {
+                        println!("{name}  (version {version})\n    {description}");
                     }
-                    println!("\nRegarder : talixio-agent pack show <nom>. Installer : talixio-agent pack install <nom> --dir <dossier>.");
+                    println!("\nRegarder : talixio-agent pack show <nom>. Installer : talixio-agent pack install <nom> (mêmes options --from, ou --depot et --key).");
                 }
-                PackAction::Show { name, file: None, from } => print!("{}", Pack::find(from.from.as_deref(), &name)?.describe()),
+                PackAction::Show { name, file: None, from } => print!("{}", from.find(&name)?.describe()),
                 PackAction::Show { name, file: Some(file), from } => {
-                    let p = Pack::find(from.from.as_deref(), &name)?;
+                    let p = from.find(&name)?;
                     let bytes = p.files.get(&file).with_context(|| format!("le paquet « {name} » n'a pas ce fichier"))?;
-                    print!("{}", String::from_utf8_lossy(bytes));
+                    // lu avant d'installer, parfois en root : rien qui commande le terminal
+                    print!("{}", talixio_agent::clean(&String::from_utf8_lossy(bytes), usize::MAX, true));
                 }
-                PackAction::Install { name, replace, from, dir } => {
-                    let p = Pack::find(from.from.as_deref(), &name)?;
-                    let dest = p.install(&dir.path()?, replace)?;
+                PackAction::Install { name, replace, allow_older, from, dir } => {
+                    // le dossier d'abord : rien n'est téléchargé pour un dossier qu'on refusera
+                    let dir = dir.path()?;
+                    let p = from.find(&name)?;
+                    let dest = p.install(&dir, replace, allow_older)?;
                     print!("{}", p.describe());
                     println!("\nInstallé dans {}. Le maître le prend à son prochain démarrage (réglage packs_dir).", dest.display());
                     println!("Ce dossier ne doit pas être inscriptible par le compte du maître.");
+                    println!("Pour que le maître n'accepte que ce contenu-là, dans sa configuration : [packs] {} = \"{}\"", p.manifest.name, p.id());
+                }
+                PackAction::Keygen { out } => {
+                    use std::io::Write;
+                    let (private, public) = talixio_agent::depot::keygen()?;
+                    let mut options = std::fs::OpenOptions::new();
+                    options.write(true).create_new(true);
+                    #[cfg(unix)]
+                    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+                    let mut file = options.open(&out).with_context(|| format!("{} (le fichier ne doit pas exister)", out.display()))?;
+                    // fermé aux autres avant d'y écrire ; rien n'est laissé si l'écriture échoue
+                    let written = talixio_agent::os::make_private(&out).map_err(anyhow::Error::msg).and_then(|()| Ok(writeln!(file, "{private}")?)).and_then(|()| Ok(file.sync_all()?));
+                    if let Err(error) = written {
+                        let _ = std::fs::remove_file(&out);
+                        return Err(error.context(format!("écriture de {}", out.display())));
+                    }
+                    println!("Clé privée écrite dans {} : gardez-la hors de la machine qui héberge le dépôt, et hors de tout dépôt de code.", out.display());
+                    println!("Clé publique, à donner à ceux qui liront vos paquets (--key, ou TALIXIO_PACK_KEY) :\n{public}");
+                }
+                PackAction::Publish { from, out, key_file } => {
+                    use talixio_agent::depot;
+                    ensure_private(&key_file)?;
+                    let private = std::fs::read_to_string(&key_file).with_context(|| format!("{}", key_file.display()))?;
+                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_secs();
+                    for entry in depot::publish(&from, &out, &private, now)? {
+                        println!("{} {}  identifiant {}", entry.name, entry.version, entry.id);
+                    }
+                    println!("\nDépôt écrit dans {} : déposez ce dossier tel quel derrière https.", out.display());
+                    println!("Lecture : talixio-agent pack list --depot https://… --key {}", depot::public_of(&private)?);
                 }
                 PackAction::Remove { name, dir } => {
                     pack::remove(&dir.path()?, &name)?;

@@ -194,3 +194,67 @@ async fn un_paquet_installe_sert_et_reste_verifie() {
     let refused = agent(&["root", "--config", config.to_str().unwrap()]);
     assert!(String::from_utf8_lossy(&refused.stderr).contains("`sha256` ne s'écrit pas"), "{}", String::from_utf8_lossy(&refused.stderr));
 }
+
+/// Le dépôt signé, de bout en bout par la ligne de commande : clé, publication, lecture,
+/// installation ; rien sans la clé, rien d'un fichier changé chez l'hébergeur.
+#[test]
+fn un_depot_signe_par_la_ligne_de_commande() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = |name: &str| tmp.path().join(name).to_str().unwrap().to_string();
+    let text = |out: &std::process::Output| format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    std::fs::create_dir_all(tmp.path().join("src/bonjour")).unwrap();
+    std::fs::write(tmp.path().join("src/bonjour/pack.toml"), "name = \"bonjour\"\nversion = \"2\"\ndescription = \"Dit bonjour.\"\n\n[[command]]\nprogram = \"salut\"\nargs = [\"*\"]\n").unwrap();
+    std::fs::write(tmp.path().join("src/bonjour/salut"), "#!/bin/sh\necho bonjour \"$1\"\n").unwrap();
+
+    let made = agent(&["pack", "keygen", "--out", &path("cle")]);
+    assert!(made.status.success(), "{}", text(&made));
+    let public = String::from_utf8_lossy(&made.stdout).lines().last().unwrap().to_string();
+    assert!(!agent(&["pack", "keygen", "--out", &path("cle")]).status.success(), "une clé n'en écrase pas une autre");
+    let published = agent(&["pack", "publish", "--from", &path("src"), "--out", &path("depot"), "--key-file", &path("cle")]);
+    assert!(published.status.success() && text(&published).contains(&public), "{}", text(&published));
+
+    // sans clé : rien ; avec : la liste, puis l'installation
+    let refused = agent(&["pack", "list", "--depot", &path("depot")]);
+    assert!(!refused.status.success() && text(&refused).contains("aucune clé de confiance"), "{}", text(&refused));
+    let listed = agent(&["pack", "list", "--depot", &path("depot"), "--key", &public]);
+    assert!(listed.status.success() && text(&listed).contains("bonjour  (version 2)") && text(&listed).contains("signé par la clé"), "{}", text(&listed));
+    let installed = agent(&["pack", "install", "bonjour", "--depot", &path("depot"), "--key", &public, "--dir", &path("packs")]);
+    assert!(installed.status.success(), "{}", text(&installed));
+    assert!(agent(&["pack", "verify", "--dir", &path("packs")]).status.success());
+    assert!(!agent(&["pack", "list", "--depot", "http://exemple.fr/p", "--key", &public]).status.success());
+    // une clé avec un dossier ordinaire : refus, jamais un repli vers le non signé ; et un dépôt
+    // dont l'index a disparu n'est pas lu comme un dossier ordinaire
+    let mixed = agent(&["pack", "install", "bonjour", "--from", &path("src"), "--key", &public, "--dir", &path("packs2")]);
+    assert!(!mixed.status.success() && !tmp.path().join("packs2").exists(), "{}", text(&mixed));
+    let plain = agent(&["pack", "list", "--from", &path("src")]);
+    assert!(plain.status.success() && text(&plain).contains("NON signée"), "{}", text(&plain));
+    std::fs::create_dir_all(tmp.path().join("sans-index/bonjour")).unwrap();
+    std::fs::copy(tmp.path().join("src/bonjour/pack.toml"), tmp.path().join("sans-index/bonjour/pack.toml")).unwrap();
+    std::fs::copy(tmp.path().join("src/bonjour/salut"), tmp.path().join("sans-index/bonjour/salut")).unwrap();
+    assert!(!agent(&["pack", "install", "bonjour", "--depot", &path("sans-index"), "--key", &public, "--dir", &path("packs2")]).status.success());
+
+    // un ancien index, toujours bien signé, ne remplace pas un paquet plus récent du même dépôt
+    std::fs::write(tmp.path().join("src/bonjour/pack.toml"), "name = \"bonjour\"\nversion = \"3\"\ndescription = \"Dit bonjour.\"\n\n[[command]]\nprogram = \"salut\"\nargs = [\"*\"]\n").unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    assert!(agent(&["pack", "publish", "--from", &path("src"), "--out", &path("depot3"), "--key-file", &path("cle")]).status.success());
+    assert!(agent(&["pack", "install", "bonjour", "--replace", "--depot", &path("depot3"), "--key", &public, "--dir", &path("packs")]).status.success());
+    let back = agent(&["pack", "install", "bonjour", "--replace", "--depot", &path("depot"), "--key", &public, "--dir", &path("packs")]);
+    assert!(!back.status.success() && text(&back).contains("plus ancien"), "{}", text(&back));
+    assert!(agent(&["pack", "install", "bonjour", "--replace", "--allow-older", "--depot", &path("depot"), "--key", &public, "--dir", &path("packs")]).status.success());
+    // une clé de signature rangée dans un paquet n'est pas publiée
+    std::fs::copy(tmp.path().join("cle"), tmp.path().join("src/bonjour/cle")).unwrap();
+    let leak = agent(&["pack", "publish", "--from", &path("src"), "--out", &path("depot4"), "--key-file", &path("cle")]);
+    assert!(!leak.status.success() && text(&leak).contains("clé de signature"), "{}", text(&leak));
+    std::fs::remove_file(tmp.path().join("src/bonjour/cle")).unwrap();
+
+    // l'hébergeur change un fichier : refus, et rien n'est installé à la place
+    std::fs::write(tmp.path().join("depot/bonjour/2/salut"), "#!/bin/sh\necho pirate! \"$1\"\n").unwrap();
+    let tampered = agent(&["pack", "install", "bonjour", "--replace", "--depot", &path("depot"), "--key", &public, "--dir", &path("packs")]);
+    assert!(!tampered.status.success() && text(&tampered).contains("n'est pas ce que l'index signé annonce"), "{}", text(&tampered));
+    assert!(std::fs::read_to_string(tmp.path().join("packs/bonjour/salut")).unwrap().contains("bonjour"));
+    // un manifeste qui tente de commander le terminal : l'erreur est nettoyée
+    std::fs::create_dir_all(tmp.path().join("piege/x")).unwrap();
+    std::fs::write(tmp.path().join("piege/x/pack.toml"), "name = \"x\"\n\u{1b}]0;TITRE\u{7}\u{1b}[31m = \n").unwrap();
+    let trap = agent(&["pack", "list", "--from", &path("piege")]);
+    assert!(!trap.status.success() && !trap.stderr.contains(&0x1b) && !trap.stderr.contains(&7), "{}", text(&trap));
+}

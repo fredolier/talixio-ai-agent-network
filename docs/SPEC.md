@@ -570,6 +570,38 @@ Demandé le 2026-11-20. Rien n'est codé.
     seule : rien ne s'installe ni ne se modifie depuis l'interface (décision 37). À la création
     d'un agent par un rôle installé, le journal note le paquet, sa version et son identifiant.
 
+40. **Le dépôt de paquets signé** (2026-11-22, « à terme un service qui permettra d'accéder et
+    de télécharger des rôles, des commandes »). Un dépôt est un dossier de fichiers statiques, à
+    déposer derrière n'importe quel serveur https, sans programme côté serveur :
+    `index.toml` (chaque paquet : nom, version, description, identifiant, et pour chaque fichier
+    son nom, sa taille, son SHA-256), `index.toml.sig` (signature Ed25519 de l'index, précédé d'un
+    préfixe de domaine), `<nom>/<version>/<fichier>`. `src/depot.rs`.
+    - **Rien sans signature.** `pack list|show|install --depot https://… --key <clé publique>` :
+      l'index est vérifié avant d'être analysé, contre les clés de l'exécutable (`TRUSTED_KEYS`,
+      aucune pour l'instant) et celles que l'exploitant donne (`--key`, `TALIXIO_PACK_KEY`). Sans
+      clé de confiance, ou sans signature valable : refus. `http://` : refus.
+    - **L'hébergeur n'est pas de confiance.** Chaque fichier est vérifié contre l'empreinte de
+      l'index signé, et le paquet reconstitué contre son identifiant ; un fichier changé est
+      refusé et rien n'est installé. Aucune redirection n'est suivie. L'index signé est lui-même lu
+      avec prudence (noms sans chemin, tailles bornées).
+    - **Publier** : `pack keygen --out <fichier>` (clé privée en 0600, clé publique affichée) et
+      `pack publish --from <paquets> --out <dossier> --key-file <fichier>`.
+    - **Deux options, deux natures.** `--depot` (https, ou un dossier écrit par `pack publish`)
+      exige une signature ; `--from` lit un dossier local tel quel, non signé, et le dit. `--key`
+      ne va qu'avec `--depot` : ce que contient le dossier ou le serveur ne décide jamais de la
+      nature de la source.
+    - **Pas de retour en arrière silencieux.** La date de l'index est affichée ; un index daté
+      dans le futur est refusé ; `pack.lock` garde la clé et la date de l'index d'où vient le
+      paquet, et `install --replace` refuse un index plus ancien de la même clé (`--allow-older`
+      pour le vouloir). Un index ne porte qu'une version par paquet.
+    - Limites : rien n'empêche un hébergeur de cacher une mise à jour (gel) ni, à la première
+      installation, de servir un ancien index ; fixer les identifiants dans `[packs]` y pare
+      côté maître. Pas de révocation de clé autrement que par une nouvelle version de
+      l'exécutable. Un mandataire d'entreprise qui déchiffre le https fera échouer la lecture
+      (racines publiques seulement) ; l'intégrité, elle, ne repose pas sur le https. Avec
+      `tools.sh pack` (conteneur sans réseau), un dépôt https ne se lit pas encore. Dépôt
+      officiel : voir Q13.
+
 ## 5. Architecture
 
 ```
@@ -671,6 +703,7 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 | Q10 | Catalogue de fournisseurs et capacités image et voix (F1–F4). | Fait pour l'essentiel (décisions 25 et 26, v0.9.0 et v0.10.0 : on se connecte et on active depuis la page). Reste ouvert : comptage en argent (B4) ; mise à jour du catalogue depuis les fournisseurs ; essai chez de vrais fournisseurs. Notes de l'étude : Format de l'assistant relu (`src/ModelCatalog.php`, `Sovereign.php`, `Routing.php`, `Pricing.php`) : une table de fournisseurs (identifiant, nom, pays, niveau de confiance, adresse, mode de facturation) et une table de modèles (identifiant exact de l'API, fournisseur, nature `LLM`, `Vision`, `Voice`, `Image`, `Embedding`, prix par million de tokens ou par unité : minute, image). Usages liés à un modèle : `fast`, `standard`, `deep`, `voice`, `vision`, `embedding` ; effort et tokens de réflexion portés par le palier. À reprendre ici : `[providers.<nom>]` (adresse, type d'API, fichier de clé) et des modèles par nature, avec prix ; droits de la forme `fournisseur/modèle`. À savoir : l'assistant ne tient ni taille de contexte ni effort par modèle, ne compte que les tokens (minutes et images sont affichées, pas comptées), et n'appelle aucune API d'image ni de synthèse vocale : seules la transcription (`POST /audio/transcriptions`) et les embeddings existent. Image et synthèse sont donc à écrire, pas à reprendre. Côté maître, du code par nature : nouveaux messages du lien, tailles bornées autrement (un son ou une image pèse lourd), comptage en argent (B4), nouveaux outils chez l'agent. Nouvelle surface : revue de sécurité avant de coder. |
 | Q11 | Se connecter par abonnement (Claude Pro/Max, ChatGPT) plutôt que par clé d'API ? | **Tranchée (2026-11-21) : oui, par la commande officielle `claude` seulement (décision 32).** D'abord écartée (« pas de dépendances, un seul exécutable »), puis demandée : l'abonnement Max doit pouvoir servir. Talixio reste un exécutable seul ; `claude` est un programme externe facultatif. Pour mémoire : L'assistant le fait pour Claude seulement, en pilotant la commande officielle `claude` (`setup-token`, puis `claude -p` à chaque tour, les outils exposés en MCP). Ici, cela demande d'installer cette commande à côté du maître, qui ne serait plus un exécutable seul, et un connecteur d'une autre nature (la commande tient elle-même la boucle d'outils). Le jeton d'abonnement ne doit pas servir à appeler l'API directement : les conditions d'Anthropic réservent cet usage à ses propres outils. Rien d'équivalent chez OpenAI dans l'assistant. |
 | Q12 | Un maître lui-même dans Docker doit-il pouvoir lancer des agents dans d'autres conteneurs ? Comment ? | **Tranchée (2026-11-22) : oui, par le socket Docker de la machine (décision 36)**, « dans un premier temps » ; à terme, le maître ira dans une machine virtuelle. Écartés : Docker dans Docker (conteneur privilégié, pire pour une isolation moindre). Le maître installé sur la machine reste possible. |
+| Q13 | Dépôt officiel de paquets : qui publie, où vit la clé. | Ouverte. Le mécanisme est prêt (décision 40) ; il manque une clé Talixio (sa partie publique dans `TRUSTED_KEYS`) et une adresse. Proposition : clé fabriquée et gardée hors ligne par Talixio, signature faite à la main à chaque publication (pas dans la CI, dont un secret volé signerait n'importe quoi), dépôt servi comme fichiers statiques (pages du dépôt GitHub ou site Talixio). |
 | Q11 | Répertoire des rôles (R1–R3). | Une table SQLite chez le maître. Écriture : à chaque `spawn_agent`, le rôle remonte par le lien, de parent en parent ; à chaque fin de mission, son résultat. Lecture : un outil `find_role` (recherche par mots, puis par embeddings quand F1 existera), dont la demande remonte au maître comme une demande de modèle. Sécurité, à trancher avant de coder : un rôle enregistré contient des instructions écrites par un agent, donc un texte qui peut avoir été empoisonné et que d'autres agents reliront. Il doit être présenté comme une donnée à évaluer, jamais comme une consigne ; ne jamais porter de droits (les droits restent accordés par le parent, dans la limite des siens) ; et un rôle « approuvé » par l'humain doit se distinguer d'un rôle seulement observé. Fuite : un agent d'une branche lit ce qu'une autre branche a écrit ; prévoir de quoi cloisonner. |
 
 ## 7. Sécurité
@@ -765,6 +798,26 @@ les seules options passées à `claude`, sans contrôle de ce qu'il fait réelle
 | K10 | Basse | Filtre des secrets de l'environnement sensible à la casse (Windows ne l'est pas). | ✅ Comparaison sans casse. Ce que `claude_env` laisse passer reste à la charge de l'exploitant (noté). |
 | K11 | Basse | `<état>/claude` pouvait être un lien symbolique posé avant le démarrage. | ✅ Refusé au démarrage. |
 | K12 | Basse | Une invite commençant par « / » pouvait être prise pour une commande de `claude`. | ✅ Jamais en tête d'invite (et `--disable-slash-commands`). |
+
+### Quatorzième passe (2026-11-22) : le dépôt de paquets signé (décision 40)
+
+Revue indépendante, essayée avec des dépôts en dossier. Signature, empreintes, ordre des contrôles
+et traversée de chemin trouvés corrects. Un constat haut, trois moyens, sept bas.
+
+| Constat | Gravité | Traitement |
+|---|---|---|
+| Avec `--key`, un dossier dont l'index avait été retiré était lu comme une source locale non signée, sans un mot (démontré). | haut | ✅ `--depot` et `--from` séparés ; `--key` exige `--depot` ; une source locale s'annonce « NON signée » (testé). |
+| Un ancien index, toujours bien signé, remplaçait un paquet plus récent ; la date n'était ni montrée ni employée. | moyen | ✅ date affichée, futur refusé, retour en arrière refusé sauf `--allow-older` (testé). Gel et première installation : limites notées. |
+| Séquences d'échappement dans le terminal par l'erreur d'analyse d'un `pack.toml` ou d'un index. | moyen | ✅ erreurs nettoyées, et toute erreur de la ligne de commande l'est à la sortie (testé). |
+| `pack show --file` imprimait le fichier brut. | moyen | ✅ nettoyé. |
+| Clé publique d'ordre faible acceptée : tout le monde sait signer pour elle (démontré). | bas | ✅ refusée (testé). |
+| `https://` sans hôte : un nom de fichier devenait l'hôte. | bas | ✅ adresse analysée, hôte exigé, chemins ajoutés par segments (testé). |
+| Tube nommé à la place d'un fichier du dépôt : lecture sans fin ; liens suivis. | bas | ✅ fichiers ordinaires seulement. |
+| `keygen` laissait un fichier vide en cas d'échec ; droits posés après l'écriture. | bas | ✅ fermé avant l'écriture, retiré en cas d'échec. |
+| `publish` publiait une clé privée rangée dans un paquet. | bas | ✅ refus (testé). |
+| Serveur lent : jusqu'à une heure. | bas | ✅ cinq minutes en tout. |
+| Noms réservés de Windows, point final, doublons à la casse près. | information | ✅ refusés. |
+| `publish --out` suit un lien et n'est pas atomique. | bas | ⬜ noté : n'écrivez un dépôt que dans un dossier à vous. |
 
 ### Treizième passe (2026-11-22) : le compte dédié (décision 38)
 

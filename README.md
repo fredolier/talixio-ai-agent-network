@@ -131,6 +131,32 @@ Hors de Docker : le plus simple est le compte dédié (voir « En service »), a
 catalogue --dir /opt/talixio/packs` sous un autre compte que celui du maître, et
 `packs_dir = "/opt/talixio/packs"` dans `talixio.toml`. Voir `examples/catalogue`.
 
+### Dépôt de paquets
+
+Des paquets peuvent venir d'un dépôt : un dossier de fichiers derrière https, dont l'index est
+signé. Rien n'est lu sans la clé publique de son éditeur, et l'hébergeur ne peut rien y changer.
+
+```bash
+talixio-agent pack list --depot https://exemple.fr/paquets --key <clé publique>
+```
+
+```bash
+sudo talixio-agent pack install <nom> --depot https://exemple.fr/paquets --key <clé publique>
+```
+
+Publier les vôtres (la clé privée reste chez vous, hors du serveur) :
+
+```bash
+talixio-agent pack keygen --out ma-cle
+```
+
+```bash
+talixio-agent pack publish --from mes-paquets --out depot --key-file ma-cle
+```
+
+Le dossier `depot` se dépose tel quel sur un serveur de fichiers. Il n'y a pas encore de dépôt
+officiel Talixio.
+
 ## En service
 
 Pour que le maître reparte seul au démarrage de la machine et après une panne, depuis le dossier

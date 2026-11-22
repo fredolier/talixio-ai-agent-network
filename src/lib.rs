@@ -13,6 +13,7 @@ pub mod link;
 pub mod model;
 pub mod node;
 pub mod os;
+pub mod depot;
 pub mod pack;
 pub mod policy;
 pub mod protocol;

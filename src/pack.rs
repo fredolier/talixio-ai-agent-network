@@ -19,8 +19,8 @@ use crate::policy::ExecRule;
 const MANIFEST: &str = "pack.toml";
 const LOCK: &str = "pack.lock";
 /// Un paquet reste petit : des scripts et des textes.
-const MAX_FILE: u64 = 2 * 1024 * 1024;
-const MAX_FILES: usize = 64;
+pub(crate) const MAX_FILE: u64 = 2 * 1024 * 1024;
+pub(crate) const MAX_FILES: usize = 64;
 
 /// Les paquets livrés dans l'exécutable.
 type Files = &'static [(&'static str, &'static [u8])];
@@ -83,12 +83,19 @@ pub struct Role {
 struct Lock {
     version: String,
     files: BTreeMap<String, String>,
+    /// Paquet venu d'un dépôt signé : la clé qui a signé l'index, et la date de celui-ci.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    depot_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    depot_issued: Option<u64>,
 }
 
 /// Un paquet lu, d'où qu'il vienne : son manifeste et ses fichiers.
 pub struct Pack {
     pub manifest: Manifest,
     pub files: BTreeMap<String, Vec<u8>>,
+    /// Venu d'un dépôt signé : la clé de l'index et sa date (secondes depuis 1970).
+    pub origin: Option<(String, u64)>,
 }
 
 /// Un rôle installé, prêt à servir : ses consignes et les règles de ses commandes.
@@ -118,24 +125,31 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 
 /// Un texte d'une ligne, sans rien qui commande un terminal ni qui se cache : il sera affiché à
 /// l'exploitant et inséré dans les consignes du maître.
-fn plain_line(text: &str, max: usize) -> bool {
+pub(crate) fn plain_line(text: &str, max: usize) -> bool {
     !text.trim().is_empty() && text.chars().count() <= max && crate::clean(text, max, false) == text && !text.contains(['\n', '\r'])
 }
 
 /// Un nom de paquet ou de fichier : court, sans rien qui fasse un chemin ou une option.
-fn plain_name(name: &str) -> bool {
+pub(crate) fn plain_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
         && !name.starts_with(['.', '-'])
+        && !name.ends_with('.')
         && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        // les noms que Windows réserve à ses périphériques
+        && !{
+            let stem = name.split('.').next().unwrap_or("").to_ascii_uppercase();
+            matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL") || (stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT")) && stem.as_bytes()[3].is_ascii_digit())
+        }
 }
 
 impl Pack {
-    fn parse(files: BTreeMap<String, Vec<u8>>) -> Result<Self> {
+    pub(crate) fn parse(files: BTreeMap<String, Vec<u8>>) -> Result<Self> {
         let text = files.get(MANIFEST).context("pack.toml manque")?;
         // les fins de ligne d'un autre système ne font pas un autre manifeste
         let text = std::str::from_utf8(text).context("pack.toml n'est pas du texte")?.replace("\r\n", "\n");
-        let manifest: Manifest = toml::from_str(&text).context("pack.toml invalide")?;
+        // l'erreur recopie la ligne fautive : nettoyée, elle ne commande pas le terminal
+        let manifest: Manifest = toml::from_str(&text).map_err(|e| anyhow::anyhow!("pack.toml invalide : {}", crate::clean(&e.to_string(), 600, true)))?;
         if !plain_name(&manifest.name) {
             bail!("nom de paquet invalide : « {} »", crate::clean(&manifest.name, 80, false));
         }
@@ -192,7 +206,12 @@ impl Pack {
                 bail!("rôle « {} » : commande « {} » absente du paquet", role.name, crate::clean(unknown, 80, false));
             }
         }
-        Ok(Self { manifest, files })
+        // sur un disque qui ne distingue pas les majuscules, deux noms n'en feraient qu'un
+        let folded: std::collections::BTreeSet<String> = files.keys().map(|n| n.to_lowercase()).collect();
+        if folded.len() != files.len() {
+            bail!("deux fichiers ne diffèrent que par la casse");
+        }
+        Ok(Self { manifest, files, origin: None })
     }
 
     /// Lit un paquet dans un dossier : des fichiers ordinaires, à plat, sans lien.
@@ -307,7 +326,8 @@ impl Pack {
     }
 
     /// Installe le paquet dans `dir/<nom>` : ses fichiers, et l'empreinte de chacun.
-    pub fn install(&self, dir: &Path, replace: bool) -> Result<PathBuf> {
+    /// `allow_older` : accepte de remplacer un paquet par celui d'un index plus ancien du même dépôt.
+    pub fn install(&self, dir: &Path, replace: bool, allow_older: bool) -> Result<PathBuf> {
         if !dir.exists() {
             std::fs::create_dir_all(dir).with_context(|| format!("création de {}", dir.display()))?;
             crate::os::set_mode(dir, 0o755)?;
@@ -315,6 +335,16 @@ impl Pack {
         let dest = dir.join(&self.manifest.name);
         if dest.symlink_metadata().is_ok() && !replace {
             bail!("le paquet « {} » est déjà installé (--replace pour le remplacer)", self.manifest.name);
+        }
+        // un hébergeur peut resservir un ancien index, toujours bien signé : pas de retour en
+        // arrière sans le dire
+        if let (Some((key, issued)), false) = (&self.origin, allow_older) {
+            let old: Option<Lock> = std::fs::read_to_string(dest.join(LOCK)).ok().and_then(|text| toml::from_str(&text).ok());
+            if let Some(Lock { depot_key: Some(old_key), depot_issued: Some(old_issued), .. }) = old {
+                if old_key == *key && old_issued > *issued {
+                    bail!("le paquet « {} » installé vient d'un index plus récent de ce dépôt : celui-ci est plus ancien (retour en arrière ?). Si c'est voulu : --allow-older", self.manifest.name);
+                }
+            }
         }
         // tout est écrit à côté, puis mis en place d'un coup : une installation interrompue ne
         // laisse pas un demi-paquet à la place de l'ancien
@@ -325,7 +355,12 @@ impl Pack {
         std::fs::create_dir(&staging).with_context(|| format!("création de {}", staging.display()))?;
         crate::os::set_mode(&staging, 0o755)?;
         let programs: Vec<&str> = self.manifest.commands.iter().map(|c| c.program.as_str()).collect();
-        let mut lock = Lock { version: self.manifest.version.clone(), files: BTreeMap::new() };
+        let mut lock = Lock {
+            version: self.manifest.version.clone(),
+            files: BTreeMap::new(),
+            depot_key: self.origin.as_ref().map(|o| o.0.clone()),
+            depot_issued: self.origin.as_ref().map(|o| o.1),
+        };
         for (name, bytes) in &self.files {
             let path = staging.join(name);
             std::fs::write(&path, bytes).with_context(|| format!("écriture de {}", path.display()))?;
@@ -480,8 +515,8 @@ mod tests {
     fn un_paquet_installe_puis_modifie_est_refuse() {
         let tmp = tempfile::tempdir().unwrap();
         let pack = Pack::find(None, "catalogue").unwrap();
-        let dest = pack.install(tmp.path(), false).unwrap();
-        assert!(pack.install(tmp.path(), false).is_err(), "installé deux fois sans --replace");
+        let dest = pack.install(tmp.path(), false, false).unwrap();
+        assert!(pack.install(tmp.path(), false, false).is_err(), "installé deux fois sans --replace");
         let installed = load_installed(tmp.path(), false).unwrap();
         assert_eq!(installed.exec.len(), 4);
         assert!(installed.exec.iter().all(|r| r.sha256.is_some() && r.program.starts_with(tmp.path().canonicalize().unwrap())));
@@ -496,14 +531,14 @@ mod tests {
         std::fs::write(&rule.program, "#!/bin/sh\nid\n").unwrap();
         assert!(check_program(&rule).unwrap_err().contains("empreinte"));
         assert!(format!("{:#}", load_installed(tmp.path(), false).err().unwrap()).contains("a changé"));
-        pack.install(tmp.path(), true).unwrap();
+        pack.install(tmp.path(), true, false).unwrap();
         // un fichier ajouté, un fichier retiré, un lien
         std::fs::write(dest.join("plus"), "x").unwrap();
         assert!(format!("{:#}", load_installed(tmp.path(), false).err().unwrap()).contains("ajouté"));
         std::fs::remove_file(dest.join("plus")).unwrap();
         std::fs::remove_file(dest.join("sites.txt")).unwrap();
         assert!(format!("{:#}", load_installed(tmp.path(), false).err().unwrap()).contains("disparu"));
-        pack.install(tmp.path(), true).unwrap();
+        pack.install(tmp.path(), true, false).unwrap();
         load_installed(tmp.path(), false).unwrap();
         remove(tmp.path(), "catalogue").unwrap();
         assert!(load_installed(tmp.path(), false).unwrap().exec.is_empty());

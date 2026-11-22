@@ -7,6 +7,28 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.20.0"
+date = "2026-11-22"
+title = "Des paquets à télécharger, signés"
+summary = "Un dépôt de paquets est un dossier de fichiers derrière https, avec un index signé : rien n'en est installé sans vérification."
+
+[[release.changes]]
+kind = "nouveau"
+text = "`talixio-agent pack list|show|install --depot https://… --key <clé publique>` : lit un dépôt de paquets. L'index est signé (Ed25519) ; chaque fichier est vérifié contre l'empreinte de l'index, et l'hébergeur ne peut rien substituer."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Publier vos paquets : `pack keygen --out <fichier>` fabrique la clé, `pack publish --from <paquets> --out <dossier> --key-file <fichier>` écrit le dépôt, à déposer tel quel derrière https."
+
+[[release.changes]]
+kind = "sécurité"
+text = "`--depot` exige toujours une signature ; `--from` (dossier local, non signé) l'annonce. Un index plus ancien ne remplace pas un paquet plus récent du même dépôt sans `--allow-older`. Les messages d'erreur et `pack show --file` ne laissent plus passer de caractères de commande vers le terminal."
+
+[[release.changes]]
+kind = "attention"
+text = "Il n'y a pas encore de dépôt officiel Talixio : un dépôt ne se lit qu'avec la clé publique que son éditeur vous donne."
+
+[[release]]
 version = "0.19.1"
 date = "2026-11-22"
 title = "Compte dédié : corrections de la revue de sécurité"
