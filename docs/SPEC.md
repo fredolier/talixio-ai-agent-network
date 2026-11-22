@@ -488,10 +488,13 @@ Demandé le 2026-11-20. Rien n'est codé.
     que le maître en conteneur ne connaît pas : `network` (l'agent joint le maître dans ce
     réseau), `agent_in_image` (l'exécutable de l'agent est dans l'image, construite à partir de
     celle du maître), et des montages par `volume` et `subpath` (un sous-dossier du volume du
-    maître, jamais le volume entier, où sont ses clés). Le conteneur d'un agent reste celui de
+    maître, jamais le volume entier, où sont ses clés : `subpath` est obligatoire, et jamais
+    sous un dossier qu'un autre conteneur écrit). Le conteneur d'un agent reste celui de
     la décision 19 : jetable, lecture seule, aucune capacité, jamais le socket. **Prix, accepté
     pour un premier temps** : qui prend le process du maître commande Docker, donc la machine
-    en root (limite 9). Le socket est interdit d'office aux outils des agents, aucune règle de
+    en root (limite 9) ; cela vaut pour tout ce que le maître lance sous son compte (agents à
+    côté de lui, commandes permises, `claude`), d'où : aucune règle de commande à arguments
+    libres chez un tel maître. Le socket est interdit d'office aux outils des agents, aucune règle de
     commande ne donne `docker` par défaut, et le client Docker sans socket ne peut rien. À
     terme : le maître dans une machine virtuelle. Non essayé : Docker sans droits
     d'administrateur (« rootless »), où le compte sans droit du conteneur n'ouvre sans doute
@@ -694,6 +697,22 @@ les seules options passées à `claude`, sans contrôle de ce qu'il fait réelle
 | K10 | Basse | Filtre des secrets de l'environnement sensible à la casse (Windows ne l'est pas). | ✅ Comparaison sans casse. Ce que `claude_env` laisse passer reste à la charge de l'exploitant (noté). |
 | K11 | Basse | `<état>/claude` pouvait être un lien symbolique posé avant le démarrage. | ✅ Refusé au démarrage. |
 | K12 | Basse | Une invite commençant par « / » pouvait être prise pour une commande de `claude`. | ✅ Jamais en tête d'invite (et `--disable-slash-commands`). |
+
+### Onzième passe (2026-11-22) : le maître en conteneur et ses conteneurs voisins (décision 36)
+
+Revue indépendante, sur un vrai Docker. Rien ne permet à un agent d'ajouter une option à
+`docker run` ni d'atteindre le socket, et le conteneur d'un agent garde toutes les protections de
+la décision 19. Aucun constat haut ; deux moyens.
+
+| N° | Gravité | Constat | Traitement |
+|---|---|---|---|
+| V1 | Moyenne | « Jamais le volume entier » n'était pas tenu : `subpath` absent ou valant « . » montait tout le volume (clés du maître comprises) ; un lien posé par un conteneur qui écrit le dossier parent était suivi par Docker. | ✅ `subpath` obligatoire, chaque partie vérifiée (ni vide, ni commençant par un point) ; deux montages emboîtés du même volume sont refusés quand le parent est en écriture. |
+| V2 | Moyenne | Le groupe qui ouvre le socket passe à tout ce que le maître lance : agents à côté de lui, commandes permises, `claude`. Une règle de commande trop large donne alors la machine, plus seulement le conteneur. | 📌 Risque accepté élargi et écrit (décision 36, limite 9). À terme : le socket tenu par un process à part, ou le maître dans une machine virtuelle. |
+| V3 | Basse | Relancer le maître laissait tourner les conteneurs d'agents de l'ancien. | ✅ `tools.sh run` les retire d'abord. |
+| V4 | Basse | `stop` oubliait un conteneur d'agent hors du réseau du maître ; `purge` disait « Effacé. » quand le volume restait. | ✅ Recherche par réseau et par volume ; `purge` dit ce qui reste. 📌 `network` doit valoir `<nom>-net`. |
+| V5 | Basse | Une cible pouvait monter le socket Docker (`host`), ou monter par-dessus `/talixio-agent` et `/state`. | ✅ Refusés au chargement. |
+| V6 | Basse | Avec `agent_in_image`, l'agent peut être d'une autre version que le maître si l'image n'est pas reconstruite. | 📌 Dit dans le README ; version dans la poignée de main : à faire. |
+| V7 | Information | Les chemins interdits du socket ne couvrent pas un Docker sans droits d'administrateur. | 📌 Noté ; ce mode n'est pas essayé. |
 
 ### Dixième passe (2026-11-22) : le navigateur des agents (`lire-page`, image, filtre d'appels système)
 

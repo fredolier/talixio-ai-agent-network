@@ -115,13 +115,16 @@ run() {
         [ "${1:-}" = claude ] || die "TALIXIO_DOCKER=1 demande l'image « claude » (l'image ordinaire n'a pas de client Docker)"
         local socket="${TALIXIO_DOCKER_SOCKET:-/var/run/docker.sock}"
         [ -S "$socket" ] || die "socket Docker introuvable : $socket (TALIXIO_DOCKER_SOCKET pour un autre)"
+        case "$socket" in *:*) die "socket Docker refusé : « : » dans son chemin" ;; esac
         # un réseau à part : le maître et ses agents s'y joignent, sans passer par la machine
         docker network inspect "$NAME-net" >/dev/null 2>&1 || docker network create "$NAME-net" >/dev/null
         # le compte sans droit du maître n'ouvre le socket que par le groupe qui le détient
         siblings=(--network "$NAME-net" -v "$socket:/var/run/docker.sock" --group-add "$(stat -c %g "$socket")")
         echo "Attention : le maître reçoit le socket Docker ($socket). Qui prend le maître commande Docker, donc cette machine." >&2
     fi
-    # un seul maître de ce nom : l'ancien conteneur est remplacé, ses données restent dans le volume
+    # un seul maître de ce nom : l'ancien conteneur est remplacé, ses données restent dans le volume ;
+    # les conteneurs d'agents de l'ancien partent avec lui (ils n'auraient plus de parent)
+    agents_down
     docker rm -f "$NAME" >/dev/null 2>&1 || true
     docker run -d --name "$NAME" --restart unless-stopped \
         -p "$BIND:$PORT:7700" -v "$VOLUME:/data" \
@@ -136,10 +139,13 @@ run() {
     fi
 }
 
-# Les conteneurs d'agents que ce maître a lancés (TALIXIO_DOCKER=1) : ceux de son réseau, sauf lui.
+# Les conteneurs d'agents que ce maître a lancés (TALIXIO_DOCKER=1) : ceux qui sont dans son
+# réseau ou qui tiennent son volume. Jamais un conteneur d'un autre nom que « talixio-a-… ».
 agents_down() {
-    docker network inspect "$NAME-net" >/dev/null 2>&1 || return 0
-    docker ps -aq --filter "network=$NAME-net" --filter "name=^talixio-a-" | while read -r id; do docker rm -f "$id" >/dev/null 2>&1 || true; done
+    {
+        docker ps -aq --filter "network=$NAME-net" --filter "name=^talixio-a-" 2>/dev/null || true
+        docker ps -aq --filter "volume=$VOLUME" --filter "name=^talixio-a-" 2>/dev/null || true
+    } | sort -u | while read -r id; do docker rm -f "$id" >/dev/null 2>&1 || true; done
 }
 
 case "${1:-}" in
@@ -160,7 +166,15 @@ case "${1:-}" in
         docker network rm "$NAME-net" >/dev/null 2>&1 || true
         docker volume rm "$VOLUME" >/dev/null 2>&1 || true
         rm -f "$TOKEN_FILE"
-        echo "Effacé."
+        # ne pas annoncer ce qui n'est pas fait : un conteneur qui tient encore le volume l'empêche
+        if docker volume inspect "$VOLUME" >/dev/null 2>&1; then
+            die "le volume $VOLUME n'a pas pu être effacé (un conteneur le tient encore : docker ps -a --filter volume=$VOLUME)"
+        fi
+        if docker network inspect "$NAME-net" >/dev/null 2>&1; then
+            echo "Effacé, sauf le réseau $NAME-net, encore employé (docker network inspect $NAME-net)."
+        else
+            echo "Effacé."
+        fi
         ;;
     *) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

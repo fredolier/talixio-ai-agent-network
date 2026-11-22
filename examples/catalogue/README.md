@@ -73,7 +73,10 @@ TALIXIO_DOCKER=1 TALIXIO_CONFIG=examples/catalogue/talixio.toml TALIXIO_TOOLS=ex
 
 `TALIXIO_DOCKER=1` donne au maître le socket Docker de la machine, et le place avec ses agents dans
 un réseau à part (`talixio-net`). **Qui prend le maître commande alors Docker, donc la machine** :
-c'est le prix de cette commodité, à ne payer que sur une machine d'essai ou dédiée. Aucun agent
+c'est le prix de cette commodité, à ne payer que sur une machine d'essai ou dédiée. Cela vaut
+pour tout ce que le maître lance sous son compte : ne lui donnez aucune commande à arguments
+libres. Dans la configuration, `network` et `volume` portent le nom du maître (`talixio-net`,
+`talixio-data` ; avec `TALIXIO_NAME=x` : `x-net`, `x-data`). Aucun agent
 ne reçoit le socket, et il est interdit d'office à leurs outils.
 
 L'image `talixio-navigateur` porte l'agent, Chromium et les scripts de `outils/` tels qu'ils

@@ -201,7 +201,8 @@ pub fn docker_args(id: &str, target: &Target, exe: &std::path::Path) -> Vec<Stri
                 args.extend(["--volume".into(), format!("{}:{}:{mode}", host.display(), mount.container.display())]);
             }
             (None, Some(volume)) => {
-                // jamais créé au passage (« volume-nocopy », et un volume absent fait échouer le sous-dossier)
+                // toujours un sous-dossier (la configuration l'exige) : un volume ou un sous-dossier
+                // absent fait échouer le lancement, rien n'est créé au passage
                 let mut spec = format!("type=volume,src={volume},dst={},volume-nocopy", mount.container.display());
                 if let Some(subpath) = &mount.subpath {
                     spec.push_str(&format!(",volume-subpath={subpath}"));
@@ -343,12 +344,29 @@ mod tests {
     #[test]
     fn un_maitre_en_conteneur_lance_un_conteneur_voisin() {
         // ni chemin de la machine, ni passage par elle : réseau du maître, agent dans l'image, dossier pris dans le volume
-        let t = target("kind = 'docker'\nimage = 'talixio-navigateur'\nuser = '65532:65532'\nnetwork = 'talixio-net'\nagent_in_image = true\nmounts = [{ volume = 'talixio-data', subpath = 'work/releves', container = '/releves', write = true }, { volume = 'autre', container = '/lu' }]").unwrap();
+        let t = target("kind = 'docker'\nimage = 'talixio-navigateur'\nuser = '65532:65532'\nnetwork = 'talixio-net'\nagent_in_image = true\nmounts = [{ volume = 'talixio-data', subpath = 'work/releves', container = '/releves', write = true }]").unwrap();
         let args = docker_args("abc", &t, std::path::Path::new("/talixio-agent"));
-        for wanted in ["--network=talixio-net", "type=volume,src=talixio-data,dst=/releves,volume-nocopy,volume-subpath=work/releves", "type=volume,src=autre,dst=/lu,volume-nocopy,readonly", "--cap-drop=ALL", "--read-only", "--entrypoint=/talixio-agent"] {
+        for wanted in ["--network=talixio-net", "type=volume,src=talixio-data,dst=/releves,volume-nocopy,volume-subpath=work/releves", "--cap-drop=ALL", "--read-only", "--entrypoint=/talixio-agent"] {
             assert!(args.iter().any(|a| a == wanted), "{wanted} manque dans {args:?}");
         }
         assert!(!args.iter().any(|a| a.contains("host-gateway") || a.contains(":/talixio-agent:ro") || a.contains("docker.sock") || a.contains("privileged")), "{args:?}");
+    }
+
+    #[test]
+    fn un_sous_dossier_monte_n_a_pas_de_parent_inscriptible() {
+        let config = |parent_write: bool| {
+            format!(
+                "[targets.a]\nkind = 'docker'\nimage = 'i'\nuser = '1000'\nmounts = [{{ volume = 'data', subpath = 'work/cat', container = '/c', write = {parent_write} }}]\n[targets.b]\nkind = 'docker'\nimage = 'i'\nuser = '1000'\nmounts = [{{ volume = 'data', subpath = 'work/cat/releves', container = '/r', write = true }}]\n"
+            )
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("t.toml");
+        std::fs::write(&path, config(true)).unwrap();
+        let Err(error) = crate::config::RootConfig::load(&path) else { panic!("parent inscriptible accepté") };
+        let error = error.to_string();
+        assert!(error.contains("parent"), "{error}");
+        std::fs::write(&path, config(false)).unwrap();
+        crate::config::RootConfig::load(&path).expect("parent en lecture seule refusé");
     }
 
     #[test]
@@ -380,6 +398,16 @@ mod tests {
             "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nnetwork = 'net --privileged'",
             "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ volume = '/var/run/docker.sock', container = '/s' }]",
             "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ volume = 'data', subpath = '../autre', container = '/s' }]",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ volume = 'data', container = '/s' }]",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ volume = 'data', subpath = '.', container = '/s' }]",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ volume = 'data', subpath = './', container = '/s' }]",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ volume = 'data', subpath = 'a//b', container = '/s' }]",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ volume = 'data', subpath = 'work/.', container = '/s' }]",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ volume = 'data', subpath = '.talixio', container = '/s' }]",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ host = '/var/run/docker.sock', container = '/s' }]",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ host = '/var/run', container = '/s' }]",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ host = '/srv', container = '/talixio-agent' }]",
+            "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ host = '/srv', container = '/state' }]",
             "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ volume = 'data,readonly=false', container = '/s' }]",
             "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ volume = 'data', subpath = 'a,dst=/etc', container = '/s' }]",
             "kind = 'docker'\nimage = 'debian'\nuser = '1000'\nmounts = [{ volume = 'data', host = '/srv', container = '/s' }]",

@@ -7,6 +7,24 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.16.1"
+date = "2026-11-22"
+title = "Conteneurs voisins : corrections de la revue de sécurité"
+summary = "Un agent en conteneur ne peut plus recevoir le volume entier du maître, et l'arrêt ne laisse plus de conteneur orphelin."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Montage d'un volume : `subpath` est obligatoire et vérifié partie par partie ; deux montages emboîtés du même volume sont refusés quand le parent est en écriture ; une cible ne peut monter ni le socket Docker, ni par-dessus `/talixio-agent` ou `/state`."
+
+[[release.changes]]
+kind = "correction"
+text = "`tools.sh` : relancer le maître retire d'abord les conteneurs d'agents de l'ancien ; `stop` les trouve aussi par le volume ; `purge` dit ce qui n'a pas pu être effacé."
+
+[[release.changes]]
+kind = "attention"
+text = "Avec `TALIXIO_DOCKER=1`, tout ce que le maître lance sous son compte peut ouvrir le socket Docker : ne lui donnez aucune commande à arguments libres."
+
+[[release]]
 version = "0.16.0"
 date = "2026-11-22"
 title = "Le maître dans Docker lance ses agents dans des conteneurs voisins"

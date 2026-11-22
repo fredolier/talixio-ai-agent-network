@@ -181,10 +181,20 @@ impl Target {
                     if !inside.starts_with('/') || !plain(&inside[1..], "/._-") || inside.contains("..") {
                         bail!("cible docker : montage invalide ({})", mount.container.display());
                     }
+                    // ni par-dessus l'agent ou son état, ni par-dessus ce que le conteneur tient du noyau
+                    let inside = inside.trim_end_matches('/');
+                    if ["/talixio-agent", "/state", "/tmp", "/proc", "/sys", "/dev"].iter().any(|r| inside == *r || inside.starts_with(&format!("{r}/"))) || inside.is_empty() {
+                        bail!("cible docker : montage sur un emplacement réservé ({})", mount.container.display());
+                    }
                     match (&mount.host, &mount.volume) {
                         (Some(host), None) if mount.subpath.is_none() => {
                             if !host.is_absolute() || !plain_host_path(host.to_str().unwrap_or("")) {
                                 bail!("cible docker : montage invalide ({})", host.display());
+                            }
+                            // le socket Docker n'est jamais montré à un agent, ni le dossier qui le porte
+                            let text = host.to_str().unwrap_or("").trim_end_matches('/');
+                            if text.ends_with("docker.sock") || matches!(text, "/run" | "/var/run" | "/var" | "") {
+                                bail!("cible docker : le socket Docker n'est jamais monté dans le conteneur d'un agent ({})", host.display());
                             }
                         }
                         (None, Some(volume)) => {
@@ -192,10 +202,10 @@ impl Target {
                             if !plain(volume, "._-") || volume.starts_with('.') {
                                 bail!("cible docker : volume invalide ({volume})");
                             }
-                            if let Some(subpath) = &mount.subpath {
-                                if subpath.starts_with('/') || subpath.contains("..") || !plain(subpath, "/._-") {
-                                    bail!("cible docker : sous-dossier de volume invalide ({subpath})");
-                                }
+                            // toujours un sous-dossier : le volume entier peut porter les clés du maître
+                            let subpath = mount.subpath.as_deref().context("cible docker : un montage `volume` demande `subpath` (un sous-dossier, jamais le volume entier)")?;
+                            if !plain(subpath, "/._-") || subpath.split('/').any(|part| part.is_empty() || part.starts_with('.')) {
+                                bail!("cible docker : sous-dossier de volume invalide ({subpath})");
                             }
                         }
                         _ => bail!("cible docker : un montage donne `host` (un dossier de la machine) ou `volume` (avec `subpath` au besoin), pas les deux"),
@@ -359,6 +369,19 @@ impl RootConfig {
                 bail!("nom de cible invalide : « {name} » (minuscules, chiffres, tirets)");
             }
             target.validate().with_context(|| format!("[targets.{name}]"))?;
+        }
+        // Un sous-dossier de volume monté pour un agent n'a jamais un parent qu'un autre conteneur
+        // peut écrire : celui-ci le remplacerait par un lien vers le reste du volume, que Docker suit.
+        let volumes: Vec<(&String, &str, bool)> = cfg
+            .targets
+            .values()
+            .flat_map(|t| &t.mounts)
+            .filter_map(|m| Some((m.volume.as_ref()?, m.subpath.as_deref()?, m.write)))
+            .collect();
+        for (volume, parent, write) in &volumes {
+            if let Some((_, child, _)) = volumes.iter().find(|(v, child, _)| v == volume && *write && child.starts_with(&format!("{parent}/"))) {
+                bail!("cibles docker : le sous-dossier « {child} » du volume {volume} est monté alors que son parent « {parent} » l'est en écriture");
+            }
         }
         if let Some(spawn) = &cfg.capabilities.spawn {
             if let Some(unknown) = spawn.targets.iter().find(|t| *t != "local" && !cfg.targets.contains_key(*t)) {
