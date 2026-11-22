@@ -133,6 +133,7 @@ pub fn install_plan(spec: &Spec) -> Result<Plan, String> {
                         format!("{SYSTEM_STATE} : dossier d'état et de travail, le seul qui appartienne au compte"),
                     ];
                     plan.notes.push(format!("Modifier la configuration : sudo, puis `sudo systemctl restart {NAME}`. Les chemins relatifs de la configuration partent de {SYSTEM_STATE}."));
+                    plan.notes.push(format!("N'ajoutez pas le compte {ACCOUNT} à un groupe (docker, sudo…) : le groupe docker vaut root, et le maître pourrait alors tout modifier. Les cibles `docker` ne sont donc pas pour ce mode."));
                     plan.notes.push(format!("Le maître ne peut modifier ni son exécutable, ni sa configuration, ni ses paquets. Les clés saisies dans l'interface restent dans son dossier d'état ({SYSTEM_STATE})."));
                 }
             }
@@ -335,20 +336,52 @@ pub fn with_system_packs(text: &str) -> Result<String, String> {
     }
 }
 
-/// Un dossier du système : créé s'il manque, à root, que root seul peut modifier. Un lien, ou un
-/// dossier qui appartient à un autre compte, est refusé.
+/// Un dossier du système : créé s'il manque, à root, que root seul peut modifier. Un lien, un
+/// dossier qui appartient à un autre compte ou que d'autres peuvent écrire, est refusé.
 #[cfg(unix)]
 fn root_dir(path: &Path) -> Result<(), String> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
     let at = |e: std::io::Error| format!("{} : {e}", path.display());
     if std::fs::symlink_metadata(path).is_err() {
         std::fs::create_dir(path).map_err(at)?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).map_err(at)?;
     }
     let meta = std::fs::symlink_metadata(path).map_err(at)?;
-    if !meta.is_dir() || meta.uid() != 0 {
-        return Err(format!("{} doit être un vrai dossier qui appartient à root", path.display()));
+    if !meta.is_dir() || meta.uid() != 0 || meta.mode() & 0o022 != 0 {
+        return Err(format!("{} doit être un vrai dossier, à root, que root seul peut modifier (chown root, chmod 755)", path.display()));
     }
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).map_err(at)
+    Ok(())
+}
+
+/// Tout ce qu'un dossier du système contient est à root, sans lien, et fermé en écriture aux
+/// autres : rien de ce que le maître lira n'a pu être posé ni ne peut être changé par un tiers.
+#[cfg(unix)]
+fn root_only_tree(dir: &Path) -> Result<(), String> {
+    use std::os::unix::fs::MetadataExt;
+    for entry in std::fs::read_dir(dir).map_err(|e| format!("{} : {e}", dir.display()))? {
+        let path = entry.map_err(|e| format!("{} : {e}", dir.display()))?.path();
+        let meta = std::fs::symlink_metadata(&path).map_err(|e| format!("{} : {e}", path.display()))?;
+        if meta.file_type().is_symlink() || meta.uid() != 0 || meta.mode() & 0o022 != 0 {
+            return Err(format!("{} : un lien, ou un fichier qui n'est pas à root seul. Rien de tel dans les dossiers du maître : retirez-le, ou rendez-le à root (chown root, chmod go-w)", path.display()));
+        }
+        if meta.is_dir() {
+            root_only_tree(&path)?;
+        }
+    }
+    Ok(())
+}
+
+/// Les dossiers au-dessus d'un emplacement du système sont à root, que root seul peut modifier.
+#[cfg(unix)]
+fn root_above(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::MetadataExt;
+    for part in path.ancestors().skip(1) {
+        let meta = std::fs::metadata(part).map_err(|e| format!("{} : {e}", part.display()))?;
+        if meta.uid() != 0 || meta.mode() & 0o022 != 0 {
+            return Err(format!("{} peut être modifié par un autre compte que root : pas d'installation du système en dessous", part.display()));
+        }
+    }
+    Ok(())
 }
 
 /// Écrit un fichier à root dans un dossier à root : à côté d'abord, puis par renommage.
@@ -367,13 +400,113 @@ fn root_file(path: &Path, bytes: &[u8], mode: u32, gid: u32) -> Result<(), Strin
     std::fs::rename(&beside, path).map_err(at)
 }
 
+/// Un compte `talixio-agent` qui existait déjà n'est accepté que s'il ressemble à celui que
+/// l'installation aurait créé : son propre groupe, aucun autre, pas de shell.
+#[cfg(unix)]
+fn account_is_plain(uid: u32, gid: u32) -> Result<(), String> {
+    let refuse = |why: &str| Err(format!("le compte « {ACCOUNT} » existe déjà et {why} : le maître aurait plus de droits que prévu. Corrigez-le, ou retirez-le (userdel {ACCOUNT}) et relancez"));
+    if uid == 0 || gid == 0 {
+        return refuse("a les droits de root");
+    }
+    let name = std::ffi::CString::new(ACCOUNT).map_err(|e| e.to_string())?;
+    // SAFETY: chaînes terminées par un zéro ; les résultats, lus aussitôt, ne sont pas gardés ;
+    // le tableau des groupes a la taille annoncée.
+    unsafe {
+        let entry = libc::getpwnam(name.as_ptr());
+        if entry.is_null() {
+            return refuse("n'est plus lisible");
+        }
+        let shell = std::ffi::CStr::from_ptr((*entry).pw_shell).to_string_lossy().into_owned();
+        if !(shell.ends_with("/nologin") || shell.ends_with("/false")) {
+            return refuse("peut ouvrir une session (shell)");
+        }
+        let mut groups = [0 as libc::gid_t; 64];
+        let mut count = groups.len() as libc::c_int;
+        let found = libc::getgrouplist(name.as_ptr(), gid as _, groups.as_mut_ptr().cast(), &mut count);
+        if found < 0 || groups[..count.max(0) as usize].iter().any(|g| *g != gid) {
+            return refuse("appartient à d'autres groupes que le sien (docker, sudo… valent root)");
+        }
+        let group = libc::getgrgid(gid);
+        if group.is_null() || std::ffi::CStr::from_ptr((*group).gr_name).to_bytes() != ACCOUNT.as_bytes() || !(*(*group).gr_mem).is_null() {
+            return refuse("partage son groupe avec d'autres comptes");
+        }
+    }
+    Ok(())
+}
+
+/// Essaie une configuration sous le compte, comme le maître la chargera. Le process lancé
+/// appartient au compte, donc au maître s'il est compromis : il ne reçoit de root ni
+/// environnement, ni terminal, ni fichier ouvert, et root ne l'attend pas indéfiniment.
+#[cfg(unix)]
+fn check_as_account(trial: &Path, uid: u32, gid: u32) -> Result<(), String> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+    let journal = trial.with_extension("journal");
+    let _ = std::fs::remove_file(&journal);
+    let out = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&journal).map_err(|e| format!("{} : {e}", journal.display()))?;
+    let err = out.try_clone().map_err(|e| e.to_string())?;
+    let mut command = std::process::Command::new(SYSTEM_EXE);
+    command
+        .args(["check", "--config"])
+        .arg(trial)
+        .current_dir(SYSTEM_STATE)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", SYSTEM_STATE)
+        .stdin(Stdio::null())
+        .stdout(out)
+        .stderr(err)
+        .uid(uid)
+        .gid(gid);
+    // SAFETY: entre fork et exec, seulement des appels système sans allocation.
+    unsafe {
+        command.pre_exec(|| {
+            libc::setsid();
+            for fd in 3..1024 {
+                libc::close(fd);
+            }
+            Ok(())
+        });
+    }
+    let mut child = command.spawn().map_err(|e| format!("{SYSTEM_EXE} : {e}"))?;
+    let started = std::time::Instant::now();
+    let status = loop {
+        match child.try_wait().map_err(|e| e.to_string())? {
+            Some(status) => break Some(status),
+            None if started.elapsed() > std::time::Duration::from_secs(30) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+            None => std::thread::sleep(std::time::Duration::from_millis(50)),
+        }
+    };
+    let mut said = Vec::new();
+    if let Ok(file) = std::fs::File::open(&journal) {
+        let _ = file.take(4000).read_to_end(&mut said);
+    }
+    let _ = std::fs::remove_file(&journal);
+    // ce texte vient d'un process du compte : nettoyé avant d'atteindre le terminal de root
+    let said = crate::clean(&String::from_utf8_lossy(&said), 4000, true);
+    match status {
+        Some(status) if status.success() => Ok(()),
+        Some(_) => Err(format!("la configuration n'est pas acceptée sous le compte {ACCOUNT} ; rien n'a été changé.\n{said}")),
+        None => Err(format!("la vérification de la configuration sous le compte {ACCOUNT} n'a pas répondu en 30 secondes ; rien n'a été changé")),
+    }
+}
+
 /// Compte dédié : crée le compte, pose l'exécutable, la configuration et le dossier des paquets
 /// à root, et le dossier d'état au compte. À lancer en root. `config` : la configuration à poser ;
-/// sans elle, celle qui est déjà en place est gardée. Rend le numéro du compte.
+/// sans elle, celle qui est déjà en place est gardée. Tous les contrôles passent avant la
+/// première écriture qui compte. Rend le numéro du compte.
 #[cfg(unix)]
 pub fn setup_dedicated(exe: &Path, config: Option<&Path>) -> Result<u32, String> {
     use std::os::unix::fs::MetadataExt;
-    use std::os::unix::process::CommandExt;
+    for place in [SYSTEM_DIR, SYSTEM_CONFIG_DIR, SYSTEM_STATE] {
+        root_above(Path::new(place))?;
+    }
     let (uid, gid) = match account_ids(ACCOUNT) {
         Some(ids) => ids,
         None => {
@@ -381,21 +514,16 @@ pub fn setup_dedicated(exe: &Path, config: Option<&Path>) -> Result<u32, String>
             let first = |names: &[&str], or: &str| names.iter().find(|p| Path::new(p).exists()).unwrap_or(&or).to_string();
             let useradd = first(&["/usr/sbin/useradd", "/sbin/useradd", "/usr/bin/useradd"], "useradd");
             let nologin = first(&["/usr/sbin/nologin", "/sbin/nologin"], "/bin/false");
-            run(&words(&[&useradd, "--system", "--user-group", "--home-dir", SYSTEM_STATE, "--no-create-home", "--shell", &nologin, ACCOUNT]))?;
+            // pas de dossier personnel : rien de ce que le maître écrit n'est lu comme réglage du compte
+            run(&words(&[&useradd, "--system", "--user-group", "--home-dir", "/nonexistent", "--no-create-home", "--shell", &nologin, ACCOUNT]))?;
             account_ids(ACCOUNT).ok_or(format!("le compte « {ACCOUNT} » n'a pas pu être créé"))?
         }
     };
-    if uid == 0 || gid == 0 {
-        return Err(format!("le compte « {ACCOUNT} » a les droits de root : le maître ne tourne jamais en root"));
-    }
+    account_is_plain(uid, gid)?;
     for dir in [SYSTEM_DIR, SYSTEM_PACKS, SYSTEM_CONFIG_DIR] {
-        root_dir(Path::new(dir))?;
-    }
-    // l'exécutable : une copie à root, que le compte ne peut pas remplacer
-    let target = Path::new(SYSTEM_EXE);
-    if exe.canonicalize().ok() != target.canonicalize().ok() {
-        let bytes = std::fs::read(exe).map_err(|e| format!("{} : {e}", exe.display()))?;
-        root_file(target, &bytes, 0o755, 0)?;
+        let dir = Path::new(dir);
+        root_dir(dir)?;
+        root_only_tree(dir)?;
     }
     // le dossier du compte : root le crée et le lui donne, puis n'y écrit plus jamais
     let state = Path::new(SYSTEM_STATE);
@@ -403,13 +531,14 @@ pub fn setup_dedicated(exe: &Path, config: Option<&Path>) -> Result<u32, String>
     if std::fs::symlink_metadata(state).is_err() {
         std::fs::create_dir(state).map_err(at)?;
         std::os::unix::fs::lchown(state, Some(uid), Some(gid)).map_err(at)?;
-        crate::os::set_mode(state, 0o700).map_err(|e| e.to_string())?;
     }
     let meta = std::fs::symlink_metadata(state).map_err(at)?;
     if !meta.is_dir() || meta.uid() != uid {
         return Err(format!("{SYSTEM_STATE} doit être un vrai dossier qui appartient à {ACCOUNT}"));
     }
-    // la configuration : posée à côté, essayée sous le compte, puis mise en place
+    // fermé aux autres, quoi que le compte en ait fait depuis
+    crate::os::set_mode(state, 0o700).map_err(|e| e.to_string())?;
+    // la configuration, lue avant toute écriture
     let dest = Path::new(SYSTEM_CONFIG);
     let source = match config {
         Some(path) => path,
@@ -417,23 +546,19 @@ pub fn setup_dedicated(exe: &Path, config: Option<&Path>) -> Result<u32, String>
         None => return Err(format!("aucune configuration dans {SYSTEM_CONFIG} : donnez la vôtre avec `--config <fichier>`")),
     };
     let text = std::fs::read_to_string(source).map_err(|e| format!("{} : {e}", source.display()))?;
-    let text = with_system_packs(&text)?;
+    let text = with_system_packs(text.trim_start_matches('\u{feff}'))?;
+    // l'exécutable : une copie à root, que le compte ne peut pas remplacer
+    let target = Path::new(SYSTEM_EXE);
+    if exe.canonicalize().ok() != target.canonicalize().ok() {
+        let bytes = std::fs::read(exe).map_err(|e| format!("{} : {e}", exe.display()))?;
+        root_file(target, &bytes, 0o755, 0)?;
+    }
+    // la configuration : posée à côté, essayée sous le compte, puis mise en place
     let trial = dest.with_extension("essai");
     root_file(&trial, text.as_bytes(), 0o640, gid)?;
-    let checked = std::process::Command::new(SYSTEM_EXE)
-        .args(["check", "--config"])
-        .arg(&trial)
-        .current_dir(state)
-        .env("HOME", SYSTEM_STATE)
-        .uid(uid)
-        .gid(gid)
-        .status();
+    let checked = check_as_account(&trial, uid, gid);
     let _ = std::fs::remove_file(&trial);
-    match checked {
-        Ok(status) if status.success() => {}
-        Ok(_) => return Err(format!("la configuration n'est pas acceptée sous le compte {ACCOUNT} (voir ci-dessus) : rien n'a été changé dans {SYSTEM_CONFIG}")),
-        Err(e) => return Err(format!("{SYSTEM_EXE} : {e}")),
-    }
+    checked?;
     if dest.is_file() && std::fs::read_to_string(dest).ok().as_deref() != Some(text.as_str()) {
         std::fs::rename(dest, dest.with_extension("toml.ancien")).map_err(|e| format!("{SYSTEM_CONFIG} : {e}"))?;
     }

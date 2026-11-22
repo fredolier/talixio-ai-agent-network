@@ -766,6 +766,25 @@ les seules options passées à `claude`, sans contrôle de ce qu'il fait réelle
 | K11 | Basse | `<état>/claude` pouvait être un lien symbolique posé avant le démarrage. | ✅ Refusé au démarrage. |
 | K12 | Basse | Une invite commençant par « / » pouvait être prise pour une commande de `claude`. | ✅ Jamais en tête d'invite (et `--disable-slash-commands`). |
 
+### Treizième passe (2026-11-22) : le compte dédié (décision 38)
+
+Revue indépendante, essayée en conteneur (Debian 13, sans systemd). Un constat haut, trois moyens,
+cinq bas, trois d'information.
+
+| Constat | Gravité | Traitement |
+|---|---|---|
+| La vérification de la configuration lancée sous le compte (`check`) héritait de l'environnement, du terminal et des fichiers ouverts de root ; le maître, de même compte, pouvait la tracer (démontré : variable de root et `/etc/shadow` lus, terminal de root atteint). | haut | ✅ `check_as_account` : environnement vidé, entrée fermée, sorties dans un fichier à root relu puis nettoyé, nouvelle session, descripteurs fermés, 30 secondes au plus. Son verdict reste indicatif (le compte peut le fausser), sans gravité : la configuration est celle de root. Correction non rejouée avec l'outil de la revue. |
+| Un compte `talixio-agent` préexistant était accepté tel quel (groupes docker ou sudo, shell, groupe partagé). | moyen | ✅ refusé s'il a un shell, un autre groupe que le sien, ou un groupe partagé (essayé). |
+| Le contenu de `/opt/talixio` et `/etc/talixio` n'était pas vérifié : un dossier préexistant trop ouvert était corrigé en silence, des fichiers d'un tiers acceptés. | moyen | ✅ tout y est à root, sans lien, fermé en écriture aux autres, sinon refus (essayé) ; plus de correction silencieuse. |
+| Installation non atomique : configuration remplacée avant un contrôle qui pouvait échouer ; le compte pouvait bloquer une réinstallation (`chmod 777` de son dossier). | moyen | ✅ contrôles avant toute écriture ; root remet le dossier d'état en 0700 (essayé). |
+| `talixio.toml` remplacé par un lien : root lisait la cible et la rendait lisible au compte. | bas | ✅ lien refusé (essayé). |
+| `pack install` / `remove` en root dans un dossier tenu par un autre compte : écritures et suppressions détournables par lien. | bas | ✅ en root, le dossier et ses ancêtres doivent être à root seul (essayé). |
+| Configuration avec marque d'ordre des octets : refus obscur. | bas | ✅ marque retirée. |
+| Dossier personnel du compte inscriptible par le maître (`~/.ssh`). | information | ✅ compte créé sans dossier personnel (`/nonexistent`). |
+| Ajouter le compte au groupe `docker` annule la séparation. | information | ✅ dit à l'installation ; les cibles `docker` ne sont pas pour ce mode. |
+| Le fichier d'essai est lisible par le compte pendant la vérification ; `pack install --from` en root lit par chemin un dossier source qu'un tiers pourrait tenir. | bas | ⬜ notés. Ne donnez à `--from`, en root, qu'un dossier à vous. |
+| Durcissements de l'unité à évaluer (`PrivateTmp`, `ProtectHome`, `ProtectSystem=strict`). | information | ⬜ à faire avec un vrai systemd, pour ne pas casser le cloisonnement des agents. |
+
 ### Douzième passe (2026-11-22) : les paquets (décision 37)
 
 Revue indépendante, avec essais. Un modèle, par ses seuls outils, ne peut ni s'ajouter une

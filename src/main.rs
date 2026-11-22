@@ -107,6 +107,20 @@ struct PackDir {
 impl PackDir {
     fn path(&self) -> Result<PathBuf> {
         if let Some(dir) = &self.dir {
+            // en root, on n'écrit ni ne supprime dans un dossier qu'un autre compte tient : il
+            // pourrait y glisser un lien et faire écrire root ailleurs
+            #[cfg(unix)]
+            if is_root() {
+                use std::os::unix::fs::MetadataExt;
+                let real = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+                for part in real.ancestors().filter(|p| p.exists()) {
+                    let meta = std::fs::metadata(part)?;
+                    // un dossier « collant » (/tmp) ne laisse personne remplacer ce qui est à root
+                    if meta.uid() != 0 || (meta.mode() & 0o022 != 0 && meta.mode() & 0o1000 == 0) {
+                        bail!("en root, le dossier des paquets et ceux qui le contiennent doivent être à root seul : {} ne l'est pas. Lancez la commande sous le compte qui possède ce dossier", part.display());
+                    }
+                }
+            }
             return Ok(dir.clone());
         }
         let system = Path::new(talixio_agent::service::SYSTEM_PACKS);

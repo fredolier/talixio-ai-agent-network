@@ -7,6 +7,20 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.19.1"
+date = "2026-11-22"
+title = "Compte dédié : corrections de la revue de sécurité"
+summary = "L'installation du compte dédié ne confie plus rien de root au compte du maître, et refuse un terrain préparé par un tiers."
+
+[[release.changes]]
+kind = "sécurité"
+text = "`service install` : la vérification de la configuration sous le compte du maître ne reçoit plus l'environnement, le terminal ni les fichiers ouverts de root. Si vous avez installé le compte dédié avec la 0.18.0 ou la 0.19.0, relancez `sudo talixio-agent service install`."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Un compte `talixio-agent` déjà présent est refusé s'il a un shell ou d'autres groupes ; /opt/talixio et /etc/talixio doivent être entièrement à root, sans lien ; tous les contrôles passent avant la première écriture. En root, `pack install` refuse un dossier tenu par un autre compte."
+
+[[release]]
 version = "0.19.0"
 date = "2026-11-22"
 title = "Les rôles installés dans l'interface"
