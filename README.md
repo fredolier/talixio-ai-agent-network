@@ -131,6 +131,9 @@ Hors de Docker : le plus simple est le compte dédié (voir « En service »), a
 catalogue --dir /opt/talixio/packs` sous un autre compte que celui du maître, et
 `packs_dir = "/opt/talixio/packs"` dans `talixio.toml`. Voir `examples/catalogue`.
 
+Après une mise à jour du dépôt (`git pull`), reconstruisez l'image : `./tools.sh build claude`.
+`tools.sh` s'arrête et le dit si l'image est plus ancienne que le dépôt.
+
 Pour parcourir plutôt que taper : `./tools.sh pack tui` (ou `talixio-agent pack tui`). La liste
 à gauche, ce que le paquet donnerait à droite ; `i` installe, `r` retire, `v` vérifie, `q` quitte.
 

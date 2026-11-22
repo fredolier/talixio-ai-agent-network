@@ -28,6 +28,7 @@
 #                    commande alors Docker, donc cette machine. Voir docs/SPEC.md, décision 36.
 #   TALIXIO_PACKS    dossier des paquets installés, sur cette machine (~/.config/talixio/<nom>-packs)
 #   TALIXIO_PACKS_FROM   un dossier de paquets à vous (un sous-dossier par paquet), pour « pack »
+#   TALIXIO_OLD_IMAGE=1  lance une image plus ancienne que le dépôt sans s'arrêter (run, pack)
 #   TALIXIO_BUILD_ARGS   options de plus pour « docker build » (derrière un mandataire, par exemple)
 #   CLAUDE_CODE_OAUTH_TOKEN   facultatif, pour « claude » : le jeton tiré par `claude setup-token`,
 #                             à la place de « ./tools.sh login »
@@ -52,6 +53,18 @@ case "$PACKS" in /*) ;; *) PACKS="$PWD/$PACKS" ;; esac
 die() { echo "tools.sh : $*" >&2; exit 1; }
 
 command -v docker >/dev/null || die "docker n'est pas installé"
+
+# L'image a-t-elle la version du dépôt ? Après un « git pull », l'image reste l'ancienne tant
+# qu'on ne la reconstruit pas : on le dit, plutôt que de laisser l'ancien exécutable répondre.
+# $1 : l'image, $2 : la commande qui la reconstruit. TALIXIO_OLD_IMAGE=1 pour passer outre.
+fresh() {
+    [ -z "${TALIXIO_OLD_IMAGE:-}" ] || return 0
+    local here there
+    here="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)"
+    there="$(docker run --rm --network none --entrypoint /talixio-agent "$1" --version 2>/dev/null | sed -n 's/^talixio-agent //p' | head -n 1)" || there=""
+    [ -n "$here" ] && [ -n "$there" ] || return 0
+    [ "$here" = "$there" ] || die "l'image $1 est en version $there, le dépôt en $here : reconstruisez-la avec « $2 » (ou TALIXIO_OLD_IMAGE=1 pour garder l'ancienne)"
+}
 
 # « claude » ou rien : quelle image
 variant() {
@@ -103,6 +116,7 @@ build() {
 run() {
     variant "${1:-}"
     docker image inspect "$IMAGE" >/dev/null 2>&1 || die "l'image $IMAGE n'existe pas : ./tools.sh build ${1:-}"
+    fresh "$IMAGE" "./tools.sh build ${1:-}"
     api_token
     export TALIXIO_API_TOKEN
     # les secrets passent par leur nom : leur valeur n'apparaît pas sur la ligne de commande
@@ -174,6 +188,7 @@ pack() {
     local image=talixio-agent:claude
     docker image inspect "$image" >/dev/null 2>&1 || image=talixio-agent
     docker image inspect "$image" >/dev/null 2>&1 || die "aucune image du maître : ./tools.sh build"
+    if [ "$image" = talixio-agent:claude ]; then fresh "$image" "./tools.sh build claude"; else fresh "$image" "./tools.sh build"; fi
     case "$PACKS" in *:*) die "dossier de paquets refusé : « : » dans son chemin" ;; esac
     mkdir -p "$PACKS"
     # vos propres paquets : TALIXIO_PACKS_FROM, un dossier avec un sous-dossier par paquet
