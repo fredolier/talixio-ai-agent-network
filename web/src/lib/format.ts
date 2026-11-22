@@ -1,25 +1,39 @@
-import type { Agent, ExecRule, Status } from './types'
+import { currentLang, t, tx } from './i18n'
+import type { Agent, ExecRule } from './types'
+import { pick } from './utils'
 
-export const STATUS: Record<Status, string> = {
-  starting: 'démarre',
-  idle: 'disponible',
-  working: 'au travail',
-  suspended: 'en veille',
-  disconnected: 'injoignable',
-  stopped: 'arrêté',
+const STATUS: Record<string, string> = {
+  starting: tx('starting'),
+  idle: tx('available'),
+  working: tx('working'),
+  suspended: tx('on standby'),
+  disconnected: tx('unreachable'),
+  stopped: tx('stopped'),
 }
 
-export const KIND: Record<string, string> = {
-  status: 'état',
-  input: 'reçu',
-  tool: 'outil',
-  tool_error: 'refus',
-  spawn: 'création',
-  report: 'rapport',
-  message: 'message',
-  error: 'erreur',
-  link: 'lien',
-  autre: 'autre',
+const KIND: Record<string, string> = {
+  status: tx('status'),
+  input: tx('received'),
+  tool: tx('tool'),
+  tool_error: tx('denied'),
+  spawn: tx('creation'),
+  report: tx('report'),
+  message: tx('message'),
+  error: tx('error'),
+  link: tx('link'),
+  autre: tx('other'),
+}
+
+/** The word for an agent status, in the current language; an unknown status is shown as received. */
+export const statusLabel = (status: unknown) => {
+  const known = pick(STATUS, status)
+  return known ? t(known) : String(status)
+}
+
+/** The word for a kind of journal event, in the current language. */
+export const kindLabel = (kind: unknown) => {
+  const known = pick(KIND, kind)
+  return known ? t(known) : String(kind)
 }
 
 export const flat = (node: Agent, out: Agent[] = []): Agent[] => {
@@ -28,17 +42,16 @@ export const flat = (node: Agent, out: Agent[] = []): Agent[] => {
   return out
 }
 
-export const count = (n: number) => n.toLocaleString('fr-FR')
-export const plural = (n: number, word: string) => `${count(n)} ${word}${n > 1 ? 's' : ''}`
+export const count = (n: number) => n.toLocaleString(currentLang())
 export const hour = (ms: number) =>
-  new Date(ms).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  new Date(ms).toLocaleTimeString(currentLang(), { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 export const day = (value: number | string) =>
-  new Date(value).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+  new Date(value).toLocaleDateString(currentLang(), { day: 'numeric', month: 'long', year: 'numeric' })
 export const moment = (ms: number) =>
-  new Date(ms).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+  new Date(ms).toLocaleString(currentLang(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 
-export const targetLabel = (target: string) => (target === 'root' ? 'maître' : target === 'local' ? 'même machine' : target)
+export const targetLabel = (target: string) => (target === 'root' ? t('master') : target === 'local' ? t('same machine') : target)
 
-/** Deux règles disent-elles la même chose ? */
+/** Do two rules say the same thing? */
 export const sameRule = (a: ExecRule, b: ExecRule) =>
   a.program === b.program && (a.cwd ?? null) === (b.cwd ?? null) && JSON.stringify(a.args ?? null) === JSON.stringify(b.args ?? null)

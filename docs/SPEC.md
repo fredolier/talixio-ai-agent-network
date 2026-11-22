@@ -616,6 +616,29 @@ Demandé le 2026-11-20. Rien n'est codé.
     sortant, il rappelle de relancer le maître si quelque chose a changé. Dépendance ajoutée :
     `crossterm` (compilée dans l'exécutable, toujours unique).
 
+42. **Dépôt public en anglais, interface en deux langues** (2026-11-22, « il faut passer en
+    anglais sur le repo […] un i18n […] par défaut, l'anglais et le français dans
+    l'application » ; puis : sur `main`, pas les spécifications ni ce qui a été dit, « un condensé
+    ou quelque chose un peu plus pro »).
+    - *Deux branches.* La branche de travail garde tout. `main`, publique, ne reçoit jamais
+      `docs/SPEC.md`, `PLAN.md`, `EXIGENCES.md`, `VERIFICATION.md` ni `CLAUDE.md` : leur condensé
+      est `docs/DESIGN.md` (anglais : architecture, modèle de sécurité, décisions, bilan des
+      revues, API, limites), à tenir à jour avec le code. `scripts/publier-main.sh` pose sur
+      `main` le même arbre moins ces fichiers. L'historique de `main` repart d'un commit sans
+      passé, pour que ces documents n'y soient pas non plus dans l'historique.
+    - *Anglais.* `README.md` (le français reste dans `README.fr.md`), `CONTRIBUTING.md`,
+      `SECURITY.md`, `docs/DESIGN.md`. Le code Rust garde pour l'instant ses commentaires et ses
+      messages en français (journal, erreurs de l'API, ligne de commande, écran des paquets,
+      notes de version, consignes données aux agents) : c'est la tranche suivante, voir Q14.
+    - *Interface.* L'anglais est le texte source, écrit dans le code (`t('Cluster')`,
+      `tn(n, '{n} agent', '{n} agents')`) ; le français est une table de l'anglais vers le
+      français (`web/src/locales/fr/*.json`), embarquée. Langue retenue : celle choisie
+      (gardée dans le navigateur), sinon la première langue du navigateur que l'on parle, sinon
+      l'anglais ; un sélecteur est dans le menu et sur la page d'entrée. `npm run build` échoue
+      si un texte du code n'a pas de traduction, si une traduction ne sert plus ou si ses
+      variables diffèrent. Aucune dépendance ajoutée, aucune route, rien de lu depuis le réseau :
+      pas de nouvelle surface. Les textes venus du serveur s'affichent tels qu'ils arrivent.
+
 ## 5. Architecture
 
 ```
@@ -718,6 +741,7 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 | Q11 | Se connecter par abonnement (Claude Pro/Max, ChatGPT) plutôt que par clé d'API ? | **Tranchée (2026-11-21) : oui, par la commande officielle `claude` seulement (décision 32).** D'abord écartée (« pas de dépendances, un seul exécutable »), puis demandée : l'abonnement Max doit pouvoir servir. Talixio reste un exécutable seul ; `claude` est un programme externe facultatif. Pour mémoire : L'assistant le fait pour Claude seulement, en pilotant la commande officielle `claude` (`setup-token`, puis `claude -p` à chaque tour, les outils exposés en MCP). Ici, cela demande d'installer cette commande à côté du maître, qui ne serait plus un exécutable seul, et un connecteur d'une autre nature (la commande tient elle-même la boucle d'outils). Le jeton d'abonnement ne doit pas servir à appeler l'API directement : les conditions d'Anthropic réservent cet usage à ses propres outils. Rien d'équivalent chez OpenAI dans l'assistant. |
 | Q12 | Un maître lui-même dans Docker doit-il pouvoir lancer des agents dans d'autres conteneurs ? Comment ? | **Tranchée (2026-11-22) : oui, par le socket Docker de la machine (décision 36)**, « dans un premier temps » ; à terme, le maître ira dans une machine virtuelle. Écartés : Docker dans Docker (conteneur privilégié, pire pour une isolation moindre). Le maître installé sur la machine reste possible. |
 | Q13 | Dépôt officiel de paquets : qui publie, où vit la clé. | Ouverte. Le mécanisme est prêt (décision 40) ; il manque une clé Talixio (sa partie publique dans `TRUSTED_KEYS`) et une adresse. Proposition : clé fabriquée et gardée hors ligne par Talixio, signature faite à la main à chaque publication (pas dans la CI, dont un secret volé signerait n'importe quoi), dépôt servi comme fichiers statiques (pages du dépôt GitHub ou site Talixio). |
+| Q14 | Passage du programme lui-même en anglais et en deux langues : messages du journal, erreurs de l'API, ligne de commande, écran des paquets, notes de version, catalogue, configuration d'exemple, consignes données aux agents, commentaires du code. | Ouverte. L'interface web est faite (décision 42). Proposition pour la suite : (1) commentaires et noms de tests en anglais, sans effet sur le comportement ; (2) messages en anglais par défaut avec le français au choix (`TALIXIO_LANG`, `lang` dans la configuration), le journal gardant des codes stables que l'interface traduit ; (3) consignes des agents en anglais, à essayer avec de vrais modèles avant de changer, car elles pèsent sur leur conduite. |
 | Q11 | Répertoire des rôles (R1–R3). | Une table SQLite chez le maître. Écriture : à chaque `spawn_agent`, le rôle remonte par le lien, de parent en parent ; à chaque fin de mission, son résultat. Lecture : un outil `find_role` (recherche par mots, puis par embeddings quand F1 existera), dont la demande remonte au maître comme une demande de modèle. Sécurité, à trancher avant de coder : un rôle enregistré contient des instructions écrites par un agent, donc un texte qui peut avoir été empoisonné et que d'autres agents reliront. Il doit être présenté comme une donnée à évaluer, jamais comme une consigne ; ne jamais porter de droits (les droits restent accordés par le parent, dans la limite des siens) ; et un rôle « approuvé » par l'humain doit se distinguer d'un rôle seulement observé. Fuite : un agent d'une branche lit ce qu'une autre branche a écrit ; prévoir de quoi cloisonner. |
 
 ## 7. Sécurité

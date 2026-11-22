@@ -7,6 +7,24 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.22.0"
+date = "2026-11-22"
+title = "Interface en anglais et en français"
+summary = "L'interface web parle anglais par défaut et français au choix ; le dépôt public passe en anglais."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Interface web en deux langues : anglais et français. Elle suit la langue du navigateur ; le sélecteur en bas du menu (et sur la page d'entrée) en change, et le choix est gardé sur l'appareil."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Documentation publique en anglais : `README.md` (le français reste dans `README.fr.md`), `CONTRIBUTING.md`, `SECURITY.md`, et `docs/DESIGN.md` (architecture, modèle de sécurité, décisions, revues de sécurité, API)."
+
+[[release.changes]]
+kind = "attention"
+text = "Les messages du programme restent en français pour l'instant : journal, erreurs de l'API, ligne de commande, écran des paquets et ces notes de version."
+
+[[release]]
 version = "0.21.1"
 date = "2026-11-22"
 title = "Écran des paquets : corrections de la revue de sécurité"

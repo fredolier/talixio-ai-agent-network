@@ -1,6 +1,7 @@
 import { Component, type ReactNode } from 'react'
 import { cn, pick } from '@/lib/utils'
-import { STATUS } from '@/lib/format'
+import { statusLabel } from '@/lib/format'
+import { t, tx } from '@/lib/i18n'
 import type { ExecRule, Status } from '@/lib/types'
 
 const DOT: Record<string, string> = {
@@ -12,12 +13,12 @@ const DOT: Record<string, string> = {
   stopped: 'bg-transparent ring-1 ring-inset ring-st-off',
 }
 
-/** L'état d'un agent : un point et un mot, jamais une pastille de couleur pleine. */
+/** The status of an agent: a dot and a word, never a solid colour pill. */
 export function StatusMark({ status, className }: { status: Status | string; className?: string }) {
   return (
     <span className={cn('inline-flex items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground', className)}>
       <span className={cn('size-2 rounded-full', pick(DOT, status) ?? 'bg-st-idle')} aria-hidden />
-      {pick(STATUS, status) ?? String(status)}
+      {statusLabel(status)}
     </span>
   )
 }
@@ -54,28 +55,28 @@ export function Field({ label, children, mono }: { label: string; children: Reac
 }
 
 const TOKEN: Record<string, { label: string; className: string }> = {
-  '*': { label: 'un argument libre, jamais une option', className: 'border-st-wait/50 text-st-wait' },
-  '**': { label: 'une suite d’arguments libres, aucune option', className: 'border-st-wait/50 text-st-wait' },
-  '{read}': { label: 'un chemin que l’agent a le droit de lire', className: 'border-st-working/50 text-st-working' },
-  '{write}': { label: 'un chemin que l’agent a le droit d’écrire', className: 'border-st-working/50 text-st-working' },
+  '*': { label: tx('one free argument, never an option'), className: 'border-st-wait/50 text-st-wait' },
+  '**': { label: tx('any number of free arguments, no option'), className: 'border-st-wait/50 text-st-wait' },
+  '{read}': { label: tx('a path the agent is allowed to read'), className: 'border-st-working/50 text-st-working' },
+  '{write}': { label: tx('a path the agent is allowed to write'), className: 'border-st-working/50 text-st-working' },
 }
 
-/** Une règle de commande, telle qu'elle est vérifiée : programme, puis chaque argument à sa place. */
+/** A command rule, as it is checked: the program, then each argument in its place. */
 export function RuleLine({ rule, className }: { rule: ExecRule; className?: string }) {
   return (
     <span className={cn('inline-flex flex-wrap items-center gap-1.5 font-mono text-[12.5px]', className)}>
       <span className="font-medium">{rule.program}</span>
       {rule.args == null ? (
-        <span className="rounded border border-st-off/50 px-1.5 py-px text-st-off" title="Aucune contrainte sur les arguments : tous les pouvoirs du programme">
-          arguments libres
+        <span className="rounded border border-st-off/50 px-1.5 py-px text-st-off" title={t('No constraint on the arguments: every power of the program')}>
+          {t('free arguments')}
         </span>
       ) : rule.args.length === 0 ? (
-        <span className="text-muted-foreground">(sans argument)</span>
+        <span className="text-muted-foreground">{t('(no argument)')}</span>
       ) : (
         rule.args.map((arg, index) => {
           const token = pick(TOKEN, arg)
           return token ? (
-            <span key={index} title={token.label} className={cn('rounded border px-1.5 py-px', token.className)}>
+            <span key={index} title={t(token.label)} className={cn('rounded border px-1.5 py-px', token.className)}>
               {arg}
             </span>
           ) : (
@@ -87,12 +88,12 @@ export function RuleLine({ rule, className }: { rule: ExecRule; className?: stri
   )
 }
 
-/** `code` entre accents graves, sans jamais passer par du HTML. */
+/** `code` between backticks, never going through HTML. */
 export function Rich({ text }: { text: string }) {
   return <>{text.split('`').map((part, index) => (index % 2 ? <code key={index}>{part}</code> : part))}</>
 }
 
-/** Un écran qui échoue (donnée inattendue) ne vide pas toute la page : on le dit, et le reste tient. */
+/** A screen that fails (unexpected data) does not blank the whole page: we say so, and the rest holds. */
 export class Guard extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false }
   static getDerivedStateFromError() {
@@ -102,10 +103,10 @@ export class Guard extends Component<{ children: ReactNode }, { failed: boolean 
     if (!this.state.failed) return this.props.children
     return (
       <div role="alert" className="rounded-md border border-st-off/50 px-4 py-3">
-        <p className="font-medium">Cet écran n'a pas pu s'afficher.</p>
-        <p className="mt-1 text-muted-foreground">Une donnée reçue n'avait pas la forme attendue. Les autres écrans restent utilisables.</p>
+        <p className="font-medium">{t('This screen could not be displayed.')}</p>
+        <p className="mt-1 text-muted-foreground">{t('Some received data did not have the expected shape. The other screens remain usable.')}</p>
         <button type="button" className="mt-2 underline underline-offset-4" onClick={() => this.setState({ failed: false })}>
-          Réessayer
+          {t('Try again')}
         </button>
       </div>
     )

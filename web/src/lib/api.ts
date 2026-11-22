@@ -1,4 +1,6 @@
-// Accès à l'API du maître. Le jeton reste dans le navigateur : session, ou appareil si demandé.
+// Access to the master's API. The token stays in the browser: session, or device when asked.
+
+import { t } from './i18n'
 
 const KEY = 'talixio-token'
 
@@ -23,10 +25,10 @@ export async function api<T>(token: string, path: string, body?: unknown): Promi
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: 'no-store',
   })
-  if (response.status === 401) throw new Unauthorized('Jeton refusé.')
+  if (response.status === 401) throw new Unauthorized(t('Token refused.'))
   if (!response.ok) {
     const detail = (await response.json().catch(() => ({}))) as { error?: string }
-    throw new Error(detail.error ?? `erreur ${response.status}`)
+    throw new Error(detail.error ?? t('error {status}', { status: response.status }))
   }
   return (await response.json()) as T
 }

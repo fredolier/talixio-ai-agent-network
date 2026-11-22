@@ -25,7 +25,7 @@
 #   TALIXIO_NAME     nom du conteneur (talixio) ; le volume de données est <nom>-data
 #   TALIXIO_DOCKER=1 le maître peut lancer ses agents dans d'autres conteneurs (image « claude ») :
 #                    il reçoit le socket Docker de cette machine. ATTENTION : qui prend le maître
-#                    commande alors Docker, donc cette machine. Voir docs/SPEC.md, décision 36.
+#                    commande alors Docker, donc cette machine. Voir docs/DESIGN.md, décision 36.
 #   TALIXIO_PACKS    dossier des paquets installés, sur cette machine (~/.config/talixio/<nom>-packs)
 #   TALIXIO_PACKS_FROM   un dossier de paquets à vous (un sous-dossier par paquet), pour « pack »
 #   TALIXIO_OLD_IMAGE=1  lance une image plus ancienne que le dépôt sans s'arrêter (run, pack)

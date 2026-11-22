@@ -1,12 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { BookUser, Boxes, Building2, CalendarClock, History, LogOut, Menu, MessageSquare, Moon, Network, ScrollText, Sun, Terminal } from 'lucide-react'
+import { BookUser, Boxes, Building2, CalendarClock, History, Languages, LogOut, Menu, MessageSquare, Moon, Network, ScrollText, Sun, Terminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { Guard } from '@/components/bits'
+import { Guard, Rich } from '@/components/bits'
 import { flat } from '@/lib/format'
+import { LANGS, setLang, t, tx, useLang, type Lang } from '@/lib/i18n'
 import { useCluster, type Cluster } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import { ChatView } from '@/views/ChatView'
@@ -20,17 +21,23 @@ import { TasksView } from '@/views/TasksView'
 import { TreeView } from '@/views/TreeView'
 
 const VIEWS = [
-  { id: 'grappe', label: 'Grappe', icon: Network, group: 'Suivre' },
-  { id: 'dialogue', label: 'Dialogue', icon: MessageSquare, group: 'Suivre' },
-  { id: 'journal', label: 'Journal', icon: ScrollText, group: 'Suivre' },
-  { id: 'commandes', label: 'Commandes', icon: Terminal, group: 'Maîtriser' },
-  { id: 'fournisseurs', label: 'Fournisseurs', icon: Building2, group: 'Maîtriser' },
-  { id: 'modeles', label: 'Modèles', icon: Boxes, group: 'Maîtriser' },
-  { id: 'roles', label: 'Rôles', icon: BookUser, group: 'Maîtriser' },
-  { id: 'taches', label: 'Tâches', icon: CalendarClock, group: 'Maîtriser' },
-  { id: 'nouveautes', label: 'Nouveautés', icon: History, group: 'Version' },
+  { id: 'grappe', label: tx('Cluster'), icon: Network, group: 'follow' },
+  { id: 'dialogue', label: tx('Conversation'), icon: MessageSquare, group: 'follow' },
+  { id: 'journal', label: tx('Journal'), icon: ScrollText, group: 'follow' },
+  { id: 'commandes', label: tx('Commands'), icon: Terminal, group: 'control' },
+  { id: 'fournisseurs', label: tx('Providers'), icon: Building2, group: 'control' },
+  { id: 'modeles', label: tx('Models'), icon: Boxes, group: 'control' },
+  { id: 'roles', label: tx('Roles'), icon: BookUser, group: 'control' },
+  { id: 'taches', label: tx('Tasks'), icon: CalendarClock, group: 'control' },
+  { id: 'nouveautes', label: tx("What's new"), icon: History, group: 'version' },
 ] as const
 type ViewId = (typeof VIEWS)[number]['id']
+
+const GROUPS = [
+  { id: 'follow', label: tx('Follow') },
+  { id: 'control', label: tx('Control') },
+  { id: 'version', label: tx('Version') },
+] as const
 
 const viewFromHash = (): ViewId => VIEWS.find((v) => v.id === location.hash.slice(1).split('?')[0])?.id ?? 'grappe'
 
@@ -66,10 +73,12 @@ function useTheme() {
 
 export default function App() {
   const theme = useTheme()
+  // every text is read again when the language changes
+  const lang = useLang()
   const { cluster, waiting, login, loginError, logout } = useCluster()
-  if (cluster) return <Shell cluster={cluster} logout={logout} theme={theme} />
+  if (cluster) return <Shell key={lang} cluster={cluster} logout={logout} theme={theme} />
   if (waiting) return <div className="grid h-full place-items-center"><Logo className="size-10 animate-pulse" /></div>
-  return <Login login={login} error={loginError} />
+  return <Login key={lang} login={login} error={loginError} />
 }
 
 function Login({ login, error }: { login: (token: string, remember: boolean) => Promise<void>; error: string | null }) {
@@ -89,26 +98,47 @@ function Login({ login, error }: { login: (token: string, remember: boolean) => 
           <Logo className="size-9" />
           <div>
             <p className="text-lg leading-tight font-semibold tracking-tight">Talixio Agents</p>
-            <p className="eyebrow">poste de pilotage</p>
+            <p className="eyebrow">{t('control room')}</p>
           </div>
         </div>
         <div className="flex flex-col gap-4 rounded-lg border bg-card p-5">
           <div className="flex flex-col gap-2">
-            <Label htmlFor="token">Jeton de l'API</Label>
+            <Label htmlFor="token">{t('API token')}</Label>
             <Input id="token" type="password" autoComplete="current-password" required autoFocus value={token} onChange={(e) => setToken(e.target.value)} className="font-mono" />
             <p className="text-[13px] text-muted-foreground">
-              Il se trouve sur la machine du maître, dans <code>.talixio/api-token</code>. Lancé avec <code>TALIXIO_API_TOKEN</code> (Docker) : c'est la valeur de cette variable, et le fichier n'existe pas.
+              <Rich text={t('It is on the master machine, in `.talixio/api-token`. Started with `TALIXIO_API_TOKEN` (Docker): it is the value of that variable, and the file does not exist.')} />
             </p>
           </div>
           <Label className="font-normal">
             <Checkbox checked={remember} onCheckedChange={(checked) => setRemember(checked === true)} />
-            Rester connecté sur cet appareil
+            {t('Stay signed in on this device')}
           </Label>
           {error && <p className="text-destructive" role="alert">{error}</p>}
-          <Button type="submit" size="lg" disabled={busy || !token.trim()}>Entrer</Button>
+          <Button type="submit" size="lg" disabled={busy || !token.trim()}>{t('Enter')}</Button>
         </div>
+        <LangPicker className="self-center" />
       </form>
     </main>
+  )
+}
+
+/** The language of the interface: kept on this device, the browser's language the first time. */
+function LangPicker({ className }: { className?: string }) {
+  const lang = useLang()
+  return (
+    <label className={cn('inline-flex items-center gap-1.5 text-xs text-muted-foreground', className)}>
+      <Languages className="size-3.5" aria-hidden />
+      <span className="sr-only">{t('Language')}</span>
+      <select
+        value={lang}
+        onChange={(e) => setLang(e.target.value as Lang)}
+        className="rounded-md bg-transparent py-1 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+      >
+        {LANGS.map((l) => (
+          <option key={l.id} value={l.id} lang={l.id}>{l.label}</option>
+        ))}
+      </select>
+    </label>
   )
 }
 
@@ -131,10 +161,10 @@ function Shell({ cluster, logout, theme }: { cluster: Cluster; logout: () => voi
 
   const nav = (
     <nav className="flex flex-1 flex-col gap-5" aria-label="Navigation">
-      {['Suivre', 'Maîtriser', 'Version'].map((group) => (
-        <div key={group} className="flex flex-col gap-0.5">
-          <p className="eyebrow px-3 pb-1.5">{group}</p>
-          {VIEWS.filter((v) => v.group === group).map((item) => (
+      {GROUPS.map((group) => (
+        <div key={group.id} className="flex flex-col gap-0.5">
+          <p className="eyebrow px-3 pb-1.5">{t(group.label)}</p>
+          {VIEWS.filter((v) => v.group === group.id).map((item) => (
             <button
               key={item.id}
               type="button"
@@ -146,7 +176,7 @@ function Shell({ cluster, logout, theme }: { cluster: Cluster; logout: () => voi
               )}
             >
               <item.icon className="size-4" />
-              {item.label}
+              {t(item.label)}
               {item.id === 'grappe' && working > 0 && <span className="num ml-auto inline-flex items-center gap-1.5 text-xs"><span className="live-dot size-1.5 rounded-full bg-st-working" />{working}</span>}
               {item.id === 'nouveautes' && cluster.releases && <span className="num ml-auto text-xs text-muted-foreground">v{cluster.releases.version}</span>}
             </button>
@@ -154,8 +184,9 @@ function Shell({ cluster, logout, theme }: { cluster: Cluster; logout: () => voi
         </div>
       ))}
       <div className="mt-auto flex items-center gap-1 border-t pt-3">
-        <Button variant="ghost" size="sm" onClick={logout} className="text-muted-foreground"><LogOut /> Se déconnecter</Button>
-        <Button variant="ghost" size="icon-sm" onClick={theme.toggle} className="ml-auto text-muted-foreground" aria-label={theme.dark ? 'Passer en clair' : 'Passer en sombre'}>
+        <Button variant="ghost" size="sm" onClick={logout} className="text-muted-foreground"><LogOut /> {t('Sign out')}</Button>
+        <LangPicker className="ml-auto" />
+        <Button variant="ghost" size="icon-sm" onClick={theme.toggle} className="text-muted-foreground" aria-label={theme.dark ? t('Switch to light') : t('Switch to dark')}>
           {theme.dark ? <Sun /> : <Moon />}
         </Button>
       </div>
@@ -176,8 +207,8 @@ function Shell({ cluster, logout, theme }: { cluster: Cluster; logout: () => voi
       </aside>
       <header className="sticky top-0 z-10 flex items-center gap-3 border-b bg-background/90 px-4 py-2.5 backdrop-blur lg:hidden">
         <Logo className="size-7" />
-        <span className="font-semibold">{current.label}</span>
-        <Button variant="outline" size="icon" className="ml-auto" onClick={() => setMenu(true)} aria-label="Ouvrir le menu"><Menu /></Button>
+        <span className="font-semibold">{t(current.label)}</span>
+        <Button variant="outline" size="icon" className="ml-auto" onClick={() => setMenu(true)} aria-label={t('Open the menu')}><Menu /></Button>
       </header>
       <Sheet open={menu} onOpenChange={setMenu}>
         <SheetContent side="left" className="w-72 gap-6 bg-sidebar px-3 py-5">
@@ -190,7 +221,7 @@ function Shell({ cluster, logout, theme }: { cluster: Cluster; logout: () => voi
       </Sheet>
       <main className="mx-auto w-full max-w-[1400px] min-w-0 flex-1 px-4 py-6 lg:px-10 lg:py-9">
         {cluster.offline && (
-          <p role="status" className="mb-5 rounded-md border border-st-wait/50 bg-st-wait/10 px-3 py-2">Maître injoignable. Nouvel essai en cours…</p>
+          <p role="status" className="mb-5 rounded-md border border-st-wait/50 bg-st-wait/10 px-3 py-2">{t('Master unreachable. Trying again…')}</p>
         )}
         <Guard key={view}>
         {view === 'grappe' && <TreeView cluster={cluster} />}

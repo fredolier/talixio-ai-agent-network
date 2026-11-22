@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Empty, PageHeader } from '@/components/bits'
 import { Input } from '@/components/ui/input'
-import { hour, KIND } from '@/lib/format'
+import { hour, kindLabel } from '@/lib/format'
+import { t } from '@/lib/i18n'
 import type { Cluster } from '@/lib/store'
 import { cn, pick } from '@/lib/utils'
 
@@ -20,25 +21,25 @@ export function JournalView({ cluster }: { cluster: Cluster }) {
   const rows = useMemo(() => {
     const wanted = filter.trim().toLowerCase()
     const matching = wanted
-      ? cluster.events.filter((e) => `${e.agent_name} ${pick(KIND, e.kind) ?? e.kind} ${e.text}`.toLowerCase().includes(wanted))
+      ? cluster.events.filter((e) => `${e.agent_name} ${kindLabel(e.kind)} ${e.text}`.toLowerCase().includes(wanted))
       : cluster.events
     return matching.slice(-SHOWN).reverse()
   }, [cluster.events, filter])
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader eyebrow="Journal" title="Tout ce qui remonte" lead="Chaque geste de chaque agent, du plus récent au plus ancien.">
+      <PageHeader eyebrow={t('Journal')} title={t('Everything that comes back up')} lead={t('Every action of every agent, from the most recent to the oldest.')}>
         <Input
           type="search"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filtrer : agent, genre, texte…"
-          aria-label="Filtrer le journal"
+          placeholder={t('Filter: agent, kind, text…')}
+          aria-label={t('Filter the journal')}
           className="w-full sm:w-72"
         />
       </PageHeader>
       {rows.length === 0 ? (
-        <Empty title={filter ? 'Rien ne correspond' : 'Journal vide'} />
+        <Empty title={filter ? t('Nothing matches') : t('Empty journal')} />
       ) : (
         <ol className="overflow-hidden rounded-lg border bg-card">
           {rows.map((event) => (
@@ -48,7 +49,7 @@ export function JournalView({ cluster }: { cluster: Cluster }) {
             >
               <time className="num text-xs text-muted-foreground">{hour(event.ts_ms)}</time>
               <span className="truncate text-[13px] font-medium">{event.agent_name}</span>
-              <span className={cn('eyebrow', pick(TONE, event.kind))}>{pick(KIND, event.kind) ?? event.kind}</span>
+              <span className={cn('eyebrow', pick(TONE, event.kind))}>{kindLabel(event.kind)}</span>
               <span className="col-start-2 whitespace-pre-wrap [overflow-wrap:anywhere] md:col-start-4">{event.text}</span>
             </li>
           ))}

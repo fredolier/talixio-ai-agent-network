@@ -1,27 +1,28 @@
-# Contribuer
+# Contributing
 
-Merci de votre intérêt. Le projet est jeune : les retours d'usage comptent autant que le code.
+Thank you for your interest. The project is young: feedback from real use matters as much as
+code.
 
-## Signaler un problème, proposer une idée
+## Reporting a problem, proposing an idea
 
-Ouvrez un ticket sur GitHub, avec :
+Open an issue on GitHub, with:
 
-- la version (`talixio-agent --version`) et le système ;
-- ce que vous avez fait, ce que vous attendiez, ce qui s'est passé ;
-- le journal du maître autour du problème, **sans jeton ni clé**.
+- the version (`talixio-agent --version`) and the system;
+- what you did, what you expected, what happened;
+- the master's journal around the problem, **without any token or key**.
 
-Une faille de sécurité ne se signale pas dans un ticket public : voir [SECURITY.md](SECURITY.md).
+A security vulnerability is not reported in a public issue: see [SECURITY.md](SECURITY.md).
 
-## Proposer un changement
+## Proposing a change
 
-1. Lisez [docs/SPEC.md](docs/SPEC.md) (exigences, décisions, questions ouvertes), puis
-   [docs/PLAN.md](docs/PLAN.md). Pour un changement de fond, ouvrez d'abord un ticket : une
-   décision déjà prise et motivée dans la spécification ne se défait pas en passant.
-2. Écrivez le changement avec ses tests.
-3. Mettez à jour la documentation **dans le même changement** : l'état des exigences dans
-   `SPEC.md`, le journal de `PLAN.md`, `releases.toml` si le comportement change pour
-   l'utilisateur, le `README.md` si la façon de s'en servir change.
-4. Vérifiez :
+1. Read [docs/DESIGN.md](docs/DESIGN.md) (architecture, security model, decisions, open
+   questions). For a substantial change, open an issue first: a decision already made and
+   justified there is not undone in passing.
+2. Write the change with its tests.
+3. Update the documentation **in the same change**: `docs/DESIGN.md` if a mechanism or a
+   decision changes, `releases.toml` if behaviour changes for the user, `README.md` (and
+   `README.fr.md`) if the way to use it changes.
+4. Check:
 
    ```bash
    cargo test
@@ -31,24 +32,26 @@ Une faille de sécurité ne se signale pas dans un ticket public : voir [SECURIT
    cargo clippy --all-targets
    ```
 
-   L'intégration continue rejoue le tout sous Linux, macOS et Windows, et construit l'exécutable
-   statique. Si vous touchez à l'interface (`web/`), reconstruisez-la (`npm ci && npm run build`
-   dans `web/`) : `web/dist` fait partie du dépôt et doit correspondre aux sources.
+   Continuous integration replays everything on Linux, macOS and Windows, and builds the static
+   binary. If you touch the interface (`web/`), rebuild it (`npm ci && npm run build` in
+   `web/`): `web/dist` is part of the repository and must match the sources.
 
-## Règles du projet
+## Project rules
 
-- **La sécurité prime.** Tout est refusé par défaut ; un enfant n'a jamais plus de droits que son
-  parent ; chaque appel d'outil est revérifié. Toute nouvelle surface (outil, message du lien,
-  route de l'API, mode de déploiement, commande) passe par une revue de sécurité, dont le compte
-  rendu va dans `SPEC.md`, §7.
-- **Un seul exécutable**, sans dépendance obligatoire au système.
-- **Dire ce qui n'a pas été essayé.** Une fonction écrite et testée avec des programmes factices
-  n'est pas « essayée » : la documentation fait la différence.
-- **Langue** : documentation, messages et commentaires en français. Les noms dans le code sont
-  en anglais.
-- **Jamais de secret** dans le dépôt, dans une configuration d'exemple ni dans un journal.
+- **Security comes first.** Everything is denied by default; a child never has more permissions
+  than its parent; every tool call is checked again. Any new surface (tool, link message, API
+  route, deployment mode, command) goes through a security review, summarised in
+  `docs/DESIGN.md`.
+- **A single binary**, with no mandatory dependency on the system.
+- **Say what has not been tried.** A feature written and tested with fake programs is not
+  "tried": the documentation makes the difference.
+- **Language.** The repository is in English: documentation, new comments and new messages.
+  Much of the existing code still carries French comments and messages; translate what you
+  touch. The web interface is written in English with a French translation
+  (`web/src/locales/fr/`): a new text needs both, and `npm run build` checks it.
+- **Never a secret** in the repository, in an example configuration or in a journal.
 
-## Licence des contributions
+## License of contributions
 
-Le projet est sous licence [AGPL-3.0-only](LICENSE). En proposant un changement, vous acceptez
-qu'il soit publié sous cette licence, et vous affirmez avoir le droit de le proposer.
+The project is licensed under [AGPL-3.0-only](LICENSE). By proposing a change, you agree that it
+is published under this license, and you state that you have the right to propose it.

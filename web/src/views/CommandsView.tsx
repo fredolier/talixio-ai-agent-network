@@ -1,18 +1,19 @@
 import { ShieldCheck } from 'lucide-react'
-import { Empty, PageHeader, RuleLine, StatusMark } from '@/components/bits'
+import { Empty, PageHeader, Rich, RuleLine, StatusMark } from '@/components/bits'
 import { Badge } from '@/components/ui/badge'
-import { flat, plural, sameRule } from '@/lib/format'
+import { flat, sameRule } from '@/lib/format'
+import { t, tn, tx } from '@/lib/i18n'
 import type { Cluster } from '@/lib/store'
 import type { Agent, ExecRule } from '@/lib/types'
 
-/** Ce qui rend une commande déléguée sûre, dans l'ordre où c'est vérifié. */
+/** What makes a delegated command safe, in the order it is checked. */
 const GUARDS = [
-  ['Rien par défaut', 'Un agent sans règle ne peut lancer aucune commande : l’outil ne lui est même pas proposé.'],
-  ['Jamais plus que le parent', 'Un parent ne délègue qu’une règle qu’il détient lui-même : même programme, même dossier, mêmes arguments. Si les siens sont libres, il peut les restreindre pour l’enfant, jamais l’inverse.'],
-  ['Programme exact, sans interpréteur', 'Le programme est désigné par son chemin absolu et lancé directement, sans passer par un shell : pas de « ; », de « | » ni de « $( ) ».'],
-  ['Arguments à leur place', 'Chaque argument est comparé à la règle, position par position. Un argument libre ne peut jamais commencer par « - » : il ne devient pas une option.'],
-  ['Chemins revérifiés', 'Un argument {read} ou {write} doit être un chemin que l’agent a le droit de lire ou d’écrire, liens résolus ; les dossiers des clés sont toujours interdits.'],
-  ['Vérifié à chaque appel', 'La règle est relue à chaque commande, pas une fois pour toutes. La commande tourne sans les variables secrètes du maître, 120 s au plus, et tout ce qu’elle a lancé est tué avec elle.'],
+  [tx('Nothing by default'), tx('An agent without a rule cannot run any command: the tool is not even offered to it.')],
+  [tx('Never more than the parent'), tx('A parent only delegates a rule it holds itself: same program, same folder, same arguments. If its own are free, it can restrict them for the child, never the reverse.')],
+  [tx('Exact program, no interpreter'), tx('The program is named by its absolute path and started directly, without going through a shell: no “;”, “|” or “$( )”.')],
+  [tx('Arguments in their place'), tx('Each argument is compared with the rule, position by position. A free argument can never start with “-”: it does not become an option.')],
+  [tx('Paths checked again'), tx('A {read} or {write} argument must be a path the agent is allowed to read or write, links resolved; the key folders are always forbidden.')],
+  [tx('Checked on every call'), tx('The rule is read again for every command, not once and for all. The command runs without the secret variables of the master, 120 s at most, and everything it started is killed with it.')],
 ] as const
 
 export function CommandsView({ cluster }: { cluster: Cluster }) {
@@ -24,22 +25,24 @@ export function CommandsView({ cluster }: { cluster: Cluster }) {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        eyebrow="Maîtrise · Commandes"
-        title="Ce que la grappe a le droit d'exécuter"
+        eyebrow={t('Control · Commands')}
+        title={t('What the cluster is allowed to run')}
         lead={
           rules.length
-            ? `Le maître détient ${plural(rules.length, 'commande')}, écrites dans son fichier de configuration. Lui seul décide lesquelles il confie, et à qui.`
-            : 'Le maître ne détient aucune commande : aucun agent de la grappe ne peut en exécuter.'
+            ? t('The master holds {commands}, written in its configuration file. It alone decides which ones it hands over, and to whom.', {
+                commands: tn(rules.length, '{n} command', '{n} commands'),
+              })
+            : t('The master holds no command: no agent in the cluster can run any.')
         }
       >
-        {free > 0 && <Badge variant="destructive">{plural(free, 'règle')} à arguments libres</Badge>}
+        {free > 0 && <Badge variant="destructive">{tn(free, '{n} rule with free arguments', '{n} rules with free arguments')}</Badge>}
       </PageHeader>
 
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
         <div className="flex flex-col gap-3">
           {rules.length === 0 && (
-            <Empty title="Aucune commande autorisée">
-              Ajoutez des règles dans la section <code>[capabilities]</code> du fichier de configuration du maître, puis relancez-le.
+            <Empty title={t('No command allowed')}>
+              <Rich text={t('Add rules in the `[capabilities]` section of the configuration file of the master, then restart it.')} />
             </Empty>
           )}
           {rules.map((rule, index) => (
@@ -48,20 +51,20 @@ export function CommandsView({ cluster }: { cluster: Cluster }) {
         </div>
 
         <aside className="rounded-lg border bg-card p-5">
-          <p className="eyebrow flex items-center gap-1.5"><ShieldCheck className="size-3.5" /> Comment un enfant est tenu</p>
+          <p className="eyebrow flex items-center gap-1.5"><ShieldCheck className="size-3.5" /> {t('How a child is kept in check')}</p>
           <ol className="mt-4 flex flex-col gap-4">
             {GUARDS.map(([title, body], index) => (
               <li key={title} className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-x-2">
                 <span className="num text-xs text-muted-foreground">{String(index + 1).padStart(2, '0')}</span>
                 <div>
-                  <p className="font-medium">{title}</p>
-                  <p className="mt-0.5 text-[13px] text-muted-foreground">{body}</p>
+                  <p className="font-medium">{t(title)}</p>
+                  <p className="mt-0.5 text-[13px] text-muted-foreground">{t(body)}</p>
                 </div>
               </li>
             ))}
           </ol>
           <p className="mt-5 border-t pt-4 text-[13px] text-muted-foreground">
-            Limite connue : une commande autorisée s'exécute avec les droits du compte de l'agent. N'autorisez que des commandes dont vous acceptez tous les effets, et lancez le maître sous un compte dédié.
+            {t('Known limit: an allowed command runs with the permissions of the account of the agent. Only allow commands whose every effect you accept, and run the master under a dedicated account.')}
           </p>
         </aside>
       </div>
@@ -70,31 +73,33 @@ export function CommandsView({ cluster }: { cluster: Cluster }) {
 }
 
 function RuleCard({ rule, holders }: { rule: ExecRule; holders: { agent: Agent; rules: ExecRule[] }[] }) {
+  // the folder is data: it is placed in the sentence, never read as text to format
+  const [before, after = ''] = t('in {cwd}').split('{cwd}')
   return (
     <section className="rounded-lg border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
         <RuleLine rule={rule} className="text-[13px]" />
         <span className="text-xs text-muted-foreground">
-          {rule.cwd ? <>dans <code>{rule.cwd}</code></> : 'dans le dossier temporaire'}
+          {rule.cwd ? <>{before}<code>{rule.cwd}</code>{after}</> : t('in the temporary folder')}
         </span>
       </div>
       <div className="border-t bg-muted/40 px-4 py-2.5">
         {holders.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">Gardée par le maître : confiée à aucun agent.</p>
+          <p className="text-[13px] text-muted-foreground">{t('Kept by the master: handed to no agent.')}</p>
         ) : (
           <ul className="flex flex-col gap-2">
             {holders.map(({ agent, rules }) => (
               <li key={agent.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <span className="eyebrow">confiée à</span>
+                <span className="eyebrow">{t('handed to')}</span>
                 <span className="font-medium">{agent.name}</span>
                 <StatusMark status={agent.status} />
                 <span className="flex flex-wrap gap-x-3 gap-y-1">
                   {rules.map((own, index) =>
                     sameRule(own, rule) ? (
-                      <span key={index} className="text-xs text-muted-foreground">telle quelle</span>
+                      <span key={index} className="text-xs text-muted-foreground">{t('as is')}</span>
                     ) : (
                       <span key={index} className="inline-flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                        restreinte à <RuleLine rule={own} className="text-foreground" />
+                        {t('restricted to')} <RuleLine rule={own} className="text-foreground" />
                       </span>
                     ),
                   )}

@@ -11,5 +11,15 @@ Agents IA autonomes en grappe, en Rust. Un seul exécutable (`talixio-agent`).
 - La sécurité prime : tout est refusé par défaut, un enfant n'a jamais plus de droits que son
   parent, chaque appel d'outil est revérifié. Toute nouvelle surface (outil, message du lien,
   route de l'API, mode de déploiement) passe par une revue de sécurité.
-- Langue : documentation, messages et commentaires en français.
+- Langue : le dépôt public est en anglais (`README.md`, `docs/DESIGN.md`, `CONTRIBUTING.md`,
+  `SECURITY.md`, nouveaux commentaires et nouveaux messages). L'interface web est écrite en anglais
+  avec sa traduction française (`web/src/locales/fr/`, vérifiée par `npm run build`). Le code Rust
+  existant garde ses commentaires et messages en français tant qu'il n'est pas traduit : traduire
+  ce que l'on touche. `SPEC.md`, `PLAN.md`, `EXIGENCES.md` et `VERIFICATION.md` restent en français.
+- Deux branches : le travail se fait sur la branche de travail ; `main` est la branche publique.
+  `main` ne reçoit **jamais** `docs/SPEC.md`, `docs/PLAN.md`, `docs/EXIGENCES.md`,
+  `docs/VERIFICATION.md` ni `CLAUDE.md` (propos du propriétaire, journal interne) : leur condensé
+  public est `docs/DESIGN.md`, à tenir à jour avec le code. Publier : `scripts/publier-main.sh`
+  (dans la branche de travail seulement), qui pose sur `main` un commit du même arbre moins ces
+  fichiers.
 - Ne pas ouvrir de pull request sans demande explicite.

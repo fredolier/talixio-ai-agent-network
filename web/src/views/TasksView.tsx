@@ -9,19 +9,20 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api'
 import { moment } from '@/lib/format'
+import { t, tx } from '@/lib/i18n'
 import type { Cluster } from '@/lib/store'
 import type { Task, TasksData } from '@/lib/types'
 
-const DAYS = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche']
+const DAYS = [tx('Monday'), tx('Tuesday'), tx('Wednesday'), tx('Thursday'), tx('Friday'), tx('Saturday'), tx('Sunday')]
 const two = (n: number) => String(n).padStart(2, '0')
 const clock = (minute: number) => `${two(Math.floor(minute / 60))}:${two(minute % 60)}`
-/** Le décalage de ce navigateur par rapport à UTC, en minutes (Paris l'hiver : 60). */
+/** This browser's offset from UTC, in minutes (Paris in winter: 60). */
 const offset = () => -new Date().getTimezoneOffset()
 
 function rhythm(task: Task) {
-  if (task.kind === 'hours') return task.hours === 1 ? 'toutes les heures' : `toutes les ${task.hours} heures`
-  if (task.kind === 'daily') return `chaque jour à ${clock(task.minute ?? 0)}`
-  return `chaque ${DAYS[task.weekday ?? 0]} à ${clock(task.minute ?? 0)}`
+  if (task.kind === 'hours') return task.hours === 1 ? t('every hour') : t('every {hours} hours', { hours: task.hours ?? 0 })
+  if (task.kind === 'daily') return t('every day at {time}', { time: clock(task.minute ?? 0) })
+  return t('every {day} at {time}', { day: t(DAYS[task.weekday ?? 0]), time: clock(task.minute ?? 0) })
 }
 
 interface Draft {
@@ -75,13 +76,13 @@ export function TasksView({ cluster }: { cluster: Cluster }) {
   }
 
   const body = (d: Draft) => ({ name: d.name, text: d.text, kind: d.kind, time: d.time, weekday: d.weekday, hours: d.hours, enabled: d.enabled, tz_offset_min: offset() })
-  const asDraft = (t: Task): Draft => ({ id: t.id, name: t.name, text: t.text, kind: t.kind, time: clock(t.minute ?? 420), weekday: t.weekday ?? 0, hours: t.hours ?? 6, enabled: t.enabled })
+  const asDraft = (task: Task): Draft => ({ id: task.id, name: task.name, text: task.text, kind: task.kind, time: clock(task.minute ?? 420), weekday: task.weekday ?? 0, hours: task.hours ?? 6, enabled: task.enabled })
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (!draft) return
     const path = draft.id ? `/api/tasks/${encodeURIComponent(draft.id)}` : '/api/tasks'
-    if (await run(() => api(cluster.token, path, body(draft)), draft.id ? 'Tâche modifiée.' : 'Tâche créée.')) setDraft(null)
+    if (await run(() => api(cluster.token, path, body(draft)), draft.id ? t('Task updated.') : t('Task created.'))) setDraft(null)
   }
 
   const tasks = data?.tasks ?? []
@@ -89,75 +90,75 @@ export function TasksView({ cluster }: { cluster: Cluster }) {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        eyebrow="Maîtrise · tâches"
-        title="Ce que le maître fait de lui-même, à heure fixe"
-        lead="Une tâche planifiée est une consigne écrite d'avance : le maître la reçoit à l'heure dite, comme si vous veniez de la lui écrire. Elle ne lui donne aucun droit de plus. Les agents ne peuvent ni en créer, ni en changer."
+        eyebrow={t('Control · tasks')}
+        title={t('What the master does on its own, at set times')}
+        lead={t("A scheduled task is an instruction written in advance: the master receives it at the set time, as if you had just written it. It gives the master no extra permission. Agents can neither create nor change one.")}
       >
         {!draft && (
-          <Button onClick={() => setDraft(blank)} disabled={full} title={full ? `Pas plus de ${data?.max} tâches` : undefined}>
-            <Plus /> Nouvelle tâche
+          <Button onClick={() => setDraft(blank)} disabled={full} title={full ? t('No more than {max} tasks', { max: data?.max ?? 0 }) : undefined}>
+            <Plus /> {t('New task')}
           </Button>
         )}
       </PageHeader>
 
       {draft && (
         <form onSubmit={submit} className="flex flex-col gap-4 rounded-lg border bg-card p-5">
-          <p className="font-semibold">{draft.id ? 'Modifier la tâche' : 'Nouvelle tâche'}</p>
+          <p className="font-semibold">{draft.id ? t('Edit the task') : t('New task')}</p>
           <div className="flex flex-col gap-2">
-            <Label htmlFor="task-name">Nom</Label>
-            <Input id="task-name" required maxLength={60} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Catalogue des modèles" />
+            <Label htmlFor="task-name">{t('Name')}</Label>
+            <Input id="task-name" required maxLength={60} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder={t('Model catalogue')} />
           </div>
           <div className="flex flex-col gap-2">
-            <Label htmlFor="task-text">Consigne remise au maître</Label>
-            <Textarea id="task-text" required rows={5} value={draft.text} onChange={(e) => setDraft({ ...draft, text: e.target.value })} placeholder="Ce que le maître doit faire, et comment savoir que c'est fait." />
+            <Label htmlFor="task-text">{t('Instruction handed to the master')}</Label>
+            <Textarea id="task-text" required rows={5} value={draft.text} onChange={(e) => setDraft({ ...draft, text: e.target.value })} placeholder={t("What the master must do, and how to know it is done.")} />
           </div>
           <div className="flex flex-wrap items-end gap-4">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="task-kind">Rythme</Label>
+              <Label htmlFor="task-kind">{t('Frequency')}</Label>
               <select
                 id="task-kind"
                 value={draft.kind}
                 onChange={(e) => setDraft({ ...draft, kind: e.target.value as Task['kind'] })}
                 className="h-9 rounded-md border bg-transparent px-3 text-sm"
               >
-                <option value="daily">Chaque jour</option>
-                <option value="weekly">Chaque semaine</option>
-                <option value="hours">Toutes les N heures</option>
+                <option value="daily">{t('Every day')}</option>
+                <option value="weekly">{t('Every week')}</option>
+                <option value="hours">{t('Every N hours')}</option>
               </select>
             </div>
             {draft.kind === 'weekly' && (
               <div className="flex flex-col gap-2">
-                <Label htmlFor="task-day">Jour</Label>
+                <Label htmlFor="task-day">{t('Day')}</Label>
                 <select id="task-day" value={draft.weekday} onChange={(e) => setDraft({ ...draft, weekday: Number(e.target.value) })} className="h-9 rounded-md border bg-transparent px-3 text-sm">
                   {DAYS.map((name, i) => (
-                    <option key={name} value={i}>{name}</option>
+                    <option key={name} value={i}>{t(name)}</option>
                   ))}
                 </select>
               </div>
             )}
             {draft.kind !== 'hours' && (
               <div className="flex flex-col gap-2">
-                <Label htmlFor="task-time">Heure (la vôtre)</Label>
+                <Label htmlFor="task-time">{t('Time (yours)')}</Label>
                 <Input id="task-time" type="time" required value={draft.time} onChange={(e) => setDraft({ ...draft, time: e.target.value })} className="w-32" />
               </div>
             )}
             {draft.kind === 'hours' && (
               <div className="flex flex-col gap-2">
-                <Label htmlFor="task-hours">Heures entre deux fois</Label>
+                <Label htmlFor="task-hours">{t('Hours between two runs')}</Label>
                 <Input id="task-hours" type="number" min={1} max={744} required value={draft.hours} onChange={(e) => setDraft({ ...draft, hours: Number(e.target.value) })} className="w-32" />
               </div>
             )}
             <Label className="h-9 font-normal">
               <Checkbox checked={draft.enabled} onCheckedChange={(checked) => setDraft({ ...draft, enabled: checked === true })} />
-              Activée
+              {t('Task enabled')}
             </Label>
           </div>
           <p className="text-[13px] text-muted-foreground">
-            L'heure est celle de ce navigateur ; elle ne suit pas le changement d'heure d'été. Une échéance passée pendant que le maître était éteint part une fois à son retour.
+            {t("The time is this browser's; it does not follow daylight saving changes. A run missed while the master was off starts once when it is back.")}
           </p>
           <div className="flex gap-2">
-            <Button type="submit" disabled={busy}>{draft.id ? 'Enregistrer' : 'Créer'}</Button>
-            <Button type="button" variant="outline" onClick={() => setDraft(null)}>Annuler</Button>
+            <Button type="submit" disabled={busy}>{draft.id ? t('Save') : t('Create')}</Button>
+            <Button type="button" variant="outline" onClick={() => setDraft(null)}>{t('Cancel')}</Button>
           </div>
         </form>
       )}
@@ -166,18 +167,18 @@ export function TasksView({ cluster }: { cluster: Cluster }) {
       {done && <p className="text-muted-foreground" role="status">{done}</p>}
 
       {data !== null && tasks.length === 0 && !draft && (
-        <Empty title="Aucune tâche planifiée">Créez-en une pour que le maître lance seul un travail régulier : une veille, une mise à jour, un contrôle.</Empty>
+        <Empty title={t('No scheduled task')}>{t('Create one so that the master starts a regular job on its own: a watch, an update, a check.')}</Empty>
       )}
       {tasks.length > 0 && (
         <div className="rounded-lg border bg-card">
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead className="eyebrow px-4">Tâche</TableHead>
-                <TableHead className="eyebrow">Rythme</TableHead>
-                <TableHead className="eyebrow">Prochaine fois</TableHead>
-                <TableHead className="eyebrow">Dernière fois</TableHead>
-                <TableHead className="eyebrow px-4 text-right">Actions</TableHead>
+                <TableHead className="eyebrow px-4">{t('Task')}</TableHead>
+                <TableHead className="eyebrow">{t('Frequency')}</TableHead>
+                <TableHead className="eyebrow">{t('Next run')}</TableHead>
+                <TableHead className="eyebrow">{t('Last run')}</TableHead>
+                <TableHead className="eyebrow px-4 text-right">{t('Actions')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -187,34 +188,34 @@ export function TasksView({ cluster }: { cluster: Cluster }) {
                     <span className="flex items-center gap-2 font-medium">
                       <span className={`size-2 rounded-full ${task.enabled ? 'bg-st-working' : 'ring-1 ring-st-off ring-inset'}`} aria-hidden />
                       {task.name}
-                      {!task.enabled && <span className="text-[13px] font-normal text-muted-foreground">en pause</span>}
+                      {!task.enabled && <span className="text-[13px] font-normal text-muted-foreground">{t('paused')}</span>}
                     </span>
                     <p className="mt-1 line-clamp-2 text-[13px] text-muted-foreground [overflow-wrap:anywhere]" title={task.text.slice(0, 600)}>{task.text}</p>
                   </TableCell>
                   <TableCell className="whitespace-nowrap">{rhythm(task)}</TableCell>
                   <TableCell className="num whitespace-nowrap">{task.enabled ? moment(task.next_run_ms) : '—'}</TableCell>
-                  <TableCell className="num whitespace-nowrap">{task.last_run_ms ? moment(task.last_run_ms) : 'jamais'}</TableCell>
+                  <TableCell className="num whitespace-nowrap">{task.last_run_ms ? moment(task.last_run_ms) : t('never')}</TableCell>
                   <TableCell className="px-4">
                     <span className="flex justify-end gap-1.5">
                       <Button
                         variant="outline"
                         size="sm"
                         disabled={busy}
-                        onClick={() => run(() => api(cluster.token, `/api/tasks/${encodeURIComponent(task.id)}/run`, {}), `« ${task.name} » remise au maître : suivez-la dans le dialogue.`)}
+                        onClick={() => run(() => api(cluster.token, `/api/tasks/${encodeURIComponent(task.id)}/run`, {}), t('“{name}” handed to the master: follow it in the conversation.', { name: task.name }))}
                       >
-                        <Play /> Lancer
+                        <Play /> {t('Run')}
                       </Button>
-                      <Button variant="outline" size="icon-sm" disabled={busy} aria-label={`Modifier ${task.name}`} title="Modifier" onClick={() => setDraft(asDraft(task))}>
+                      <Button variant="outline" size="icon-sm" disabled={busy} aria-label={t('Edit {name}', { name: task.name })} title={t('Edit')} onClick={() => setDraft(asDraft(task))}>
                         <Pencil />
                       </Button>
                       <Button
                         variant="outline"
                         size="icon-sm"
                         disabled={busy}
-                        aria-label={`Supprimer ${task.name}`}
-                        title="Supprimer"
+                        aria-label={t('Delete {name}', { name: task.name })}
+                        title={t('Delete')}
                         onClick={() => {
-                          if (confirm(`Supprimer la tâche « ${task.name} » ?`)) void run(() => api(cluster.token, `/api/tasks/${encodeURIComponent(task.id)}/delete`, {}), 'Tâche supprimée.')
+                          if (confirm(t('Delete the task “{name}”?', { name: task.name }))) void run(() => api(cluster.token, `/api/tasks/${encodeURIComponent(task.id)}/delete`, {}), t('Task deleted.'))
                         }}
                       >
                         <Trash2 />

@@ -1,99 +1,89 @@
 # Talixio Agent Network
 
 [![tests](https://github.com/fredolier/talixio-ai-agent-network/actions/workflows/ci.yml/badge.svg)](https://github.com/fredolier/talixio-ai-agent-network/actions/workflows/ci.yml)
-[![licence : AGPL-3.0](https://img.shields.io/badge/licence-AGPL--3.0-blue.svg)](LICENSE)
+[![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
-**Des agents IA autonomes qui travaillent en équipe, sans jamais avoir plus de droits que ce que
-vous leur avez donné.**
+**Autonomous AI agents that work as a team, and never hold more permissions than you gave them.**
 
-Un agent « maître » reçoit votre demande, crée d'autres agents, leur confie des missions et vous
-rend compte. Chaque agent est un petit process avec un modèle, des consignes et des droits
-limités. Tout est dans un seul exécutable Rust, `talixio-agent`, que l'on pose sur une machine,
-dans un conteneur ou derrière un `ssh`.
+A "master" agent receives your request, creates other agents, hands them missions and reports
+back to you. Each agent is a small process with a model, instructions and limited permissions.
+Everything ships as a single Rust binary, `talixio-agent`, that you drop on a machine, in a
+container or behind `ssh`.
 
-![La grappe dans l'interface](docs/images/interface-grappe.png)
+![The cluster in the web interface](docs/images/interface-grappe.png)
 
-> **État du projet : jeune.** Le cœur fonctionne et il est testé sous Linux, macOS et Windows à
-> chaque changement, mais plusieurs modes n'ont pas encore servi en conditions réelles. Lisez
-> [« Limites actuelles »](#limites-actuelles) avant de lui confier quoi que ce soit d'important.
+> **Project status: young.** The core works and is tested on Linux, macOS and Windows on every
+> change, but several modes have not yet been used in real conditions. Read
+> [Current limitations](#current-limitations) before trusting it with anything important.
 
-*In English: Talixio Agent Network runs autonomous AI agents as a tree of small, least-privilege
-processes. A root agent spawns children, hands them missions with measurable success criteria,
-and reports back. Everything is denied by default, a child never holds more rights than its
-parent, model keys stay with the root agent, and every tool call is checked again. One static
-Rust binary; web UI, CLI and JSON API included. The documentation is in French for now.*
+*[Version française](README.fr.md).*
 
-## Pourquoi
+## Why
 
-Un agent IA qui agit sur une machine pose toujours la même question : que peut-il faire au
-juste, et qui l'a décidé ? La plupart des outils répondent par la confiance dans le modèle. Ici
-la réponse est dans le programme :
+An AI agent acting on a machine always raises the same question: what exactly can it do, and who
+decided so? Most tools answer with trust in the model. Here the answer is in the program:
 
-- **Tout est refusé par défaut.** Un agent ne lit, n'écrit et ne lance que ce qui est écrit dans
-  ses droits : des dossiers, des commandes avec leurs arguments permis, des modèles, un budget.
-- **Un enfant n'a jamais plus de droits que son parent.** Les droits ne font que se réduire en
-  descendant l'arbre, et chaque appel d'outil est revérifié par le programme, quoi que le
-  modèle demande.
-- **Les clés des modèles restent chez le maître.** Les autres agents passent par lui : aucun
-  n'a de clé à voler, et chacun est compté (tokens, appels).
-- **Le maître ne se donne pas de pouvoirs.** Ses commandes et ses rôles viennent de paquets que
-  vous installez vous-même, vérifiés par empreinte à chaque démarrage et à chaque lancement.
-- **Tout se voit.** L'arbre des agents, leurs droits, leurs échanges et leurs dépenses sont dans
-  l'interface et dans un journal.
+- **Everything is denied by default.** An agent reads, writes and runs only what its permissions
+  spell out: directories, commands with their allowed arguments, models, a budget.
+- **A child never has more permissions than its parent.** Permissions only shrink going down the
+  tree, and every tool call is checked again by the program, whatever the model asks for.
+- **Model keys stay with the master.** Other agents go through it: none of them has a key to
+  steal, and each one is metered (tokens, calls).
+- **The master cannot grant itself powers.** Its commands and roles come from packs that you
+  install yourself, verified by hash at every start and at every launch.
+- **Everything is visible.** The agent tree, their permissions, their exchanges and their
+  spending are in the interface and in a journal.
 
-## Comment ça marche
+## How it works
 
 ```mermaid
 flowchart TD
-    V([Vous : navigateur, ligne de commande, API]) -->|HTTPS + jeton| M
-    M["Maître (niveau 0)<br/>clés des modèles, API, interface, journal"]
-    M -->|lien chiffré| A["Agent collecteur<br/>lit le web, écrit dans un dossier"]
-    M -->|lien chiffré| B["Agent rédacteur<br/>lit ce dossier, écrit un rapport"]
-    M -->|ssh ou conteneur| C["Agent sur une autre machine"]
-    A --> A1["Sous-agent<br/>droits encore réduits"]
-    M -.->|appels aux modèles| F[(Fournisseurs de modèles)]
+    V([You: browser, command line, API]) -->|HTTPS + token| M
+    M["Master (level 0)<br/>model keys, API, interface, journal"]
+    M -->|encrypted link| A["Collector agent<br/>reads the web, writes to one directory"]
+    M -->|encrypted link| B["Writer agent<br/>reads that directory, writes a report"]
+    M -->|ssh or container| C["Agent on another machine"]
+    A --> A1["Sub-agent<br/>permissions reduced further"]
+    M -.->|model calls| F[(Model providers)]
 ```
 
-1. **Vous parlez au maître**, dans l'interface web, en ligne de commande ou par l'API.
-2. **Le maître décide de déléguer** : il crée un agent avec un rôle, une mission, un critère de
-   réussite mesurable, un modèle, un budget et des droits pris dans les siens.
-3. **L'agent travaille seul** avec ses outils (lire, écrire, lancer une commande permise, créer
-   ses propres enfants s'il en a le droit) et ne parle qu'à son parent.
-4. **Il rend compte** : mission réussie ou non, avec la preuve. Le parent vérifie, relance,
-   arrête, ou conclut à son tour.
-5. **Vous suivez et vous arrêtez** ce que vous voulez, à tout moment.
+1. **You talk to the master**, in the web interface, on the command line or through the API.
+2. **The master decides to delegate**: it creates an agent with a role, a mission, a measurable
+   success criterion, a model, a budget and permissions taken from its own.
+3. **The agent works alone** with its tools (read, write, run an allowed command, create its own
+   children if permitted) and only talks to its parent.
+4. **It reports**: mission accomplished or not, with the evidence. The parent checks, retries,
+   stops, or concludes in turn.
+5. **You watch, and stop** whatever you want, at any time.
 
-Un agent peut tourner sur la machine du maître, dans un conteneur Docker (lecture seule, sans
-capacité, sans réseau si vous le voulez) ou sur une autre machine par `ssh`. Les modèles viennent
-d'un catalogue de fournisseurs embarqué (Anthropic, OpenAI, Mistral, OVHcloud, Scaleway, Gemini,
-OpenRouter… avec leur pays et leur niveau de confiance), ou de votre abonnement Claude par la
-commande officielle `claude`.
+An agent can run on the master's machine, in a Docker container (read-only, no capabilities, no
+network if you wish) or on another machine through `ssh`. Models come from an embedded provider
+catalogue (Anthropic, OpenAI, Mistral, OVHcloud, Scaleway, Gemini, OpenRouter… with their country
+and trust level), or from your Claude subscription through the official `claude` command.
 
-## À quoi ça sert
+## What it is for
 
-Quelques usages visés ; les deux premiers ont été essayés, les autres sont ce pour quoi l'outil
-est conçu.
+A few intended uses; the first two have been tried, the others are what the tool is designed for.
 
-- **Veille et tenue à jour d'un document.** Trois agents (collecteur, rédacteur, vérificateur)
-  relèvent sur le web les modèles et les prix des fournisseurs et proposent une mise à jour du
-  catalogue : c'est l'exemple fourni, [`examples/catalogue`](examples/catalogue).
-- **Lire le web avec un vrai navigateur**, dans un conteneur à part, sur une liste de sites
-  permise.
-- **Audit puis correction, séparés.** Un agent diagnostique une machine en lecture seule et rend
-  compte ; son parent décide ensuite d'envoyer un agent correcteur, avec d'autres droits.
-- **Tâches planifiées.** Une mission relancée chaque jour ou chaque semaine (page « Tâches »).
-- **Agents permanents.** Un agent qui revient avec sa mémoire à chaque redémarrage du maître.
-- **Équipe pour une mission longue**, où chaque agent a un modèle à sa mesure : un petit modèle
-  pour collecter, un grand pour vérifier.
+- **Watching a topic and keeping a document up to date.** Three agents (collector, writer,
+  checker) gather provider models and prices from the web and propose a catalogue update: this
+  is the bundled example, [`examples/catalogue`](examples/catalogue).
+- **Reading the web with a real browser**, in a separate container, on an allowed list of sites.
+- **Audit, then fix, kept apart.** One agent diagnoses a machine read-only and reports; its
+  parent then decides whether to send a fixing agent, with different permissions.
+- **Scheduled tasks.** A mission run again every day or every week ("Tasks" page).
+- **Permanent agents.** An agent that comes back with its memory every time the master restarts.
+- **A team for a long mission**, where each agent gets a model that fits: a small model to
+  collect, a large one to verify.
 
-Ce que ce n'est pas : un assistant personnel (voir
-[Talixio AI Assistant](https://github.com/fredolier/talixio-ai-assistant)), ni un bac à sable
-complet. Le cloisonnement entre agents d'un même compte est fait par le programme, pas encore
-par le système : voir les limites.
+What it is not: a personal assistant (see
+[Talixio AI Assistant](https://github.com/fredolier/talixio-ai-assistant)), nor a complete
+sandbox. Isolation between agents of the same account is enforced by the program, not yet by the
+operating system: see the limitations.
 
-## Démarrer en cinq minutes
+## Five-minute start
 
-Avec Docker, sans rien installer d'autre et sans clé de modèle :
+With Docker, nothing else to install and no model key:
 
 ```bash
 git clone https://github.com/fredolier/talixio-ai-agent-network && cd talixio-ai-agent-network
@@ -107,50 +97,51 @@ git clone https://github.com/fredolier/talixio-ai-agent-network && cd talixio-ai
 ./tools.sh token
 ```
 
-Ouvrez `https://127.0.0.1:7700` (le certificat est fabriqué par le maître : le navigateur demande
-confirmation), entrez le jeton, connectez un fournisseur dans « Fournisseurs » (OVHcloud se
-connecte sans clé, pour essayer), activez un modèle dans « Modèles », puis parlez au maître dans
-« Dialogue ». La suite de cette page détaille chaque mode.
+Open `https://127.0.0.1:7700` (the certificate is made by the master: the browser asks for
+confirmation), enter the token, connect a provider under "Providers" (OVHcloud connects without a
+key, enough to try), enable a model under "Models", then talk to the master under
+"Conversation". The rest of this page details each mode.
 
-## Sommaire
+## Contents
 
-- [Installer](#installer) · [Dans Docker](#dans-docker) · [Paquets : commandes et rôles](#paquets--commandes-et-rôles) · [En service](#en-service)
-- [Compiler](#compiler) · [Lancer le maître](#lancer-le-maître) · [Piloter](#piloter) · [Tester](#tester)
-- [Limites actuelles](#limites-actuelles) · [Documentation](#documentation) · [Contribuer](#contribuer) · [Sécurité](#sécurité) · [Licence](#licence)
+- [Install](#install) · [In Docker](#in-docker) · [Packs: commands and roles](#packs-commands-and-roles) · [As a service](#as-a-service)
+- [Build](#build) · [Run the master](#run-the-master) · [Operate](#operate) · [Test](#test)
+- [Current limitations](#current-limitations) · [Documentation](#documentation) · [Contributing](#contributing) · [Security](#security) · [License](#license)
 
-## Installer
+## Install
 
-Un exécutable par système est publié à chaque version (Linux et macOS, x86_64 et ARM ; Windows
-x86_64), avec ses empreintes. Une ligne suffit ; rien n'est lancé et rien ne demande root.
+One binary per system is published with each version (Linux and macOS, x86_64 and ARM; Windows
+x86_64), with its checksums. One line is enough; nothing is started and nothing needs root.
 
-Linux et macOS :
+Linux and macOS:
 
 ```bash
 curl -fsSL https://github.com/fredolier/talixio-ai-agent-network/releases/latest/download/install.sh | sh
 ```
 
-Windows (PowerShell) :
+Windows (PowerShell):
 
 ```powershell
 irm https://github.com/fredolier/talixio-ai-agent-network/releases/latest/download/install.ps1 | iex
 ```
 
-Le script télécharge l'exécutable de la machine, vérifie son empreinte SHA-256 et le pose dans
-`~/.local/bin` (Windows : `%LOCALAPPDATA%\Talixio`). `TALIXIO_VERSION=0.10.0` choisit une version,
-`TALIXIO_INSTALL_DIR` un autre dossier. On peut aussi télécharger le fichier à la main depuis la
-page des versions du dépôt. L'empreinte vient du même endroit que l'exécutable : elle protège
-d'un téléchargement abîmé, pas d'un dépôt compromis.
+The script downloads the binary for the machine, checks its SHA-256 checksum and puts it in
+`~/.local/bin` (Windows: `%LOCALAPPDATA%\Talixio`). `TALIXIO_VERSION=0.10.0` picks a version,
+`TALIXIO_INSTALL_DIR` another directory. You can also download the file by hand from the
+repository's releases page. The checksum comes from the same place as the binary: it protects
+against a damaged download, not against a compromised repository.
 
-## Dans Docker
+## In Docker
 
-Pour essayer sans rien installer et sans risque pour la machine : une image qui ne contient que
-l'exécutable (6,5 Mo), sans système ni shell, où le maître tourne sous un compte sans droit.
+To try it with nothing to install and no risk for the machine: an image that contains only the
+binary (6.5 MB), with no system and no shell, where the master runs under an unprivileged
+account.
 
-Le plus court, depuis le dépôt : `./tools.sh up` construit l'image et lance le maître,
-`./tools.sh token` affiche le jeton de l'interface (tiré au hasard, gardé hors du dépôt dans
-`~/.config/talixio/`), `./tools.sh up claude` fait de même avec votre abonnement Claude (voir plus
-bas), `./tools.sh logs`, `status` et `stop` font le reste. Les commandes qu'il lance sont celles
-qui suivent, à la main :
+The shortest way, from the repository: `./tools.sh up` builds the image and starts the master,
+`./tools.sh token` prints the interface token (drawn at random, kept outside the repository in
+`~/.config/talixio/`), `./tools.sh up claude` does the same with your Claude subscription (see
+below), `./tools.sh logs`, `status` and `stop` do the rest. The commands it runs are the
+following, by hand:
 
 ```bash
 docker build -t talixio-agent .
@@ -164,20 +155,20 @@ export TALIXIO_API_TOKEN="$(openssl rand -hex 32)"; echo "$TALIXIO_API_TOKEN"
 docker run -d --name talixio -p 127.0.0.1:7700:7700 -v talixio-data:/data --cap-drop ALL --security-opt no-new-privileges --pids-limit 256 --memory 1g -e TALIXIO_API_TOKEN talixio-agent
 ```
 
-La deuxième commande tire le jeton de l'interface au hasard et l'affiche : gardez-le. Un jeton
-faible ou recopié d'un exemple est refusé. Aucune clé de modèle n'est demandée pour démarrer.
+The second command draws the interface token at random and prints it: keep it. A weak token, or
+one copied from an example, is refused. No model key is needed to start.
 
-Puis ouvrez `https://127.0.0.1:7700` (le certificat est fabriqué par le maître : le navigateur
-demande confirmation) et entrez votre jeton. Dans « Fournisseurs », connectez le vôtre ; dans
-« Modèles », activez un modèle de texte : le premier activé devient celui du maître, et
-« Donner au maître » en change. Les agents ne lisent et n'écrivent que dans `/data/work`, et
-aucune commande ne leur est permise. Pour d'autres droits, montez votre configuration :
-`-v /chemin/talixio.toml:/config/talixio.toml:ro` (modèle : `docker/talixio.toml`).
+Then open `https://127.0.0.1:7700` (the certificate is made by the master: the browser asks for
+confirmation) and enter your token. Under "Providers", connect yours; under "Models", enable a
+text model: the first one enabled becomes the master's, and "Give to the master" changes it.
+Agents only read and write in `/data/work`, and no command is allowed to them. For other
+permissions, mount your configuration: `-v /path/talixio.toml:/config/talixio.toml:ro`
+(template: `docker/talixio.toml`).
 
-### Avec votre abonnement Claude
+### With your Claude subscription
 
-L'image ci-dessus est vide : elle ne peut pas héberger la commande `claude`. Une seconde image
-l'ajoute, pour servir des modèles avec un abonnement Claude (Pro, Max) plutôt qu'une clé d'API :
+The image above is empty: it cannot host the `claude` command. A second image adds it, to serve
+models with a Claude subscription (Pro, Max) rather than an API key:
 
 ```bash
 docker build -f docker/Dockerfile.claude -t talixio-agent:claude .
@@ -187,25 +178,25 @@ docker build -f docker/Dockerfile.claude -t talixio-agent:claude .
 docker run -d --name talixio -p 127.0.0.1:7700:7700 -v talixio-data:/data --cap-drop ALL --security-opt no-new-privileges --pids-limit 512 --memory 3g -e TALIXIO_API_TOKEN talixio-agent:claude
 ```
 
-Puis connectez `claude` à votre abonnement, une fois (`./tools.sh login` fait la même chose) :
+Then connect `claude` to your subscription, once (`./tools.sh login` does the same):
 
 ```bash
 docker exec -it talixio claude auth login
 ```
 
-`claude` affiche un lien : ouvrez-le, connectez-vous chez Anthropic, recollez le code. Il garde
-sa connexion dans le volume (`/data/.claude`, interdit aux agents) : elle survit aux mises à jour
-du conteneur. Autre voie, sans cette étape : tirer un jeton sur votre poste avec
-`claude setup-token` et le passer au lancement (`-e CLAUDE_CODE_OAUTH_TOKEN`).
+`claude` prints a link: open it, sign in at Anthropic, paste the code back. It keeps its session
+in the volume (`/data/.claude`, off limits to agents): it survives container updates. Another
+way, without this step: draw a token on your workstation with `claude setup-token` and pass it
+at launch (`-e CLAUDE_CODE_OAUTH_TOKEN`).
 
-Dans « Fournisseurs », « Claude (abonnement) », « Connecter » ; puis activez Opus, Sonnet ou
-Haiku dans « Modèles ». Le maître lance la commande `claude` telle quelle : il ne lit ni ne
-garde votre jeton, et n'appelle pas l'API d'Anthropic lui-même. Les outils intégrés de `claude`
-sont coupés : il n'a que ceux de l'agent, dont chaque appel repasse par les contrôles de droits.
-L'usage compte dans les limites de votre abonnement, aux conditions d'Anthropic pour un usage
-personnel ; elles ont changé plusieurs fois en 2026, vérifiez-les. Hors Docker, il suffit que
-`claude` soit installé et connecté sous le compte du maître. « Anthropic » (clé d'API) reste
-disponible à côté : les deux peuvent servir en même temps.
+Under "Providers", "Claude (subscription)", "Connect"; then enable Opus, Sonnet or Haiku under
+"Models". The master runs the `claude` command as it is: it neither reads nor keeps your token,
+and does not call Anthropic's API itself. The built-in tools of `claude` are switched off: it
+only has the agent's tools, each call of which goes through the permission checks again. Usage
+counts against your subscription limits, under Anthropic's terms for personal use; they changed
+several times in 2026, check them. Outside Docker, `claude` only needs to be installed and
+signed in under the master's account. "Anthropic" (API key) remains available alongside: both
+can be used at the same time.
 
 ```bash
 docker logs talixio
@@ -215,11 +206,11 @@ docker logs talixio
 docker rm -f talixio
 ```
 
-## Paquets : commandes et rôles
+## Packs: commands and roles
 
-Un paquet donne au maître des commandes (des scripts, avec leurs arguments permis) et des rôles
-(des consignes toutes faites pour un agent). C'est vous qui les installez ; le maître ne peut ni
-s'en ajouter ni les modifier, et il vérifie leurs empreintes à chaque démarrage.
+A pack gives the master commands (scripts, with their allowed arguments) and roles (ready-made
+instructions for an agent). You install them; the master can neither add nor modify them, and it
+verifies their hashes at every start.
 
 ```bash
 ./tools.sh pack list
@@ -237,74 +228,74 @@ s'en ajouter ni les modifier, et il vérifie leurs empreintes à chaque démarra
 ./tools.sh run claude
 ```
 
-Hors de Docker : le plus simple est le compte dédié (voir « En service »), après quoi
-`sudo talixio-agent pack install catalogue` suffit. À la main : `talixio-agent pack install
-catalogue --dir /opt/talixio/packs` sous un autre compte que celui du maître, et
-`packs_dir = "/opt/talixio/packs"` dans `talixio.toml`. Voir `examples/catalogue`.
+Outside Docker: the simplest is the dedicated account (see "As a service"), after which
+`sudo talixio-agent pack install catalogue` is enough. By hand: `talixio-agent pack install
+catalogue --dir /opt/talixio/packs` under an account other than the master's, and
+`packs_dir = "/opt/talixio/packs"` in `talixio.toml`. See `examples/catalogue`.
 
-Après une mise à jour du dépôt (`git pull`), reconstruisez l'image : `./tools.sh build claude`.
-`tools.sh` s'arrête et le dit si l'image est plus ancienne que le dépôt.
+After updating the repository (`git pull`), rebuild the image: `./tools.sh build claude`.
+`tools.sh` stops and says so when the image is older than the repository.
 
-Pour parcourir plutôt que taper : `./tools.sh pack tui` (ou `talixio-agent pack tui`). La liste
-à gauche, ce que le paquet donnerait à droite ; `i` installe, `r` retire, `v` vérifie, `q` quitte.
+To browse rather than type: `./tools.sh pack tui` (or `talixio-agent pack tui`). The list on the
+left, what the pack would grant on the right; `i` installs, `r` removes, `v` verifies, `q` quits.
 
-### Dépôt de paquets
+### Pack repository
 
-Des paquets peuvent venir d'un dépôt : un dossier de fichiers derrière https, dont l'index est
-signé. Rien n'est lu sans la clé publique de son éditeur, et l'hébergeur ne peut rien y changer.
+Packs can come from a repository: a directory of files behind https, whose index is signed.
+Nothing is read without its publisher's public key, and the host cannot change anything in it.
 
 ```bash
-talixio-agent pack list --depot https://exemple.fr/paquets --key <clé publique>
+talixio-agent pack list --depot https://example.org/packs --key <public key>
 ```
 
 ```bash
-sudo talixio-agent pack install <nom> --depot https://exemple.fr/paquets --key <clé publique>
+sudo talixio-agent pack install <name> --depot https://example.org/packs --key <public key>
 ```
 
-Publier les vôtres (la clé privée reste chez vous, hors du serveur) :
+Publishing your own (the private key stays with you, off the server):
 
 ```bash
-talixio-agent pack keygen --out ma-cle
+talixio-agent pack keygen --out my-key
 ```
 
 ```bash
-talixio-agent pack publish --from mes-paquets --out depot --key-file ma-cle
+talixio-agent pack publish --from my-packs --out depot --key-file my-key
 ```
 
-Le dossier `depot` se dépose tel quel sur un serveur de fichiers. Il n'y a pas encore de dépôt
-officiel Talixio.
+The `depot` directory is uploaded as it is to any file server. There is no official Talixio
+repository yet.
 
-## En service
+## As a service
 
-Pour que le maître reparte seul au démarrage de la machine et après une panne, depuis le dossier
-où se trouve `talixio.toml` :
+To have the master start again on its own when the machine boots and after a failure, from the
+directory that holds `talixio.toml`:
 
 ```bash
 talixio-agent service install --config talixio.toml
 ```
 
-Linux : unité systemd de votre compte. macOS : agent launchd. Windows : tâche planifiée à
-l'ouverture de session. `--print` montre ce qui serait fait sans rien faire ; `service status` et
-`service uninstall` font le reste. Un service n'hérite pas des variables de votre terminal :
-donnez les clés par `api_key_file`, depuis l'interface, ou sous Linux par `--env-file`.
+Linux: a systemd unit of your account. macOS: a launchd agent. Windows: a scheduled task at
+logon. `--print` shows what would be done without doing it; `service status` and
+`service uninstall` do the rest. A service does not inherit your terminal's variables: give the
+keys through `api_key_file`, from the interface, or on Linux through `--env-file`.
 
-### Compte dédié (Linux, recommandé)
+### Dedicated account (Linux, recommended)
 
 ```bash
 sudo talixio-agent service install --config talixio.toml
 ```
 
-En root, la commande met tout en place pour que le maître ne puisse modifier ni son exécutable,
-ni sa configuration, ni ses paquets :
+As root, the command sets everything up so that the master can modify neither its binary, nor
+its configuration, nor its packs:
 
-| Quoi | Où | À qui |
+| What | Where | Owner |
 |---|---|---|
-| exécutable | `/opt/talixio/talixio-agent` | root |
-| paquets (commandes, rôles) | `/opt/talixio/packs` | root |
-| configuration | `/etc/talixio/talixio.toml` | root (lisible par le compte) |
-| état, clés saisies dans l'interface, travail | `/var/lib/talixio` | `talixio-agent` |
+| binary | `/opt/talixio/talixio-agent` | root |
+| packs (commands, roles) | `/opt/talixio/packs` | root |
+| configuration | `/etc/talixio/talixio.toml` | root (readable by the account) |
+| state, keys entered in the interface, work | `/var/lib/talixio` | `talixio-agent` |
 
-Le compte `talixio-agent` est créé s'il manque, sans mot de passe ni shell. Ensuite :
+The `talixio-agent` account is created if missing, with no password and no shell. Then:
 
 ```bash
 sudo talixio-agent pack install catalogue
@@ -314,29 +305,30 @@ sudo talixio-agent pack install catalogue
 sudo systemctl restart talixio-agent
 ```
 
-Modifier la configuration : `sudo` sur `/etc/talixio/talixio.toml`, puis redémarrer le service
-(`talixio-agent check --config <fichier>` la vérifie sans rien lancer). Le jeton de l'interface :
-`sudo cat /var/lib/talixio/.talixio/api-token`. Les chemins relatifs de la configuration partent
-de `/var/lib/talixio`. Pour faire tourner le maître sous un compte à vous, là où sont ses
-fichiers : `sudo talixio-agent service install --user <compte>` (jamais root).
+Changing the configuration: `sudo` on `/etc/talixio/talixio.toml`, then restart the service
+(`talixio-agent check --config <file>` verifies it without starting anything). The interface
+token: `sudo cat /var/lib/talixio/.talixio/api-token`. Relative paths in the configuration start
+from `/var/lib/talixio`. To run the master under an account of yours, where its files are:
+`sudo talixio-agent service install --user <account>` (never root).
 
-Au redémarrage, le maître retrouve son journal, sa mémoire, ses fournisseurs, et ses agents
-**permanents** : demandez-lui de créer un agent « permanent », il le recrée à chaque démarrage
-avec sa mémoire, jusqu'à ce que vous l'arrêtiez. Les agents ordinaires ne reviennent pas.
+On restart, the master finds its journal, its memory, its providers, and its **permanent**
+agents again: ask it to create a "permanent" agent, and it recreates it at every start with its
+memory, until you stop it. Ordinary agents do not come back.
 
-## Compiler
+## Build
 
 ```bash
 cargo build --release
 ```
 
-L'exécutable est `target/release/talixio-agent`. C'est tout ce qu'il faut déployer, avec un fichier de configuration.
+The binary is `target/release/talixio-agent`. It is all there is to deploy, with a configuration
+file.
 
-### Exécutable statique (recommandé pour déployer)
+### Static binary (recommended for deployment)
 
-Compilé ainsi, l'exécutable ne dépend d'aucune bibliothèque du système : il tourne tel quel sur
-n'importe quelle distribution Linux du même processeur, et dans n'importe quelle image Docker,
-même vide. C'est la version à utiliser dès que le maître déploie des agents ailleurs.
+Built this way, the binary depends on no system library: it runs as it is on any Linux
+distribution with the same processor, and in any Docker image, even an empty one. This is the
+version to use as soon as the master deploys agents elsewhere.
 
 ```bash
 sudo apt-get install -y musl-tools
@@ -350,9 +342,9 @@ rustup target add x86_64-unknown-linux-musl
 cargo build --release --target x86_64-unknown-linux-musl
 ```
 
-L'exécutable est alors `target/x86_64-unknown-linux-musl/release/talixio-agent` (5,3 Mo).
+The binary is then `target/x86_64-unknown-linux-musl/release/talixio-agent` (5.3 MB).
 
-## Lancer le maître
+## Run the master
 
 ```bash
 cp talixio.example.toml talixio.toml
@@ -362,43 +354,44 @@ cp talixio.example.toml talixio.toml
 ANTHROPIC_API_KEY=... target/release/talixio-agent root --config talixio.toml
 ```
 
-## Piloter
+## Operate
 
-### Dans un navigateur
+### In a browser
 
-Ouvrir l'adresse du maître (`https://127.0.0.1:7700/` par défaut) et saisir le jeton de l'API
-(`.talixio/api-token`). Sur un téléphone, la page s'installe comme une application.
+Open the master's address (`https://127.0.0.1:7700/` by default) and enter the API token
+(`.talixio/api-token`). On a phone, the page installs like an application. The interface is
+available in English and French: it follows the browser's language, and the selector at the
+bottom of the menu changes it. (The screenshots below show the French interface.)
 
-![La grappe](docs/images/interface-grappe.png)
+![The cluster](docs/images/interface-grappe.png)
 
-L'écran « Commandes » montre ce que le maître a le droit d'exécuter et à qui il l'a confié ;
-« Rôles » montre les agents créés.
+The "Commands" screen shows what the master is allowed to run and whom it entrusted it to;
+"Roles" shows the agents created.
 
-![Les commandes](docs/images/interface-commandes.png)
+![The commands](docs/images/interface-commandes.png)
 
-« Fournisseurs » liste tous les fournisseurs du catalogue embarqué (`catalog.toml`) : pays,
-Europe ou non, niveau de confiance, connecté ou non. « Modèles » liste leurs modèles avec leur
-qualité et leur prix indicatif, et dit lesquels sont activés chez le maître.
+"Providers" lists every provider of the embedded catalogue (`catalog.toml`): country, in Europe
+or not, trust level, connected or not. "Models" lists their models with their quality and
+indicative price, and says which ones are enabled on the master.
 
-On se connecte depuis la page : dans « Fournisseurs », choisissez un fournisseur, collez votre clé
-(un lien mène à la page où la créer), « Connecter ». Le maître essaie la clé, la range dans un
-fichier que seul son compte peut lire (`<state_dir>/keys/`), et ne la rend plus jamais. Dans
-« Modèles », « Activer » rend un modèle utilisable aussitôt, sans redémarrage. OpenRouter se
-connecte par autorisation dans le navigateur ; OVHcloud se connecte aussi sans clé (« Connecter
-sans clé » : anonyme, limites basses, de quoi essayer) ; les autres (OpenAI, Anthropic, Gemini, Mistral,
-OVHcloud, AKI.IO, Scaleway, ElevenLabs, DeepSeek) par clé. Le maître lui-même reçoit son
-modèle de la même façon : sans `model` dans `talixio.toml`, il démarre sans modèle ni clé, prend
-le premier modèle de texte activé, et « Donner au maître » lui en donne un autre. Déclarer les
-modèles dans `talixio.toml` reste possible ; un `model` écrit là ne se change pas depuis la page.
+You connect from the page: under "Providers", pick a provider, paste your key (a link leads to
+the page where you create it), "Connect". The master tries the key, stores it in a file only its
+account can read (`<state_dir>/keys/`), and never gives it back. Under "Models", "Enable" makes
+a model usable at once, without a restart. OpenRouter connects through an authorization in the
+browser; OVHcloud also connects without a key ("Connect without a key": anonymous, low limits,
+enough to try); the others (OpenAI, Anthropic, Gemini, Mistral, OVHcloud, AKI.IO, Scaleway,
+ElevenLabs, DeepSeek) with a key. The master itself receives its model the same way: without
+`model` in `talixio.toml`, it starts with no model and no key, takes the first text model
+enabled, and "Give to the master" gives it another. Declaring models in `talixio.toml` remains
+possible; a `model` written there cannot be changed from the page.
 
-![Les fournisseurs](docs/images/interface-fournisseurs.png)
+![The providers](docs/images/interface-fournisseurs.png)
 
-### Voix, image, prévision, décision
+### Voice, image, forecast, decision
 
-Un agent peut aussi transcrire un son, lire un texte à voix haute, créer ou décrire une image,
-chercher dans sa mémoire par le sens, prévoir la suite d'une série ou poser des questions fermées
-à un modèle de décision. Ces modèles se déclarent chez le maître avec leur `nature`, et se
-comptent en appels :
+An agent can also transcribe audio, read a text aloud, create or describe an image, search its
+memory by meaning, forecast the continuation of a series or put closed questions to a decision
+model. These models are declared on the master with their `nature`, and are counted in calls:
 
 ```toml
 [models.oreille]
@@ -412,24 +405,27 @@ api_key_file = "/etc/talixio/mistral.key"
 transcription = 200
 ```
 
-Comme pour le texte, la clé reste chez le maître et un enfant n'obtient un modèle de service et
-un nombre d'appels que si son parent les lui confie, dans la limite des siens. Sans ligne dans
-`max_calls`, aucun appel n'est permis. Toutes les natures et leurs fournisseurs :
-`talixio.example.toml`.
+As with text, the key stays with the master, and a child only gets a service model and a number
+of calls if its parent entrusts them to it, within its own limits. Without a line in
+`max_calls`, no call is allowed. All natures and their providers: `talixio.example.toml`.
 
-L'interface (`web/`) est faite avec React et shadcn/ui. Son résultat construit, `web/dist/`, est
-au dépôt : `cargo build` suffit. Pour la modifier :
+The interface (`web/`) is built with React and shadcn/ui. Its build output, `web/dist/`, is in
+the repository: `cargo build` is enough. To change it:
 
 ```bash
 cd web && npm ci && npm run build
 ```
 
-### En ligne de commande
+Its texts are written in English in the code; the French translation is in
+`web/src/locales/fr/`, and the build fails if a text has no translation.
 
-Depuis le dossier du maître (le jeton de l'API et l'empreinte de son certificat sont lus dans `.talixio/`) :
+### On the command line
+
+From the master's directory (the API token and its certificate fingerprint are read from
+`.talixio/`):
 
 ```bash
-talixio-agent send "Audite le dossier /srv/projet et dis-moi ce qui cloche."
+talixio-agent send "Audit the /srv/project directory and tell me what is wrong."
 ```
 
 ```bash
@@ -441,74 +437,74 @@ talixio-agent tree
 ```
 
 ```bash
-talixio-agent stop <identifiant>
+talixio-agent stop <id>
 ```
 
-Ce qui a changé de version en version :
+What changed from version to version:
 
 ```bash
 talixio-agent releases
 ```
 
-L'API JSON est décrite dans la spécification.
+The JSON API is described in [docs/DESIGN.md](docs/DESIGN.md).
 
-## Tester
+## Test
 
 ```bash
 cargo test
 ```
 
-## Limites actuelles
+## Current limitations
 
-- **Projet jeune, peu éprouvé hors de ses tests.** Les essais réels à ce jour : un maître dans
-  Docker avec l'abonnement Claude et avec OVHcloud, l'exemple « catalogue » à trois agents, des
-  agents lancés dans des conteneurs voisins. Le reste est couvert par des tests automatiques.
-- **Le cloisonnement entre agents d'un même compte est fait par le programme, pas encore par le
-  système d'exploitation** : une commande autorisée s'exécute avec tous les droits du compte.
-  N'autorisez que des commandes écrites au plus serré, et faites tourner le maître sous le compte
-  dédié ou dans un conteneur (voir la spécification, §7).
-- **Pas encore essayé en conditions réelles** : le déploiement par `ssh` sur une vraie machine
-  (testé avec un faux `ssh`) ; le service sous un vrai systemd, launchd ou Windows ; un poste
-  Windows ou macOS réel (l'intégration continue y passe) ; un dépôt de paquets servi en https ;
-  les modèles de service (voix, image, prévision, décision) chez un vrai fournisseur.
-- **Une cible distante doit avoir le même processeur que le maître** ; avec l'exécutable
-  statique, la distribution n'a plus d'importance.
-- **Pas de dépôt officiel de paquets** pour l'instant : seuls ceux de l'exécutable, les vôtres,
-  ou ceux d'un éditeur dont vous avez la clé publique.
-- **Documentation en français** seulement.
+- **Young project, little proven outside its tests.** Real trials so far: a master in Docker
+  with the Claude subscription and with OVHcloud, the three-agent "catalogue" example, agents
+  started in neighbouring containers. The rest is covered by automated tests.
+- **Isolation between agents of the same account is enforced by the program, not yet by the
+  operating system**: an allowed command runs with all the rights of the account. Only allow
+  commands written as tightly as possible, and run the master under the dedicated account or in
+  a container (see [docs/DESIGN.md](docs/DESIGN.md)).
+- **Not yet tried in real conditions**: deployment through `ssh` on a real machine (tested with
+  a fake `ssh`); the service under a real systemd, launchd or Windows; a real Windows or macOS
+  workstation (continuous integration runs there); a pack repository served over https; service
+  models (voice, image, forecast, decision) with a real provider.
+- **A remote target must have the same processor as the master**; with the static binary, the
+  distribution no longer matters.
+- **No official pack repository** for now: only the packs of the binary, your own, or those of
+  a publisher whose public key you hold.
+- **The program's own messages are still in French** (journal, API errors, command line, pack
+  browser, release notes, configuration comments), as are most code comments. The web interface
+  is available in English and French; translating the rest is in progress.
 
 ## Documentation
 
-| Document | Contenu |
+| Document | Content |
 |---|---|
-| [docs/SPEC.md](docs/SPEC.md) | Exigences, décisions d'architecture (numérotées, datées, motivées), questions ouvertes, et le compte rendu de chaque revue de sécurité (§7). |
-| [docs/PLAN.md](docs/PLAN.md) | Tâches, étape en cours, journal de ce qui a été fait. |
-| [docs/EXIGENCES.md](docs/EXIGENCES.md) | Chaque demande, sa source, et l'état de ses critères. |
-| [docs/VERIFICATION.md](docs/VERIFICATION.md) | Une vérification indépendante des exigences. |
-| [talixio.example.toml](talixio.example.toml) | La configuration du maître, commentée. |
-| [examples/catalogue](examples/catalogue) | Un exemple complet à trois agents. |
-| `talixio-agent releases` | Les notes de version ([releases.toml](releases.toml)), aussi dans l'interface. |
+| [docs/DESIGN.md](docs/DESIGN.md) | Architecture, security model, design decisions, security reviews, HTTP API, known limitations. |
+| [talixio.example.toml](talixio.example.toml) | The master's configuration, commented (in French for now). |
+| [examples/catalogue](examples/catalogue) | A complete three-agent example. |
+| `talixio-agent releases` | The release notes ([releases.toml](releases.toml)), also in the interface. |
+| [README.fr.md](README.fr.md) | This page in French. |
 
-## Contribuer
+## Contributing
 
-Les rapports de bogue, les questions et les propositions sont bienvenus : voir
-[CONTRIBUTING.md](CONTRIBUTING.md). En bref : `cargo test` et `cargo clippy --all-targets` doivent
-passer, la documentation suit le code dans le même changement, et toute nouvelle surface (outil,
-route, mode de déploiement) passe par une revue de sécurité.
+Bug reports, questions and proposals are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). In
+short: `cargo test` and `cargo clippy --all-targets` must pass, documentation follows the code
+in the same change, and any new surface (tool, route, deployment mode) goes through a security
+review.
 
-## Sécurité
+## Security
 
-Une faille ne se signale pas dans un ticket public : voir [SECURITY.md](SECURITY.md). Ce contre
-quoi le projet se défend, ses limites connues et le détail des quinze revues de sécurité déjà
-faites sont dans [docs/SPEC.md](docs/SPEC.md), §7.
+A vulnerability is not reported in a public issue: see [SECURITY.md](SECURITY.md). What the
+project defends against, its known limits and the outcome of the fifteen security reviews done
+so far are in [docs/DESIGN.md](docs/DESIGN.md).
 
-## Licence
+## License
 
-Copyright (C) 2026 Talixio. Ce programme est un logiciel libre : vous pouvez le redistribuer et le
-modifier selon les termes de la GNU Affero General Public License, version 3 (`AGPL-3.0-only`),
-dans [`LICENSE`](LICENSE). Il est fourni sans aucune garantie. Si vous faites tourner une version
-modifiée pour d'autres personnes à travers un réseau, vous devez leur en offrir le code source.
+Copyright (C) 2026 Talixio. This program is free software: you can redistribute it and modify it
+under the terms of the GNU Affero General Public License, version 3 (`AGPL-3.0-only`), in
+[`LICENSE`](LICENSE). It comes with no warranty. If you run a modified version for other people
+over a network, you must offer them its source code.
 
-L'interface embarque les polices Instrument Sans et JetBrains Mono, sous licence SIL Open Font
-License 1.1. Les bibliothèques Rust et JavaScript employées gardent leurs propres licences
-(MIT, Apache-2.0, BSD, ISC pour l'essentiel), listées dans `Cargo.lock` et `web/package-lock.json`.
+The interface embeds the Instrument Sans and JetBrains Mono fonts, under the SIL Open Font
+License 1.1. The Rust and JavaScript libraries used keep their own licenses (mostly MIT,
+Apache-2.0, BSD, ISC), listed in `Cargo.lock` and `web/package-lock.json`.

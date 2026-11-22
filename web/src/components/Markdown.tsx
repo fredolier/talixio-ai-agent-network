@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react'
 
-// Les réponses des modèles sont écrites en Markdown. On en rend l'essentiel (titres, listes,
-// gras, italique, code) en éléments React : le texte reste du texte, aucun HTML venu du modèle
-// n'est interprété, aucun lien n'est rendu cliquable.
+// Model answers are written in Markdown. We render the essentials (headings, lists, bold,
+// italic, code) as React elements: text stays text, no HTML coming from the model is
+// interpreted, no link is made clickable.
 
 const INLINE = /(`[^`\n]+`|\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\s][^*\n]*\*)/
 
@@ -34,7 +34,7 @@ export function Markdown({ text }: { text: string }) {
       i++
       continue
     }
-    // bloc de code
+    // code block
     const fence = line.match(/^\s*(```|~~~)/)
     if (fence) {
       const body: string[] = []
@@ -64,7 +64,7 @@ export function Markdown({ text }: { text: string }) {
       i++
       continue
     }
-    // liste (à puces ou numérotée), avec les lignes de suite indentées
+    // list (bulleted or numbered), with indented continuation lines
     const bullet = /^\s*([-*+]|\d+[.)])\s+(.*)$/
     const first = line.match(bullet)
     if (first) {
@@ -101,12 +101,12 @@ export function Markdown({ text }: { text: string }) {
       )
       continue
     }
-    // paragraphe : jusqu'à la ligne vide ou au bloc suivant
+    // paragraph: up to the empty line or the next block
     const paragraph: string[] = []
     while (i < lines.length && lines[i].trim() && !/^\s*(```|~~~|#{1,6}\s|>)/.test(lines[i]) && !(paragraph.length && bullet.test(lines[i]))) {
       paragraph.push(lines[i++])
     }
-    // quoi qu'il arrive, on avance : une ligne qu'aucun bloc ne prend est un paragraphe
+    // whatever happens, we move forward: a line no block takes is a paragraph
     if (!paragraph.length) paragraph.push(lines[i++])
     out.push(
       <p key={key()} className="whitespace-pre-wrap">

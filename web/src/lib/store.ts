@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { t } from './i18n'
 import { api, forgetToken, keepToken, savedToken, Unauthorized } from './api'
 import type { ActivityEvent, Agent, InstalledRole, ModelsData, Release, RoleEntry } from './types'
 
 const KEPT = 5000
-/** Le fournisseur dont l'autorisation dans le navigateur est en cours, le temps de l'aller-retour. */
+/** The provider being authorized in the browser, for the time of the round trip. */
 const OAUTH = 'talixio-oauth'
 
 export interface Cluster {
@@ -16,17 +17,17 @@ export interface Cluster {
   installedRoles: InstalledRole[]
   releases: { version: string; releases: Release[] } | null
   refresh: () => void
-  /** Ce que le retour d'une autorisation dans le navigateur a donné. */
+  /** What came back from an authorization in the browser. */
   notice: string | null
-  /** Demande un changement au maître (connexion, activation…), puis relit les modèles. */
+  /** Asks the master for a change (connection, activation…), then reads the models again. */
   change: <T>(path: string, body: unknown) => Promise<T>
-  /** Part chez le fournisseur pour autoriser le maître ; le retour se fait sur cette page. */
+  /** Leaves for the provider to authorize the master; the return lands on this page. */
   authorize: (provider: string) => Promise<void>
   send: (text: string) => Promise<void>
   stop: (id: string) => Promise<void>
 }
 
-/** L'état de la grappe, relu toutes les secondes et demie tant que la page est visible. */
+/** The state of the cluster, read again every second and a half while the page is visible. */
 export function useCluster() {
   const [token, setToken] = useState<string | null>(savedToken)
   const [loginError, setLoginError] = useState<string | null>(null)
@@ -66,7 +67,7 @@ export function useCluster() {
         after.current = log.events[log.events.length - 1].id
         setEvents((old) => [...old, ...log.events].slice(-KEPT))
       }
-      // le répertoire des rôles bouge peu : une lecture sur six
+      // the role directory changes little: one read out of six
       if (round.current++ % 6 === 0) {
         api<{ roles: RoleEntry[]; installed?: InstalledRole[] }>(token, '/api/roles')
           .then((r) => {
@@ -88,9 +89,9 @@ export function useCluster() {
     round.current = 0
     refresh()
     const reload = () => api<Cluster['models']>(token, '/api/models').then(setModels).catch(() => {})
-    // retour d'une autorisation commencée ici : le code part chez le maître et quitte l'adresse
+    // back from an authorization started here: the code goes to the master and leaves the address bar
     const code = new URLSearchParams(location.search).get('code')
-    // la marque ne vaut que dix minutes, comme l'autorisation chez le maître
+    // the mark only holds for ten minutes, like the authorization on the master
     const [pending, since] = (sessionStorage.getItem(OAUTH) ?? '').split(' ')
     const expired = !!pending && Date.now() - Number(since) > 600_000
     if (expired) sessionStorage.removeItem(OAUTH)
@@ -98,8 +99,8 @@ export function useCluster() {
       sessionStorage.removeItem(OAUTH)
       history.replaceState(null, '', `${location.pathname}#fournisseurs`)
       api(token, `/api/providers/${encodeURIComponent(pending)}/oauth/finish`, { code })
-        .then(() => setNotice('Fournisseur connecté. Vous pouvez activer ses modèles.'))
-        .catch((error: Error) => setNotice(`Autorisation non aboutie : ${error.message}`))
+        .then(() => setNotice(t('Provider connected. You can now enable its models.')))
+        .catch((error: Error) => setNotice(t('Authorization did not complete: {error}', { error: error.message })))
         .finally(reload)
     } else reload()
     api<Cluster['releases']>(token, '/api/releases').then(setReleases).catch(() => {})
@@ -119,7 +120,7 @@ export function useCluster() {
       setLoginError(null)
       setToken(candidate)
     } catch (error) {
-      setLoginError(error instanceof Unauthorized ? error.message : 'Maître injoignable.')
+      setLoginError(error instanceof Unauthorized ? error.message : t('Master unreachable.'))
     }
   }, [])
 

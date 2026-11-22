@@ -13,7 +13,8 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import { count, flat, moment, plural, STATUS, targetLabel } from '@/lib/format'
+import { count, flat, moment, statusLabel, targetLabel } from '@/lib/format'
+import { t, tn } from '@/lib/i18n'
 import type { Cluster } from '@/lib/store'
 import type { Agent, Status } from '@/lib/types'
 import { cn, pick } from '@/lib/utils'
@@ -30,9 +31,13 @@ export function TreeView({ cluster }: { cluster: Cluster }) {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        eyebrow="Grappe"
-        title="Les agents, en direct"
-        lead={`${plural(all.length, 'agent')} sur ${plural(machines, 'machine')}. Le maître tourne sur ${cluster.tree.host}.`}
+        eyebrow={t('Cluster')}
+        title={t('The agents, live')}
+        lead={t('{agents} on {machines}. The master runs on {host}.', {
+          agents: tn(all.length, '{n} agent', '{n} agents'),
+          machines: tn(machines, '{n} machine', '{n} machines'),
+          host: cluster.tree.host,
+        })}
       >
         <div className="flex flex-wrap gap-x-4 gap-y-1">
           {[...tally].map(([status, n]) => (
@@ -45,7 +50,7 @@ export function TreeView({ cluster }: { cluster: Cluster }) {
       </PageHeader>
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,400px)]">
-        <ul className="flex flex-col" aria-label="Agents">
+        <ul className="flex flex-col" aria-label={t('Agents')}>
           {all.map((agent) => (
             <AgentRow
               key={agent.id}
@@ -59,8 +64,8 @@ export function TreeView({ cluster }: { cluster: Cluster }) {
           ))}
           {all.length === 1 && (
             <li className="mt-4">
-              <Empty title="Le maître est seul">
-                Demandez-lui, dans le dialogue, de créer un agent : il apparaîtra ici avec les droits qu'il lui aura accordés.
+              <Empty title={t('The master is alone')}>
+                {t('Ask it, in the conversation, to create an agent: it will appear here with the permissions the master granted it.')}
               </Empty>
             </li>
           )}
@@ -74,7 +79,7 @@ export function TreeView({ cluster }: { cluster: Cluster }) {
         <SheetContent side="bottom" className="max-h-[85dvh] overflow-y-auto p-5 lg:hidden">
           <SheetHeader className="sr-only">
             <SheetTitle>{selected.name}</SheetTitle>
-            <SheetDescription>Fiche de l'agent</SheetDescription>
+            <SheetDescription>{t('Agent details')}</SheetDescription>
           </SheetHeader>
           <AgentDetail agent={selected} cluster={cluster} />
         </SheetContent>
@@ -88,7 +93,7 @@ function AgentRow({ agent, selected, onSelect }: { agent: Agent; selected: boole
   const depth = Math.min(agent.depth, 6)
   return (
     <li className="relative flex">
-      {/* le rail de l'arbre : un retrait par niveau, un coude vers l'agent */}
+      {/* the rail of the tree: one indent per level, an elbow towards the agent */}
       {depth > 0 && (
         <span className="flex shrink-0 justify-end" style={{ width: depth * 28 }} aria-hidden>
           <span className="mr-1.5 block h-1/2 w-4 rounded-bl-md border-b border-l border-rail" />
@@ -106,10 +111,10 @@ function AgentRow({ agent, selected, onSelect }: { agent: Agent; selected: boole
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className="font-semibold">{agent.name}</span>
           <StatusMark status={agent.status} />
-          {agent.depth === 0 && <Badge>maître</Badge>}
+          {agent.depth === 0 && <Badge>{t('master')}</Badge>}
           {agent.unverified && (
-            <Badge variant="outline" className="border-st-off/50 text-st-off" title="Ce que cet agent déclare dépasse ce que son parent peut accorder. Ses droits réels restent ceux que son parent lui applique.">
-              déclaration incohérente
+            <Badge variant="outline" className="border-st-off/50 text-st-off" title={t('What this agent declares exceeds what its parent can grant. Its actual permissions remain those its parent enforces.')}>
+              {t('inconsistent declaration')}
             </Badge>
           )}
           <span className="num ml-auto text-xs text-muted-foreground">{agent.model}</span>
@@ -137,11 +142,11 @@ function AgentDetail({ agent, cluster }: { agent: Agent; cluster: Cluster }) {
   const caps = agent.capabilities
   const [confirm, setConfirm] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const list = (items?: string[]) => (items?.length ? items.join(', ') : <span className="text-muted-foreground">aucun</span>)
+  const list = (items?: string[]) => (items?.length ? items.join(', ') : <span className="text-muted-foreground">{t('none')}</span>)
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <p className="eyebrow">{agent.depth === 0 ? 'Agent maître' : `Niveau ${agent.depth}`}</p>
+        <p className="eyebrow">{agent.depth === 0 ? t('Master agent') : t('Level {depth}', { depth: agent.depth })}</p>
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
           <h2 className="text-lg font-semibold tracking-tight">{agent.name}</h2>
           <StatusMark status={agent.status} />
@@ -150,43 +155,47 @@ function AgentDetail({ agent, cluster }: { agent: Agent; cluster: Cluster }) {
       </div>
 
       <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-2.5">
-        <Field label="Modèle" mono>{agent.model}</Field>
-        <Field label="Machine">{agent.host} <span className="text-muted-foreground">({agent.os})</span></Field>
-        <Field label="Adresses" mono>{agent.ips.join(', ') || '—'}</Field>
-        <Field label="Déployé">{targetLabel(agent.target)}</Field>
-        <Field label="Tokens" mono>
+        <Field label={t('Model')} mono>{agent.model}</Field>
+        <Field label={t('Machine')}>{agent.host} <span className="text-muted-foreground">({agent.os})</span></Field>
+        <Field label={t('Addresses')} mono>{agent.ips.join(', ') || '—'}</Field>
+        <Field label={t('Deployed')}>{targetLabel(agent.target)}</Field>
+        <Field label={t('Tokens')} mono>
           {count(agent.tokens_used)}
-          {caps.max_tokens ? ` / ${count(caps.max_tokens)}` : ' (sans plafond)'}
+          {caps.max_tokens ? ` / ${count(caps.max_tokens)}` : ` ${t('(no cap)')}`}
         </Field>
-        <Field label="Depuis">{moment(agent.started_at_ms)}</Field>
-        <Field label="Identifiant" mono>{agent.id}</Field>
+        <Field label={t('Since')}>{moment(agent.started_at_ms)}</Field>
+        <Field label={t('Identifier')} mono>{agent.id}</Field>
       </dl>
 
       <div className="border-t pt-4">
-        <p className="eyebrow">Ce qu'il a le droit de faire</p>
+        <p className="eyebrow">{t('What it is allowed to do')}</p>
         <dl className="mt-3 grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-2.5">
-          <Field label="Lire" mono>{list(caps.fs_read)}</Field>
-          <Field label="Écrire" mono>{list(caps.fs_write)}</Field>
-          <Field label="Modèles" mono>{list(caps.models)}</Field>
-          <Field label="Appels de service">
+          <Field label={t('Read')} mono>{list(caps.fs_read)}</Field>
+          <Field label={t('Write')} mono>{list(caps.fs_write)}</Field>
+          <Field label={t('Models')} mono>{list(caps.models)}</Field>
+          <Field label={t('Service calls')}>
             {Object.keys(caps.max_calls ?? {}).length ? (
               <ul className="flex flex-col gap-1">
                 {Object.entries(caps.max_calls ?? {}).map(([nature, max]) => (
                   <li key={nature} className="num">
-                    {nature} : {count(pick(agent.calls_used ?? {}, nature) ?? 0)} / {count(max)}
+                    {t('{nature}: {used} / {max}', { nature, used: count(pick(agent.calls_used ?? {}, nature) ?? 0), max: count(max) })}
                   </li>
                 ))}
               </ul>
             ) : (
-              <span className="text-muted-foreground">aucun</span>
+              <span className="text-muted-foreground">{t('none')}</span>
             )}
           </Field>
-          <Field label="Enfants">
+          <Field label={t('Children')}>
             {caps.spawn
-              ? `${caps.spawn.max_children} au plus, sur ${caps.spawn.max_depth} niveau${caps.spawn.max_depth > 1 ? 'x' : ''} (${caps.spawn.targets.map(targetLabel).join(', ')})`
-              : <span className="text-muted-foreground">ne peut pas en créer</span>}
+              ? t('{children} at most, over {levels} ({targets})', {
+                  children: caps.spawn.max_children,
+                  levels: tn(caps.spawn.max_depth, '{n} level', '{n} levels'),
+                  targets: caps.spawn.targets.map(targetLabel).join(', '),
+                })
+              : <span className="text-muted-foreground">{t('cannot create any')}</span>}
           </Field>
-          <Field label="Commandes">
+          <Field label={t('Commands')}>
             {caps.exec?.length ? (
               <ul className="flex flex-col gap-1.5">
                 {caps.exec.map((rule, index) => (
@@ -194,7 +203,7 @@ function AgentDetail({ agent, cluster }: { agent: Agent; cluster: Cluster }) {
                 ))}
               </ul>
             ) : (
-              <span className="text-muted-foreground">aucune</span>
+              <span className="text-muted-foreground">{t('no command')}</span>
             )}
           </Field>
         </dl>
@@ -203,7 +212,7 @@ function AgentDetail({ agent, cluster }: { agent: Agent; cluster: Cluster }) {
       {agent.depth > 0 && agent.status !== 'stopped' && (
         <div className="border-t pt-4">
           <Button variant="destructive" onClick={() => setConfirm(true)}>
-            Arrêter cet agent et sa descendance
+            {t('Stop this agent and its descendants')}
           </Button>
           {error && <p className="mt-2 text-destructive" role="alert">{error}</p>}
         </div>
@@ -212,13 +221,13 @@ function AgentDetail({ agent, cluster }: { agent: Agent; cluster: Cluster }) {
       <AlertDialog open={confirm} onOpenChange={setConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Arrêter « {agent.name} » ?</AlertDialogTitle>
+            <AlertDialogTitle>{t('Stop “{name}”?', { name: agent.name })}</AlertDialogTitle>
             <AlertDialogDescription>
-              L'agent et toute sa descendance s'arrêtent. Ce qui a été déployé sur une autre machine en est retiré. État actuel : {pick(STATUS, agent.status) ?? agent.status}.
+              {t('The agent and all its descendants stop. Whatever was deployed on another machine is removed from it. Current status: {status}.', { status: statusLabel(agent.status) })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogCancel>{t('Cancel')}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
               onClick={() => {
@@ -227,7 +236,7 @@ function AgentDetail({ agent, cluster }: { agent: Agent; cluster: Cluster }) {
                 cluster.stop(agent.id).catch((e: Error) => setError(e.message))
               }}
             >
-              Arrêter
+              {t('Stop')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -1,4 +1,4 @@
-// Ce que renvoie l'API du maître. Tout texte venu de la grappe est affiché comme du texte.
+// What the master's API returns. Any text coming from the cluster is displayed as text.
 
 export type Status = 'starting' | 'idle' | 'working' | 'suspended' | 'disconnected' | 'stopped'
 
@@ -6,11 +6,11 @@ export interface ExecRule {
   program: string
   args?: string[] | null
   cwd?: string | null
-  /** Commande d'un paquet : l'empreinte du fichier installé, vérifiée avant chaque lancement. */
+  /** Command from a package: the hash of the installed file, checked before each launch. */
   sha256?: string | null
 }
 
-/** Un rôle installé par l'exploitant (paquet), que le maître peut donner à un agent. */
+/** A role installed by the operator (package), which the master can give to an agent. */
 export interface InstalledRole {
   name: string
   pack: string
@@ -30,7 +30,7 @@ export interface Capabilities {
   spawn?: { max_children: number; max_depth: number; targets: string[] } | null
   models?: string[]
   max_tokens?: number | null
-  /** Appels permis aux modèles de service, par nature ; une nature absente : aucun. */
+  /** Calls allowed to service models, by kind; a missing kind: none. */
   max_calls?: Record<string, number>
 }
 
@@ -50,10 +50,10 @@ export interface Agent {
   started_at_ms: number
   last_seen_ms: number
   tokens_used: number
-  /** Appels aboutis aux modèles de service, par nature, descendance comprise. */
+  /** Completed calls to service models, by kind, descendants included. */
   calls_used?: Record<string, number>
   capabilities: Capabilities
-  /** Ce que l'agent déclare dépasse ce que son parent déclare pouvoir accorder. */
+  /** What the agent declares exceeds what its parent declares it can grant. */
   unverified?: boolean
   children: Agent[]
 }
@@ -75,7 +75,7 @@ export interface ModelInfo {
   effort: string | null
   max_tokens: number | null
   has_key: boolean
-  /** `llm`, `transcription`, `speech`, `image`, `embedding`, `forecast` ou `decision`. */
+  /** `llm`, `transcription`, `speech`, `image`, `embedding`, `forecast` or `decision`. */
   nature?: string
   vision?: boolean
 }
@@ -107,32 +107,32 @@ export interface Release {
   changes: { kind: string; text: string }[]
 }
 
-/** Un fournisseur du catalogue du maître, et ce que sa configuration en dit. */
+/** A provider from the master's catalog, and what its configuration says about it. */
 export interface CatalogProvider {
   id: string
   name: string
   country: string
-  /** Hébergé et régi en Europe ; `null` si le catalogue ne le connaît pas. */
+  /** Hosted and governed in Europe; `null` if the catalog does not know it. */
   europe: boolean | null
-  /** `1` à `5`, `L` (local), ou vide hors catalogue. */
+  /** `1` to `5`, `L` (local), or empty when not in the catalog. */
   trust: string
   kind: string
   billing: string
-  /** Les API que le maître sait parler chez lui ; vide : pas encore appelable. */
+  /** The APIs the master can speak with it; empty: not callable yet. */
   apis: string[]
   endpoint: string
   hosts: string[]
-  /** Un de ses modèles est déclaré chez le maître, avec sa clé. */
+  /** One of its models is declared on the master, with its key. */
   connected: boolean
   configured: number
   listed: boolean
-  /** Connecté depuis cette interface : ses modèles s'activent et il se déconnecte d'ici. */
+  /** Connected from this interface: its models are enabled and it is disconnected from here. */
   linked?: boolean
-  /** Ce que la page propose : une clé à coller, une autorisation dans le navigateur, rien pour une machine locale, ou la configuration. */
+  /** What the page offers: a key to paste, an authorization in the browser, nothing for a local machine, or the configuration. */
   connect?: 'key' | 'oauth' | 'local' | 'cli' | 'config'
-  /** La page du fournisseur où l'on crée une clé. */
+  /** The provider's page where a key is created. */
   keys_url?: string
-  /** Le fournisseur répond aussi sans clé, avec des limites basses. */
+  /** The provider also answers without a key, with low limits. */
   keyless?: boolean
 }
 
@@ -141,7 +141,7 @@ export interface CatalogModel {
   id: string
   provider: string
   nature: string
-  /** Qualité relative, de 1 à 10 ; `null` hors catalogue. */
+  /** Relative quality, from 1 to 10; `null` when not in the catalog. */
   rank: number | null
   price_in: number | null
   price_out: number | null
@@ -150,39 +150,39 @@ export interface CatalogModel {
   currency: string | null
   estimated: boolean
   deprecated: boolean
-  /** Annoncé, pas encore proposé. */
+  /** Announced, not offered yet. */
   soon: boolean
-  /** Les alias sous lesquels le maître l'a activé. */
+  /** The aliases under which the master has enabled it. */
   aliases: string[]
-  /** Le maître a un connecteur pour lui : un agent peut l'appeler une fois le modèle activé. */
+  /** The master has a connector for it: an agent can call it once the model is enabled. */
   callable: boolean
-  /** Comment le déclarer dans la configuration du maître. */
+  /** How to declare it in the master's configuration. */
   declare?: { provider: string; nature: string; vision: boolean }
   listed: boolean
 }
 
 export interface ModelsData {
-  /** L'alias du modèle du maître ; vide : il n'en a pas encore. */
+  /** The alias of the master's model; empty: it has none yet. */
   default: string
-  /** Le modèle du maître vient de sa configuration : il ne se change pas d'ici. */
+  /** The master's model comes from its configuration: it cannot be changed from here. */
   default_fixed?: boolean
   models: ModelInfo[]
   providers: CatalogProvider[]
   catalog: CatalogModel[]
-  /** Les alias activés depuis l'interface : eux seuls se désactivent d'ici. */
+  /** The aliases enabled from the interface: only these can be disabled from here. */
   activated?: string[]
 }
 
-/** Une tâche planifiée : une consigne que le maître reçoit seul, à heure fixe. */
+/** A scheduled task: an instruction the master receives on its own, at a fixed time. */
 export interface Task {
   id: string
   name: string
   text: string
   kind: 'hours' | 'daily' | 'weekly'
   hours?: number
-  /** Minutes après minuit, à l'heure locale de qui l'a créée. */
+  /** Minutes after midnight, in the local time of whoever created it. */
   minute?: number
-  /** 0 : lundi … 6 : dimanche. */
+  /** 0: Monday … 6: Sunday. */
   weekday?: number
   tz_offset_min: number
   enabled: boolean

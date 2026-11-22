@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState, type FormEvent } from 'react'
 import { X } from 'lucide-react'
-import { Connection, natureLabel, NATURES, Origin, Price, Quality, Trust } from '@/components/catalog'
+import { Connection, Mixed, natureLabel, NATURES, Origin, Price, Quality, Trust } from '@/components/catalog'
 import { PageHeader } from '@/components/bits'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -9,12 +9,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { count, flat, plural } from '@/lib/format'
+import { count, flat } from '@/lib/format'
+import { t, tn } from '@/lib/i18n'
 import type { Cluster } from '@/lib/store'
 import type { Agent, CatalogModel, CatalogProvider, ModelsData } from '@/lib/types'
 import { cn, pick } from '@/lib/utils'
 
-/** Le fournisseur demandé par la page Fournisseurs (`#modeles?f=mistral`). */
+/** The provider asked for by the Providers page (`#modeles?f=mistral`). */
 const wantedProvider = () => new URLSearchParams(location.hash.split('?')[1] ?? '').get('f') ?? ''
 
 export function ModelsView({ cluster }: { cluster: Cluster }) {
@@ -50,41 +51,44 @@ export function ModelsView({ cluster }: { cluster: Cluster }) {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        eyebrow="Maîtrise · Modèles"
-        title="Modèles"
-        lead="Tous les modèles du catalogue, fournisseur par fournisseur, avec leur qualité relative et leur prix indicatif. Un modèle activé porte un alias chez le maître : c'est sous cet alias qu'il s'accorde à un agent."
+        eyebrow={t('Control · Models')}
+        title={t('Models')}
+        lead={t('Every model in the catalog, provider by provider, with its relative quality and indicative price. An enabled model has an alias on the master: it is granted to an agent under that alias.')}
       >
-        <Input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Chercher un modèle, un alias…" aria-label="Chercher un modèle" className="w-full sm:w-64" />
+        <Input type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t('Search for a model, an alias…')} aria-label={t('Search for a model')} className="w-full sm:w-64" />
       </PageHeader>
 
       {!data.default && (
         <p role="status" className="rounded-lg border border-st-off/40 bg-card px-4 py-3 text-sm">
-          <span className="font-medium">Le maître n'a pas encore de modèle.</span>{' '}
-          Connectez un fournisseur dans la page <a href="#fournisseurs" className="underline underline-offset-4">Fournisseurs</a>, puis activez ici un modèle de texte : le premier activé devient le sien (un serveur local se donne par « Donner au maître »).
+          <span className="font-medium">{t('The master has no model yet.')}</span>{' '}
+          <Mixed
+            text={t('Connect a provider on the {providers} page, then enable a text model here: the first one enabled becomes its own (a local server is given with “Give to the master”).')}
+            slots={{ providers: <a href="#fournisseurs" className="underline underline-offset-4">{t('Providers')}</a> }}
+          />
         </p>
       )}
 
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-        <div className="flex flex-wrap gap-1" role="group" aria-label="Nature des modèles">
+        <div className="flex flex-wrap gap-1" role="group" aria-label={t('Model kind')}>
           {['', ...NATURES].map((n) => (
             <Button key={n} size="sm" variant={nature === n ? 'default' : 'ghost'} aria-pressed={nature === n} onClick={() => setNature(n)}>
-              {n ? natureLabel(n) : 'Toutes'}
+              {n ? natureLabel(n) : t('All kinds')}
             </Button>
           ))}
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-x-5 gap-y-2">
           {only && (
             <Button size="sm" variant="outline" onClick={() => { setOnly(''); history.replaceState(null, '', '#modeles') }}>
-              {onlyName ?? only} <X aria-hidden /> <span className="sr-only">Retirer ce filtre</span>
+              {onlyName ?? only} <X aria-hidden /> <span className="sr-only">{t('Remove this filter')}</span>
             </Button>
           )}
           <Label className="font-normal">
             <Checkbox checked={active} onCheckedChange={(checked) => setActive(checked === true)} />
-            Activés seulement <span className="num text-muted-foreground">{activated}</span>
+            {t('Enabled only')} <span className="num text-muted-foreground">{activated}</span>
           </Label>
           <Label className="font-normal">
             <Checkbox checked={europe} onCheckedChange={(checked) => setEurope(checked === true)} />
-            Europe et local seulement
+            {t('Europe and local only')}
           </Label>
         </div>
       </div>
@@ -93,11 +97,11 @@ export function ModelsView({ cluster }: { cluster: Cluster }) {
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              <TableHead className="eyebrow px-4">Modèle</TableHead>
-              <TableHead className="eyebrow">Nature</TableHead>
-              <TableHead className="eyebrow">Qualité</TableHead>
-              <TableHead className="eyebrow" title="Par million de tokens : entrée / sortie">Prix, entrée / sortie</TableHead>
-              <TableHead className="eyebrow px-4">Chez le maître</TableHead>
+              <TableHead className="eyebrow px-4">{t('Model')}</TableHead>
+              <TableHead className="eyebrow">{t('Kind')}</TableHead>
+              <TableHead className="eyebrow">{t('Quality')}</TableHead>
+              <TableHead className="eyebrow" title={t('Per million tokens: input / output')}>{t('Price, input / output')}</TableHead>
+              <TableHead className="eyebrow px-4">{t('On the master')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -121,7 +125,7 @@ export function ModelsView({ cluster }: { cluster: Cluster }) {
             ))}
             {groups.length === 0 && (
               <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={5} className="px-4 py-8 text-center text-muted-foreground">Aucun modèle ne correspond. Élargissez les filtres.</TableCell>
+                <TableCell colSpan={5} className="px-4 py-8 text-center text-muted-foreground">{t('No model matches. Widen the filters.')}</TableCell>
               </TableRow>
             )}
           </TableBody>
@@ -129,8 +133,11 @@ export function ModelsView({ cluster }: { cluster: Cluster }) {
       </div>
 
       <p className="text-[13px] text-muted-foreground">
-        Qualité : de 1 (élémentaire) à 10 (le meilleur), relative. Prix en dollars par million de tokens, indicatifs (relevé d'octobre 2026) ; « ≈ » : estimation, à vérifier chez le fournisseur.
-        Pour activer un modèle, connectez d'abord son fournisseur dans la page <a href="#fournisseurs" className="underline underline-offset-4">Fournisseurs</a>. Un modèle de service se compte en appels : le nombre donné à l'activation vaut pour toute la grappe.
+        {t('Quality: from 1 (basic) to 10 (the best), relative. Prices in dollars per million tokens, indicative (recorded in October 2026); “≈”: an estimate, to check with the provider.')}{' '}
+        <Mixed
+          text={t('To enable a model, first connect its provider on the {providers} page. A service model is counted in calls: the number given when enabling applies to the whole cluster.')}
+          slots={{ providers: <a href="#fournisseurs" className="underline underline-offset-4">{t('Providers')}</a> }}
+        />
       </p>
     </div>
   )
@@ -146,7 +153,7 @@ function ModelRow({ model, provider, data, agents, cluster }: { model: CatalogMo
     try {
       await action()
     } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Demande non aboutie.')
+      setError(failure instanceof Error ? failure.message : t('The request did not complete.'))
     } finally {
       setBusy(false)
     }
@@ -156,9 +163,9 @@ function ModelRow({ model, provider, data, agents, cluster }: { model: CatalogMo
       <TableCell className="px-4 py-2.5">
         <span className={cn('block', on && 'font-medium text-foreground')}>
           {model.name}
-          {model.deprecated && <span className="ml-2 text-xs font-normal text-st-off">en fin de vie</span>}
-          {model.soon && <span className="ml-2 text-xs font-normal text-muted-foreground">annoncé</span>}
-          {!model.listed && <span className="ml-2 text-xs font-normal text-muted-foreground">hors catalogue</span>}
+          {model.deprecated && <span className="ml-2 text-xs font-normal text-st-off">{t('end of life')}</span>}
+          {model.soon && <span className="ml-2 text-xs font-normal text-muted-foreground">{t('announced')}</span>}
+          {!model.listed && <span className="ml-2 text-xs font-normal text-muted-foreground">{t('not in the catalog')}</span>}
         </span>
         {model.id !== model.name && <span className="num block text-xs text-muted-foreground">{model.id}</span>}
       </TableCell>
@@ -172,15 +179,15 @@ function ModelRow({ model, provider, data, agents, cluster }: { model: CatalogMo
               <span key={alias} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
                 <Activation alias={alias} data={data} agents={agents} />
                 {!data.default_fixed && alias !== data.default && talks(data, alias) && (
-                  <Button size="sm" variant={data.default ? 'outline' : 'default'} disabled={busy} title="Le maître réfléchira avec ce modèle" onClick={() => {
-                    if (!data.default || confirm(`Donner « ${alias} » (${provider.name}) au maître ? Sa conversation en cours, résultats d'outils compris, sera envoyée à ce fournisseur.`)) run(() => cluster.change(`/api/models/${encodeURIComponent(alias)}/default`, {}))
+                  <Button size="sm" variant={data.default ? 'outline' : 'default'} disabled={busy} title={t('The master will think with this model')} onClick={() => {
+                    if (!data.default || confirm(t('Give “{alias}” ({provider}) to the master? Its current conversation, tool results included, will be sent to this provider.', { alias, provider: provider.name }))) run(() => cluster.change(`/api/models/${encodeURIComponent(alias)}/default`, {}))
                   }}>
-                    Donner au maître
+                    {t('Give to the master')}
                   </Button>
                 )}
                 {data.activated?.includes(alias) && (
                   <Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => cluster.change(`/api/models/${encodeURIComponent(alias)}/deactivate`, {}))}>
-                    Désactiver
+                    {t('Disable')}
                   </Button>
                 )}
               </span>
@@ -188,20 +195,20 @@ function ModelRow({ model, provider, data, agents, cluster }: { model: CatalogMo
             {error && <span role="alert" className="text-[13px] text-destructive">{error}</span>}
           </span>
         ) : !model.callable ? (
-          <span title={model.soon ? 'Annoncé par le fournisseur, pas encore proposé' : "Le maître n'a pas de connecteur pour ce modèle chez ce fournisseur : il est listé pour comparer"}>Pas encore appelable</span>
+          <span title={model.soon ? t('Announced by the provider, not offered yet') : t('The master has no connector for this model at this provider: it is listed for comparison')}>{t('Not callable yet')}</span>
         ) : provider.linked ? (
           <Activate model={model} provider={provider} agents={agents} busy={busy} error={error} run={run} cluster={cluster} />
         ) : provider.connected ? (
-          <span title="Ce fournisseur est connecté par la configuration du maître : ses modèles s'y déclarent">Disponible, non activé</span>
+          <span title={t("This provider is connected through the master's configuration: its models are declared there")}>{t('Available, not enabled')}</span>
         ) : (
-          <span>Fournisseur non connecté</span>
+          <span>{t('Provider not connected')}</span>
         )}
       </TableCell>
     </TableRow>
   )
 }
 
-/** Activer un modèle d'un fournisseur connecté d'ici ; pour un modèle de service, avec son nombre d'appels. */
+/** Enable a model of a provider connected from here; for a service model, with its number of calls. */
 function Activate({ model, provider, agents, busy, error, run, cluster }: {
   model: CatalogModel; provider: CatalogProvider; agents: Agent[]; busy: boolean; error: string | null
   run: (action: () => Promise<unknown>) => Promise<void>; cluster: Cluster
@@ -216,11 +223,11 @@ function Activate({ model, provider, agents, busy, error, run, cluster }: {
   return (
     <form onSubmit={submit} className="flex flex-col gap-1.5 py-0.5">
       <span className="flex flex-wrap items-center gap-2">
-        <Button type="submit" size="sm" disabled={busy}>Activer</Button>
+        <Button type="submit" size="sm" disabled={busy}>{t('Enable')}</Button>
         {service && (
           <Label className="font-normal text-[13px]">
-            <Input type="number" min={0} max={1000000} value={calls} onChange={(e) => setCalls(e.target.value)} className="num h-8 w-24" aria-label={`Appels « ${service} » permis à la grappe`} />
-            appels permis
+            <Input type="number" min={0} max={1000000} value={calls} onChange={(e) => setCalls(e.target.value)} className="num h-8 w-24" aria-label={t('“{service}” calls allowed to the cluster', { service })} />
+            {t('calls allowed')}
           </Label>
         )}
       </span>
@@ -229,13 +236,13 @@ function Activate({ model, provider, agents, busy, error, run, cluster }: {
   )
 }
 
-/** Un alias du maître : ses réglages, qui s'en sert, à qui il est accordé. */
+/** An alias of the master: its settings, who uses it, whom it is granted to. */
 function Activation({ alias, data, agents }: { alias: string; data: ModelsData; agents: Agent[] }) {
   const info = data.models.find((m) => m.alias === alias)
   const running = agents.filter((a) => a.model === alias)
   const granted = agents.filter((a) => a.depth > 0 && a.capabilities.models?.includes(alias))
   const tokens = running.reduce((sum, a) => sum + (a.depth === 0 ? 0 : a.tokens_used), 0)
-  // un modèle de service ne fait tourner aucun agent : il se compte en appels, par nature
+  // a service model runs no agent: it is counted in calls, by kind
   const service = info?.nature && info.nature !== 'llm' ? info.nature : null
   const root = agents.find((a) => a.depth === 0)
   const allowed = service ? pick(root?.capabilities.max_calls ?? {}, service) ?? 0 : 0
@@ -244,30 +251,34 @@ function Activation({ alias, data, agents }: { alias: string; data: ModelsData; 
     <span className="text-[13px] text-foreground">
       <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="size-2 rounded-full bg-st-working" aria-hidden />
-        <span className="font-medium">Activé</span>
+        <span className="font-medium">{t('Enabled')}</span>
         <span className="num">{alias}</span>
-        {alias === data.default && <Badge>modèle du maître</Badge>}
-        {info && !info.has_key && needsKey(info.host) && <span className="text-st-off">sans clé</span>}
+        {alias === data.default && <Badge>{t("master's model")}</Badge>}
+        {info && !info.has_key && needsKey(info.host) && <span className="text-st-off">{t('no key')}</span>}
       </span>
       <span className="block text-muted-foreground">
         {[
-          info?.effort && `effort ${info.effort}`,
-          info?.max_tokens && `${count(info.max_tokens)} tokens par réponse`,
-          info?.vision && 'lit les images',
-          service ? (allowed > 0 ? `${count(used)} / ${count(allowed)} appels « ${service} »` : `aucun appel « ${service} » accordé (max_calls)`) : `${plural(running.length, 'agent')} en cours`,
-          tokens > 0 && `${count(tokens)} tokens chez les enfants`,
+          info?.effort && t('effort {effort}', { effort: info.effort }),
+          info?.max_tokens && t('{count} tokens per reply', { count: count(info.max_tokens) }),
+          info?.vision && t('reads images'),
+          service
+            ? allowed > 0
+              ? t('{used} / {allowed} calls to “{service}”', { used: count(used), allowed: count(allowed), service })
+              : t('no “{service}” call granted (max_calls)', { service })
+            : tn(running.length, '{n} agent running', '{n} agents running'),
+          tokens > 0 && t('{count} tokens used by children', { count: count(tokens) }),
         ].filter(Boolean).join(' · ')}
       </span>
-      <span className="block text-muted-foreground">{granted.length ? `Accordé à ${granted.map((a) => a.name).join(', ')}.` : 'Accordé à aucun enfant.'}</span>
+      <span className="block text-muted-foreground">{granted.length ? t('Granted to {names}.', { names: granted.map((a) => a.name).join(', ') }) : t('Granted to no child.')}</span>
     </span>
   )
 }
 
-/** Ce modèle tient une conversation : le maître peut réfléchir avec lui. */
+/** This model holds a conversation: the master can think with it. */
 const talks = (data: ModelsData, alias: string) => {
   const nature = data.models.find((m) => m.alias === alias)?.nature
   return !nature || nature === 'llm' || nature === 'vision'
 }
 
-/** Une machine locale se passe de clé ; partout ailleurs, son absence mérite d'être dite. */
+/** A local machine needs no key; anywhere else, its absence is worth saying. */
 const needsKey = (host: string) => !/^(localhost|127\.0\.0\.1|\[?::1\]?)(:\d+)?$/.test(host) && !host.endsWith('.invalid')

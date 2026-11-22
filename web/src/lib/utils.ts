@@ -1,6 +1,6 @@
 export { cn } from "cn"
 
-/** Lit une table par une clé venue d'ailleurs, sans jamais tomber sur une propriété héritée. */
+/** Reads a table by a key that came from elsewhere, never landing on an inherited property. */
 export function pick<T>(table: Record<string, T>, key: unknown): T | undefined {
   return typeof key === 'string' && Object.hasOwn(table, key) ? table[key] : undefined
 }
