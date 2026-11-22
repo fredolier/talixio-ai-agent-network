@@ -44,6 +44,12 @@ enum Command {
         #[arg(long)]
         log_file: Option<PathBuf>,
     },
+    /// Vérifie une configuration comme le maître à son démarrage (paquets compris), sans le lancer.
+    Check {
+        /// Fichier de configuration (TOML).
+        #[arg(short, long, default_value = "talixio.toml")]
+        config: PathBuf,
+    },
     /// Affiche la grappe.
     Tree(Remote),
     /// Usage interne : le pont d'outils que la commande `claude` lance et qui rappelle le maître.
@@ -93,8 +99,25 @@ enum CatalogAction {
 #[derive(clap::Args)]
 struct PackDir {
     /// Dossier des paquets installés : celui que `packs_dir` désigne dans la configuration du maître.
+    /// En root, sur une machine où `service install` a posé le compte dédié : /opt/talixio/packs.
     #[arg(long, env = "TALIXIO_PACKS")]
-    dir: PathBuf,
+    dir: Option<PathBuf>,
+}
+
+impl PackDir {
+    fn path(&self) -> Result<PathBuf> {
+        if let Some(dir) = &self.dir {
+            return Ok(dir.clone());
+        }
+        let system = Path::new(talixio_agent::service::SYSTEM_PACKS);
+        if system.is_dir() {
+            if !is_root() {
+                bail!("les paquets de cette machine sont dans {} et appartiennent à root : relancez avec sudo", system.display());
+            }
+            return Ok(system.to_path_buf());
+        }
+        bail!("quel dossier de paquets ? `--dir <dossier>` (ou TALIXIO_PACKS) : celui que `packs_dir` désigne dans la configuration du maître")
+    }
 }
 
 #[derive(clap::Args)]
@@ -147,13 +170,16 @@ enum PackAction {
 enum ServiceAction {
     /// Inscrit le maître auprès du système (systemd, launchd, ou tâche planifiée) et le démarre.
     Install {
-        /// Fichier de configuration (TOML).
-        #[arg(short, long, default_value = "talixio.toml")]
-        config: PathBuf,
+        /// Fichier de configuration (TOML). Par défaut : talixio.toml ; avec le compte dédié, celle
+        /// qui est déjà dans /etc/talixio.
+        #[arg(short, long)]
+        config: Option<PathBuf>,
         /// Linux : fichier de variables d'environnement (les clés lues par `api_key_env`), fermé aux autres comptes.
         #[arg(long)]
         env_file: Option<PathBuf>,
-        /// Linux, installation en root : le compte ordinaire sous lequel le maître tournera.
+        /// Linux, installation en root : un compte ordinaire à vous, sous lequel le maître tournera
+        /// là où sont ses fichiers. Sans cette option, en root : le compte dédié « talixio-agent »,
+        /// l'exécutable, la configuration et les paquets à root (/opt/talixio, /etc/talixio).
         #[arg(long)]
         user: Option<String>,
         /// Montre ce qui serait fait, sans rien faire.
@@ -199,6 +225,11 @@ async fn main() -> Result<()> {
             run_root(&config).await
         }
         Command::Service { action } => service(action),
+        Command::Check { config } => {
+            let cfg = RootConfig::load(&config)?;
+            println!("Configuration valide.{}", if cfg.pack_names.is_empty() { String::new() } else { format!(" Paquets vérifiés : {}.", cfg.pack_names.join(", ")) });
+            Ok(())
+        }
         Command::Child { state_dir, log_file } => run_child(state_dir, log_file).await,
         Command::McpBridge => talixio_agent::model::cli::run_bridge().await,
         Command::Catalog { action: CatalogAction::Check { file } } => {
@@ -227,19 +258,20 @@ async fn main() -> Result<()> {
                 }
                 PackAction::Install { name, replace, from, dir } => {
                     let p = Pack::find(from.from.as_deref(), &name)?;
-                    let dest = p.install(&dir.dir, replace)?;
+                    let dest = p.install(&dir.path()?, replace)?;
                     print!("{}", p.describe());
                     println!("\nInstallé dans {}. Le maître le prend à son prochain démarrage (réglage packs_dir).", dest.display());
                     println!("Ce dossier ne doit pas être inscriptible par le compte du maître.");
                 }
                 PackAction::Remove { name, dir } => {
-                    pack::remove(&dir.dir, &name)?;
+                    pack::remove(&dir.path()?, &name)?;
                     println!("Paquet « {name} » retiré. Le maître le perd à son prochain démarrage.");
                 }
                 PackAction::Verify { dir } => {
-                    let installed = pack::load_installed(&dir.dir, false)?;
+                    let dir = dir.path()?;
+                    let installed = pack::load_installed(&dir, false)?;
                     if installed.names.is_empty() {
-                        println!("Aucun paquet installé dans {}.", dir.dir.display());
+                        println!("Aucun paquet installé dans {}.", dir.display());
                     }
                     for name in &installed.names {
                         println!("{name} : intact");
@@ -332,8 +364,10 @@ fn system_paths_are_safe(spec: &talixio_agent::service::Spec) -> Result<()> {
         }
         Ok(())
     };
-    check(&spec.exe, "exécutable", &[0, uid])?;
-    check(&spec.config, "configuration", &[0, uid])?;
+    // compte dédié : l'exécutable et la configuration sont à root, et à lui seul
+    let fixed: &[u32] = if spec.dedicated { &[0] } else { &[0, uid] };
+    check(&spec.exe, "exécutable", fixed)?;
+    check(&spec.config, "configuration", fixed)?;
     check(&spec.workdir, "dossier de travail", &[0, uid])?;
     if let Some(env) = &spec.env_file {
         check(env, "fichier d'environnement", &[0])?;
@@ -350,27 +384,52 @@ fn service(action: ServiceAction) -> Result<()> {
     let uid = unsafe { libc::getuid() };
     #[cfg(not(unix))]
     let uid = 0;
-    let mut spec = Spec { kind, exe: std::env::current_exe()?, config: PathBuf::new(), workdir: std::env::current_dir()?, home, env_file: None, user: None, uid };
+    let mut spec = Spec { kind, exe: std::env::current_exe()?, config: PathBuf::new(), workdir: std::env::current_dir()?, home, env_file: None, user: None, uid, dedicated: false };
     match action {
         ServiceAction::Install { config, env_file, user, print } => {
-            // la configuration doit être bonne avant d'en faire un service qui redémarre en boucle
-            let cfg = RootConfig::load(&config)?;
-            spec.config = config.canonicalize().with_context(|| format!("configuration {}", config.display()))?;
-            if cfg!(windows) {
-                // sous Windows, le chemin canonique porte un préfixe que les autres outils ne lisent pas
-                spec.config = std::path::absolute(&config)?;
-            }
             if let Some(env) = &env_file {
                 ensure_private(env)?;
                 spec.env_file = Some(env.canonicalize()?);
             }
-            spec.user = user;
+            // en root sans `--user` : le compte dédié, et tout ce que le maître lit est à root
+            spec.dedicated = kind == service::Kind::SystemdSystem && user.is_none();
+            let from_env: Vec<String>;
+            if spec.dedicated {
+                let source = match &config {
+                    Some(path) => path.canonicalize().with_context(|| format!("configuration {}", path.display()))?,
+                    None => PathBuf::from(service::SYSTEM_CONFIG),
+                };
+                // en root, la configuration ne se charge pas comme le maître la chargera (ses paquets
+                // seraient « à sa portée ») : `setup_dedicated` l'essaie sous le compte
+                let table: toml::Table = std::fs::read_to_string(&source).ok().and_then(|text| toml::from_str(&text).ok()).unwrap_or_default();
+                let models = table.get("models").and_then(|m| m.as_table()).cloned().unwrap_or_default();
+                from_env = models.values().filter_map(|m| m.get("api_key_env")?.as_str().map(str::to_string)).collect();
+                #[cfg(unix)]
+                if !print {
+                    service::setup_dedicated(&spec.exe, config.as_ref().map(|_| source.as_path())).map_err(anyhow::Error::msg)?;
+                }
+                spec.user = Some(service::ACCOUNT.into());
+                spec.exe = service::SYSTEM_EXE.into();
+                spec.config = service::SYSTEM_CONFIG.into();
+                spec.workdir = service::SYSTEM_STATE.into();
+            } else {
+                let config = config.unwrap_or_else(|| "talixio.toml".into());
+                // la configuration doit être bonne avant d'en faire un service qui redémarre en boucle
+                let cfg = RootConfig::load(&config)?;
+                from_env = cfg.models.values().filter_map(|m| m.api_key_env.clone()).collect();
+                spec.config = config.canonicalize().with_context(|| format!("configuration {}", config.display()))?;
+                if cfg!(windows) {
+                    // sous Windows, le chemin canonique porte un préfixe que les autres outils ne lisent pas
+                    spec.config = std::path::absolute(&config)?;
+                }
+                spec.user = user;
+            }
             #[cfg(unix)]
-            if kind == service::Kind::SystemdSystem {
+            if kind == service::Kind::SystemdSystem && !(spec.dedicated && print) {
                 system_paths_are_safe(&spec)?;
             }
             let plan = service::install_plan(&spec).map_err(anyhow::Error::msg)?;
-            let from_env: Vec<&str> = cfg.models.values().filter_map(|m| m.api_key_env.as_deref()).filter(|name| !name.is_empty()).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+            let from_env: Vec<&str> = from_env.iter().map(String::as_str).filter(|name| !name.is_empty()).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
             if !from_env.is_empty() && spec.env_file.is_none() {
                 println!(
                     "Attention : la configuration lit des clés dans l'environnement ({}). Un service n'hérite pas de votre terminal : donnez-les par `api_key_file`, depuis l'interface, ou (Linux) par `--env-file`.",
@@ -383,6 +442,9 @@ fn service(action: ServiceAction) -> Result<()> {
                     println!("Non fait, sans gravité : {skipped}");
                 }
                 println!("Service installé et démarré. État : talixio-agent service status");
+                if spec.dedicated {
+                    println!("Paquets : sudo talixio-agent pack list, puis sudo talixio-agent pack install <nom> (dans {}).", service::SYSTEM_PACKS);
+                }
             }
         }
         ServiceAction::Uninstall { user, print } => {

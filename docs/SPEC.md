@@ -538,6 +538,30 @@ Demandé le 2026-11-20. Rien n'est codé.
 20. **Les notes de version ont une source unique**, `releases.toml`, embarquée dans l'exécutable.
     Chaque version y ajoute une entrée ; un test refuse une version sans note.
 
+38. **Le compte dédié : ce que le maître lit est à root** (2026-11-22, demandé : « mettre un
+    utilisateur talixio-agent […] et tous les fichiers à root ; le maître ne pourrait pas modifier
+    les fichiers »). `sudo talixio-agent service install [--config f.toml]`, en root et sans
+    `--user`, met tout en place sous Linux (systemd) :
+    - le compte `talixio-agent`, créé s'il manque (`useradd --system`), sans mot de passe, sans
+      shell ; refusé s'il a le numéro de root ;
+    - `/opt/talixio/talixio-agent` (copie de l'exécutable) et `/opt/talixio/packs` (paquets), à
+      root ; `/etc/talixio/talixio.toml`, à root, lisible par le groupe du compte (0640) ;
+      `packs_dir = "/opt/talixio/packs"` y est ajouté s'il manque, un autre dossier est refusé ;
+    - `/var/lib/talixio`, seul dossier qui appartienne au compte : état, clés saisies dans
+      l'interface (Q6), travail ; les chemins relatifs de la configuration en partent. Root le
+      crée et le donne, puis n'y écrit plus ;
+    - la configuration est d'abord posée à côté et **essayée sous le compte** (`talixio-agent
+      check`, nouvelle commande : charge la configuration comme le maître, paquets compris, sans
+      rien lancer) ; refusée, rien n'est changé ; acceptée, l'ancienne est gardée en
+      `talixio.toml.ancien` ;
+    - l'unité ajoute `ProtectSystem=full` et `ReadOnlyPaths=/opt/talixio /etc/talixio` : même un
+      droit de fichier mal remis ne rend pas ces dossiers inscriptibles au maître.
+    Ensuite `sudo talixio-agent pack install <nom>` vise `/opt/talixio/packs` sans option (sans
+    root : refus qui dit pourquoi). Modifier la configuration demande `sudo` puis un redémarrage
+    du service : c'est le but. `--user <compte>` garde l'ancien mode (un compte à vous, fichiers
+    là où ils sont). `--print` montre tout sans rien faire. macOS et Windows : pas encore. Dans
+    Docker, l'équivalent existe déjà (dossier des paquets monté en lecture seule, décision 37).
+
 ## 5. Architecture
 
 ```

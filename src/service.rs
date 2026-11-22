@@ -11,6 +11,17 @@ pub const NAME: &str = "talixio-agent";
 const LABEL: &str = "com.talixio.agent";
 const TASK: &str = "TalixioAgent";
 
+/// Installation en root sans `--user` : le compte dédié et les emplacements du système.
+/// L'exécutable, les paquets et la configuration sont à root ; le compte ne possède que son
+/// dossier d'état et de travail.
+pub const ACCOUNT: &str = "talixio-agent";
+pub const SYSTEM_DIR: &str = "/opt/talixio";
+pub const SYSTEM_EXE: &str = "/opt/talixio/talixio-agent";
+pub const SYSTEM_PACKS: &str = "/opt/talixio/packs";
+pub const SYSTEM_CONFIG_DIR: &str = "/etc/talixio";
+pub const SYSTEM_CONFIG: &str = "/etc/talixio/talixio.toml";
+pub const SYSTEM_STATE: &str = "/var/lib/talixio";
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Kind {
     /// Unité systemd du compte courant.
@@ -35,6 +46,8 @@ pub struct Spec {
     /// Unité du système : le compte, jamais root, sous lequel le maître tourne.
     pub user: Option<String>,
     pub uid: u32,
+    /// Unité du système sous le compte dédié : les emplacements du système, à root, en lecture seule.
+    pub dedicated: bool,
 }
 
 /// Ce que l'installation fait : un fichier à écrire (s'il y en a un), des commandes à lancer.
@@ -45,6 +58,8 @@ pub struct Plan {
     /// Commandes dont l'échec n'empêche pas le service de tourner.
     pub optional: Vec<Vec<String>>,
     pub notes: Vec<String>,
+    /// Compte dédié : ce qui est mis en place avant d'écrire le service.
+    pub setup: Vec<String>,
 }
 
 fn words(text: &[&str]) -> Vec<String> {
@@ -107,6 +122,19 @@ pub fn install_plan(spec: &Spec) -> Result<Plan, String> {
                      ProtectKernelLogs=yes\nProtectControlGroups=yes\nProtectClock=yes\nProtectHostname=yes\nRestrictSUIDSGID=yes\n\
                      LockPersonality=yes\nRestrictRealtime=yes\n"
                 ));
+                if spec.dedicated {
+                    // ce qui est à root reste hors d'écriture même si un droit de fichier venait à changer
+                    unit.push_str(&format!("ProtectSystem=full\nReadOnlyPaths={SYSTEM_DIR} {SYSTEM_CONFIG_DIR}\n"));
+                    plan.setup = vec![
+                        format!("compte « {ACCOUNT} » créé s'il manque : sans mot de passe, sans shell, sans droit d'administration"),
+                        format!("{SYSTEM_EXE} : copie de cet exécutable (à root)"),
+                        format!("{SYSTEM_PACKS} : dossier des paquets (à root) ; `sudo talixio-agent pack install <nom>` y installe"),
+                        format!("{SYSTEM_CONFIG} : la configuration (à root, lisible par le compte), avec packs_dir = \"{SYSTEM_PACKS}\" ; l'ancienne est gardée en talixio.toml.ancien"),
+                        format!("{SYSTEM_STATE} : dossier d'état et de travail, le seul qui appartienne au compte"),
+                    ];
+                    plan.notes.push(format!("Modifier la configuration : sudo, puis `sudo systemctl restart {NAME}`. Les chemins relatifs de la configuration partent de {SYSTEM_STATE}."));
+                    plan.notes.push(format!("Le maître ne peut modifier ni son exécutable, ni sa configuration, ni ses paquets. Les clés saisies dans l'interface restent dans son dossier d'état ({SYSTEM_STATE})."));
+                }
             }
             unit.push_str(&format!(
                 "Restart=on-failure\nRestartSec=5\nNoNewPrivileges=true\nUMask=0077\nLimitCORE=0\n\
@@ -215,6 +243,9 @@ pub fn kind_here(root: bool) -> Result<Kind, String> {
 /// Montre ce qui serait fait, sans rien faire.
 pub fn describe(plan: &Plan, removing: bool) -> String {
     let mut out = String::new();
+    for step in &plan.setup {
+        out.push_str(&format!("Mise en place : {step}\n"));
+    }
     if let Some((path, content)) = &plan.file {
         if removing {
             out.push_str(&format!("Fichier retiré : {}\n", path.display()));
@@ -282,6 +313,135 @@ pub fn apply(plan: &Plan, removing: bool) -> Result<Vec<String>, String> {
     Ok(skipped)
 }
 
+/// Les numéros (compte, groupe) d'un compte de la machine.
+#[cfg(unix)]
+pub fn account_ids(name: &str) -> Option<(u32, u32)> {
+    let name = std::ffi::CString::new(name).ok()?;
+    // SAFETY: chaîne terminée par un zéro ; le résultat, lu aussitôt, n'est pas gardé.
+    unsafe {
+        let entry = libc::getpwnam(name.as_ptr());
+        if entry.is_null() { None } else { Some(((*entry).pw_uid, (*entry).pw_gid)) }
+    }
+}
+
+/// La configuration telle qu'elle sera posée : `packs_dir` y désigne le dossier des paquets du
+/// système. Ajouté en tête s'il manque ; refusé s'il désigne un autre dossier.
+pub fn with_system_packs(text: &str) -> Result<String, String> {
+    let table: toml::Table = toml::from_str(text).map_err(|e| format!("configuration invalide : {e}"))?;
+    match table.get("packs_dir") {
+        None => Ok(format!("# Ajouté par `talixio-agent service install` : les paquets installés par root.\npacks_dir = \"{SYSTEM_PACKS}\"\n\n{text}")),
+        Some(toml::Value::String(dir)) if dir == SYSTEM_PACKS => Ok(text.to_string()),
+        Some(_) => Err(format!("la configuration désigne un autre dossier de paquets : retirez `packs_dir`, ou écrivez packs_dir = \"{SYSTEM_PACKS}\"")),
+    }
+}
+
+/// Un dossier du système : créé s'il manque, à root, que root seul peut modifier. Un lien, ou un
+/// dossier qui appartient à un autre compte, est refusé.
+#[cfg(unix)]
+fn root_dir(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    let at = |e: std::io::Error| format!("{} : {e}", path.display());
+    if std::fs::symlink_metadata(path).is_err() {
+        std::fs::create_dir(path).map_err(at)?;
+    }
+    let meta = std::fs::symlink_metadata(path).map_err(at)?;
+    if !meta.is_dir() || meta.uid() != 0 {
+        return Err(format!("{} doit être un vrai dossier qui appartient à root", path.display()));
+    }
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).map_err(at)
+}
+
+/// Écrit un fichier à root dans un dossier à root : à côté d'abord, puis par renommage.
+#[cfg(unix)]
+fn root_file(path: &Path, bytes: &[u8], mode: u32, gid: u32) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let at = |e: std::io::Error| format!("{} : {e}", path.display());
+    let beside = path.with_extension("nouveau");
+    let _ = std::fs::remove_file(&beside);
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&beside).map_err(at)?;
+    file.write_all(bytes).map_err(at)?;
+    std::os::unix::fs::fchown(&file, Some(0), Some(gid)).map_err(at)?;
+    file.set_permissions(std::fs::Permissions::from_mode(mode)).map_err(at)?;
+    file.sync_all().map_err(at)?;
+    std::fs::rename(&beside, path).map_err(at)
+}
+
+/// Compte dédié : crée le compte, pose l'exécutable, la configuration et le dossier des paquets
+/// à root, et le dossier d'état au compte. À lancer en root. `config` : la configuration à poser ;
+/// sans elle, celle qui est déjà en place est gardée. Rend le numéro du compte.
+#[cfg(unix)]
+pub fn setup_dedicated(exe: &Path, config: Option<&Path>) -> Result<u32, String> {
+    use std::os::unix::fs::MetadataExt;
+    use std::os::unix::process::CommandExt;
+    let (uid, gid) = match account_ids(ACCOUNT) {
+        Some(ids) => ids,
+        None => {
+            // sous sudo, le PATH n'a pas toujours les dossiers de l'administration
+            let first = |names: &[&str], or: &str| names.iter().find(|p| Path::new(p).exists()).unwrap_or(&or).to_string();
+            let useradd = first(&["/usr/sbin/useradd", "/sbin/useradd", "/usr/bin/useradd"], "useradd");
+            let nologin = first(&["/usr/sbin/nologin", "/sbin/nologin"], "/bin/false");
+            run(&words(&[&useradd, "--system", "--user-group", "--home-dir", SYSTEM_STATE, "--no-create-home", "--shell", &nologin, ACCOUNT]))?;
+            account_ids(ACCOUNT).ok_or(format!("le compte « {ACCOUNT} » n'a pas pu être créé"))?
+        }
+    };
+    if uid == 0 || gid == 0 {
+        return Err(format!("le compte « {ACCOUNT} » a les droits de root : le maître ne tourne jamais en root"));
+    }
+    for dir in [SYSTEM_DIR, SYSTEM_PACKS, SYSTEM_CONFIG_DIR] {
+        root_dir(Path::new(dir))?;
+    }
+    // l'exécutable : une copie à root, que le compte ne peut pas remplacer
+    let target = Path::new(SYSTEM_EXE);
+    if exe.canonicalize().ok() != target.canonicalize().ok() {
+        let bytes = std::fs::read(exe).map_err(|e| format!("{} : {e}", exe.display()))?;
+        root_file(target, &bytes, 0o755, 0)?;
+    }
+    // le dossier du compte : root le crée et le lui donne, puis n'y écrit plus jamais
+    let state = Path::new(SYSTEM_STATE);
+    let at = |e: std::io::Error| format!("{SYSTEM_STATE} : {e}");
+    if std::fs::symlink_metadata(state).is_err() {
+        std::fs::create_dir(state).map_err(at)?;
+        std::os::unix::fs::lchown(state, Some(uid), Some(gid)).map_err(at)?;
+        crate::os::set_mode(state, 0o700).map_err(|e| e.to_string())?;
+    }
+    let meta = std::fs::symlink_metadata(state).map_err(at)?;
+    if !meta.is_dir() || meta.uid() != uid {
+        return Err(format!("{SYSTEM_STATE} doit être un vrai dossier qui appartient à {ACCOUNT}"));
+    }
+    // la configuration : posée à côté, essayée sous le compte, puis mise en place
+    let dest = Path::new(SYSTEM_CONFIG);
+    let source = match config {
+        Some(path) => path,
+        None if dest.is_file() => dest,
+        None => return Err(format!("aucune configuration dans {SYSTEM_CONFIG} : donnez la vôtre avec `--config <fichier>`")),
+    };
+    let text = std::fs::read_to_string(source).map_err(|e| format!("{} : {e}", source.display()))?;
+    let text = with_system_packs(&text)?;
+    let trial = dest.with_extension("essai");
+    root_file(&trial, text.as_bytes(), 0o640, gid)?;
+    let checked = std::process::Command::new(SYSTEM_EXE)
+        .args(["check", "--config"])
+        .arg(&trial)
+        .current_dir(state)
+        .env("HOME", SYSTEM_STATE)
+        .uid(uid)
+        .gid(gid)
+        .status();
+    let _ = std::fs::remove_file(&trial);
+    match checked {
+        Ok(status) if status.success() => {}
+        Ok(_) => return Err(format!("la configuration n'est pas acceptée sous le compte {ACCOUNT} (voir ci-dessus) : rien n'a été changé dans {SYSTEM_CONFIG}")),
+        Err(e) => return Err(format!("{SYSTEM_EXE} : {e}")),
+    }
+    if dest.is_file() && std::fs::read_to_string(dest).ok().as_deref() != Some(text.as_str()) {
+        std::fs::rename(dest, dest.with_extension("toml.ancien")).map_err(|e| format!("{SYSTEM_CONFIG} : {e}"))?;
+    }
+    // même contenu : les droits sont tout de même remis d'aplomb
+    root_file(dest, text.as_bytes(), 0o640, gid)?;
+    Ok(uid)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,6 +456,7 @@ mod tests {
             env_file: None,
             user: None,
             uid: 501,
+            dedicated: false,
         }
     }
 
@@ -385,6 +546,43 @@ mod tests {
         for bad in [r"relatif\talixio.toml", r#"C:\a" --autre ""#, r"C:\a&calc", r"C:\%TEMP%\t.toml", r"C:\a|b"] {
             assert!(install_plan(&Spec { config: bad.into(), ..ici.clone() }).is_err(), "{bad}");
         }
+    }
+
+    // chemins d'Unix : sous Windows, ils ne sont pas absolus
+    #[cfg(unix)]
+    #[test]
+    fn compte_dedie() {
+        let asked = Spec {
+            user: Some(ACCOUNT.into()),
+            dedicated: true,
+            exe: SYSTEM_EXE.into(),
+            config: SYSTEM_CONFIG.into(),
+            workdir: SYSTEM_STATE.into(),
+            ..spec(Kind::SystemdSystem)
+        };
+        let plan = install_plan(&asked).unwrap();
+        let (_, unit) = plan.file.clone().unwrap();
+        assert!(unit.contains("\nUser=talixio-agent\n") && unit.contains("\nReadOnlyPaths=/opt/talixio /etc/talixio\n") && unit.contains("\nProtectSystem=full\n"));
+        assert!(unit.contains("ExecStart=\"/opt/talixio/talixio-agent\" root --config \"/etc/talixio/talixio.toml\"\n") && unit.contains("WorkingDirectory=/var/lib/talixio\n"));
+        assert_eq!(plan.setup.len(), 5);
+        assert!(describe(&plan, false).starts_with("Mise en place : compte « talixio-agent »"));
+        // sans compte dédié, rien de tout cela
+        let plain = install_plan(&Spec { user: Some("ada".into()), ..spec(Kind::SystemdSystem) }).unwrap();
+        assert!(plain.setup.is_empty() && !plain.file.unwrap().1.contains("ReadOnlyPaths"));
+    }
+
+    #[test]
+    fn configuration_du_systeme_et_paquets() {
+        let posed = with_system_packs("listen = \"127.0.0.1:7700\"\n\n[models.a]\nprovider = \"x\"\n").unwrap();
+        assert!(posed.contains("packs_dir = \"/opt/talixio/packs\"\n"));
+        let table: toml::Table = toml::from_str(&posed).unwrap();
+        assert_eq!(table["packs_dir"].as_str(), Some(SYSTEM_PACKS));
+        assert!(table.contains_key("models"), "le reste est intact");
+        // déjà le bon dossier : rien ne change ; un autre : refus
+        let same = format!("packs_dir = \"{SYSTEM_PACKS}\"\n");
+        assert_eq!(with_system_packs(&same).unwrap(), same);
+        assert!(with_system_packs("packs_dir = \"/home/ada/packs\"\n").unwrap_err().contains("autre dossier"));
+        assert!(with_system_packs("packs_dir = 3\n").is_err() && with_system_packs("[[[").is_err());
     }
 
     #[test]

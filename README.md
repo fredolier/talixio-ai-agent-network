@@ -126,9 +126,10 @@ s'en ajouter ni les modifier, et il vérifie leurs empreintes à chaque démarra
 ./tools.sh run claude
 ```
 
-Hors de Docker : `talixio-agent pack install catalogue --dir /opt/talixio/packs` sous un autre
-compte que celui du maître (avec `sudo`, par exemple), et `packs_dir = "/opt/talixio/packs"` dans
-`talixio.toml`. Voir `examples/catalogue`.
+Hors de Docker : le plus simple est le compte dédié (voir « En service »), après quoi
+`sudo talixio-agent pack install catalogue` suffit. À la main : `talixio-agent pack install
+catalogue --dir /opt/talixio/packs` sous un autre compte que celui du maître, et
+`packs_dir = "/opt/talixio/packs"` dans `talixio.toml`. Voir `examples/catalogue`.
 
 ## En service
 
@@ -139,11 +140,42 @@ où se trouve `talixio.toml` :
 talixio-agent service install --config talixio.toml
 ```
 
-Linux : unité systemd de votre compte (en root : `--user <compte>`, le maître ne tourne jamais en
-root). macOS : agent launchd. Windows : tâche planifiée à l'ouverture de session. `--print` montre
-ce qui serait fait sans rien faire ; `service status` et `service uninstall` font le reste. Un
-service n'hérite pas des variables de votre terminal : donnez les clés par `api_key_file`, depuis
-l'interface, ou sous Linux par `--env-file`.
+Linux : unité systemd de votre compte. macOS : agent launchd. Windows : tâche planifiée à
+l'ouverture de session. `--print` montre ce qui serait fait sans rien faire ; `service status` et
+`service uninstall` font le reste. Un service n'hérite pas des variables de votre terminal :
+donnez les clés par `api_key_file`, depuis l'interface, ou sous Linux par `--env-file`.
+
+### Compte dédié (Linux, recommandé)
+
+```bash
+sudo talixio-agent service install --config talixio.toml
+```
+
+En root, la commande met tout en place pour que le maître ne puisse modifier ni son exécutable,
+ni sa configuration, ni ses paquets :
+
+| Quoi | Où | À qui |
+|---|---|---|
+| exécutable | `/opt/talixio/talixio-agent` | root |
+| paquets (commandes, rôles) | `/opt/talixio/packs` | root |
+| configuration | `/etc/talixio/talixio.toml` | root (lisible par le compte) |
+| état, clés saisies dans l'interface, travail | `/var/lib/talixio` | `talixio-agent` |
+
+Le compte `talixio-agent` est créé s'il manque, sans mot de passe ni shell. Ensuite :
+
+```bash
+sudo talixio-agent pack install catalogue
+```
+
+```bash
+sudo systemctl restart talixio-agent
+```
+
+Modifier la configuration : `sudo` sur `/etc/talixio/talixio.toml`, puis redémarrer le service
+(`talixio-agent check --config <fichier>` la vérifie sans rien lancer). Le jeton de l'interface :
+`sudo cat /var/lib/talixio/.talixio/api-token`. Les chemins relatifs de la configuration partent
+de `/var/lib/talixio`. Pour faire tourner le maître sous un compte à vous, là où sont ses
+fichiers : `sudo talixio-agent service install --user <compte>` (jamais root).
 
 Au redémarrage, le maître retrouve son journal, sa mémoire, ses fournisseurs, et ses agents
 **permanents** : demandez-lui de créer un agent « permanent », il le recrée à chaque démarrage

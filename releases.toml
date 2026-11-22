@@ -7,6 +7,24 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.18.0"
+date = "2026-11-22"
+title = "Un compte dédié, et des fichiers que le maître ne peut pas modifier"
+summary = "Sous Linux, `sudo talixio-agent service install` crée le compte du maître et pose son exécutable, sa configuration et ses paquets à root."
+
+[[release.changes]]
+kind = "sécurité"
+text = "`sudo talixio-agent service install --config talixio.toml`, sans `--user` : compte `talixio-agent` (sans mot de passe ni shell), exécutable et paquets dans /opt/talixio, configuration dans /etc/talixio, tous à root ; le maître ne possède que /var/lib/talixio (état et travail). L'unité systemd met en plus ces dossiers en lecture seule."
+
+[[release.changes]]
+kind = "nouveau"
+text = "`sudo talixio-agent pack install <nom>` installe dans /opt/talixio/packs sans option. `talixio-agent check --config f.toml` vérifie une configuration comme le maître à son démarrage, paquets compris, sans le lancer."
+
+[[release.changes]]
+kind = "attention"
+text = "Avec le compte dédié, la configuration se modifie avec sudo (/etc/talixio/talixio.toml), puis `sudo systemctl restart talixio-agent`. Le jeton de l'interface est dans /var/lib/talixio/.talixio/api-token (lisible avec sudo). `service install --user <compte>` garde l'ancien fonctionnement."
+
+[[release]]
 version = "0.17.2"
 date = "2026-11-22"
 title = "Un identifiant par paquet"
