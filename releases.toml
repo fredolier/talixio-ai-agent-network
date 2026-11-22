@@ -7,6 +7,28 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.17.1"
+date = "2026-11-22"
+title = "Paquets : corrections de la revue de sécurité"
+summary = "La garde qui empêche le maître de modifier ses paquets ne se contourne plus, et un manifeste ne peut plus tromper ni le terminal ni le maître."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Le maître refuse de démarrer si le dossier des paquets, un de ses fichiers ou un dossier au-dessus lui appartient ou lui est inscriptible (retirer les droits d'écriture ne suffit plus) ; seul un montage en lecture seule en dispense."
+
+[[release.changes]]
+kind = "sécurité"
+text = "L'empreinte d'une commande vient toujours du parent, jamais de la demande d'un agent ; le plafond d'une cible la reçoit du paquet. Une règle écrite à la main sur un programme de paquet est refusée."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Manifeste d'un paquet : descriptions et arguments d'une ligne, bornés, sans caractère de commande. `pack show` montre aussi les consignes des rôles."
+
+[[release.changes]]
+kind = "attention"
+text = "Un rôle installé s'appelle « paquet/rôle » (`catalogue/collecteur`). Hors de Docker, le dossier des paquets et ses parents ne doivent pas appartenir au compte du maître : `/opt/talixio/packs` installé avec sudo, par exemple."
+
+[[release]]
 version = "0.17.0"
 date = "2026-11-22"
 title = "Des paquets de commandes et de rôles, installés par vous"

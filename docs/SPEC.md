@@ -509,8 +509,9 @@ Demandé le 2026-11-20. Rien n'est codé.
     remove | verify` : les paquets viennent de l'exécutable (le paquet « catalogue », ancien
     exemple) ou d'un dossier (`--from`) ; à terme, d'un service de téléchargement.
     - **Séparation** : le maître n'a aucun outil ni aucune route pour installer. Il lit le
-      dossier (`packs_dir`) à son démarrage, et **refuse de démarrer** s'il peut l'écrire
-      (`packs_unprotected = true` pour un essai) ou si un fichier ne répond plus à l'empreinte
+      dossier (`packs_dir`) à son démarrage, et **refuse de démarrer** si ce dossier, un de ses
+      fichiers ou un dossier au-dessus lui appartient ou lui est inscriptible, hors montage en
+      lecture seule (`packs_unprotected = true` pour un essai) ou si un fichier ne répond plus à l'empreinte
       SHA-256 notée à l'installation (`pack.lock`). Le dossier est interdit à ses outils de
       fichiers. Dans Docker : `./tools.sh pack …` écrit le dossier sur la machine, à votre
       compte ; le maître le reçoit monté en lecture seule.
@@ -520,7 +521,7 @@ Demandé le 2026-11-20. Rien n'est codé.
       relit le programme et refuse s'il a changé. Une empreinte ne s'écrit pas dans la
       configuration.
     - **Rôles** : le maître voit les rôles installés dans ses consignes ; `spawn_agent` avec le
-      nom d'un rôle installé donne à l'enfant les consignes et les commandes du rôle. Dossiers,
+      nom complet d'un rôle installé (« paquet/rôle ») donne à l'enfant les consignes et les commandes du rôle. Dossiers,
       budget et mission restent choisis par le maître, dans ses propres droits.
     - Non fait : interface de navigation (TUI), service de téléchargement et signature des
       paquets (l'empreinte protège ce qui est installé, pas ce qu'on installe : `pack show`
@@ -723,6 +724,28 @@ les seules options passées à `claude`, sans contrôle de ce qu'il fait réelle
 | K10 | Basse | Filtre des secrets de l'environnement sensible à la casse (Windows ne l'est pas). | ✅ Comparaison sans casse. Ce que `claude_env` laisse passer reste à la charge de l'exploitant (noté). |
 | K11 | Basse | `<état>/claude` pouvait être un lien symbolique posé avant le démarrage. | ✅ Refusé au démarrage. |
 | K12 | Basse | Une invite commençant par « / » pouvait être prise pour une commande de `claude`. | ✅ Jamais en tête d'invite (et `--disable-slash-commands`). |
+
+### Douzième passe (2026-11-22) : les paquets (décision 37)
+
+Revue indépendante, avec essais. Un modèle, par ses seuls outils, ne peut ni s'ajouter une
+commande ni élargir une commande de paquet. Un constat haut : la garde du dossier se contournait.
+
+| N° | Gravité | Constat | Traitement |
+|---|---|---|---|
+| P1 | Haute | La garde « le maître ne peut pas écrire ses paquets » ne regardait que les droits d'écriture : un dossier au compte du maître passait après un `chmod a-w`, et un dossier parent inscriptible permettait de remplacer le paquet entier, empreintes comprises. | ✅ Refus si le dossier, un fichier ou un dossier au-dessus, jusqu'à la racine, appartient au compte du maître ou lui est inscriptible, sauf montage en lecture seule. |
+| P2 | Moyenne | Le contrôle répondait pour le compte réel sans ses capacités, et toute erreur valait « protégé ». | ✅ Droits effectifs ; seul un refus net du système vaut protection. |
+| P3 | Moyenne | Sur une cible, l'agent pouvait fournir lui-même l'empreinte (le plafond n'en portait pas). | ✅ L'empreinte vient toujours du parent, jamais de la demande ; le plafond d'une cible reçoit celle du paquet au chargement. |
+| P4 | Moyenne | `pack show` et les autres affichaient le manifeste tel quel (séquences de terminal), sans les consignes des rôles. | ✅ Champs d'une ligne, bornés, sans caractère de commande, refusés sinon ; consignes affichées. |
+| P5 | Moyenne | Descriptions et arguments du manifeste entraient tels quels dans les consignes du maître. | ✅ Mêmes contrôles, à l'analyse du manifeste. |
+| P6 | Basse à moyenne | Un rôle de paquet au nom courant détournait les créations d'agents de ce nom. | ✅ Un rôle installé s'appelle toujours « paquet/rôle » ; le résultat de `spawn_agent` dit ce qui a été donné. |
+| P7 | Basse | Les fichiers voisins d'un script (liste de sites) ne sont revérifiés qu'au démarrage du maître ; vérification puis lancement par le chemin. | 📌 Limite : tient tant que la garde P1 tient. Empreinte du paquet entier chez l'agent : à faire. |
+| P8 | Basse | Une règle de cible sous le dossier des paquets survivait au retrait du paquet ; chemins différents entre maître et image : pas d'empreinte. | ✅ Une telle règle doit être une commande installée, sinon le maître ne démarre pas. 📌 Les paquets doivent être au même chemin chez le maître et dans l'image. |
+| P9 | Basse | Une règle écrite à la main sur un programme de paquet passait devant celle du paquet, sans empreinte. | ✅ Refusée au chargement. |
+| P10 | Basse | Sous Windows, le contrôle ne voulait rien dire. | ✅ Dit comme tel : pas de protection vérifiée, `packs_unprotected` à poser en connaissance de cause. |
+| P11 | Basse | `--from` prenait un paquet par le nom de son manifeste ; `remove` supprimait tout dossier portant un `pack.lock` ; installation interrompue. | ✅ Dossier et manifeste de même nom ; seuls les fichiers du paquet sont retirés ; installation à côté puis mise en place d'un coup. |
+| P12 | Basse | `sha256` ni validé ni borné dans les droits déclarés. | ✅ 64 chiffres hexadécimaux, compté, nettoyé. |
+| P13 | Basse | `tools.sh` : chemin relatif pris pour un volume, dossier temporaire laissé. | ✅ |
+| — | Information | Un paquet installé exécute du code sous le compte du maître : « jamais d'arguments libres » ne borne que les scripts honnêtes. `pack.lock` vit dans le dossier qu'il décrit : il détecte l'accident, la garde P1 fait le reste. | 📌 D'où la signature, à faire avec le service de téléchargement. |
 
 ### Onzième passe (2026-11-22) : le maître en conteneur et ses conteneurs voisins (décision 36)
 

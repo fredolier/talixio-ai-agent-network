@@ -105,6 +105,9 @@ impl Capabilities {
             if let Some(cwd) = &rule.cwd {
                 check_plain_path(cwd)?;
             }
+            if rule.sha256.as_ref().is_some_and(|h| h.len() != 64 || !h.bytes().all(|b| b.is_ascii_hexdigit())) {
+                return Err(format!("empreinte invalide pour {}", rule.program.display()));
+            }
             // un programme que l'agent peut réécrire n'est plus une liste fermée
             if self.fs_write.iter().any(|root| rule.program.starts_with(root)) {
                 return Err(format!("{} est dans un dossier inscriptible par l'agent", rule.program.display()));
@@ -133,7 +136,8 @@ impl Capabilities {
             .exec
             .iter()
             .map(|r| {
-                32 + r.program.as_os_str().len()
+                32 + r.sha256.as_ref().map_or(0, |h| h.len())
+                    + r.program.as_os_str().len()
                     + r.cwd.as_ref().map_or(0, |c| c.as_os_str().len())
                     + r.args.as_ref().map_or(0, |a| a.iter().map(|s| s.len() + 4).sum())
             })
@@ -160,6 +164,9 @@ impl Capabilities {
             }
             for arg in rule.args.iter_mut().flatten() {
                 *arg = crate::clean(arg, 1024, false);
+            }
+            if let Some(hash) = &mut rule.sha256 {
+                *hash = crate::clean(hash, 64, false);
             }
         }
         for model in &mut self.models {

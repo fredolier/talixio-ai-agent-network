@@ -46,6 +46,8 @@ VOLUME="$NAME-data"
 TOKEN_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/talixio/$NAME-api-token"
 # les paquets installés : sur cette machine, à votre compte ; le maître ne les voit qu'en lecture seule
 PACKS="${TALIXIO_PACKS:-${XDG_CONFIG_HOME:-$HOME/.config}/talixio/$NAME-packs}"
+# un chemin relatif passerait pour un nom de volume Docker
+case "$PACKS" in /*) ;; *) PACKS="$PWD/$PACKS" ;; esac
 
 die() { echo "tools.sh : $*" >&2; exit 1; }
 
@@ -82,12 +84,13 @@ build() {
         # les paquets installés entrent dans l'image au même chemin que chez le maître (/packs) :
         # l'agent y vérifie l'empreinte de chaque commande avant de la lancer
         local empty; empty="$(mktemp -d)"
+        # shellcheck disable=SC2064  # le chemin est figé maintenant : la variable est locale
+        trap "rmdir '$empty' 2>/dev/null || true" EXIT
         local tools="${TALIXIO_TOOLS:-$empty}" packs="$PACKS"
         [ -d "$tools" ] || die "dossier d'outils introuvable : $tools"
         [ -d "$packs" ] || packs="$empty"
         # shellcheck disable=SC2086
         docker build ${TALIXIO_BUILD_ARGS:-} -f docker/Dockerfile.navigateur --build-context "outils=$tools" --build-context "paquets=$packs" -t talixio-navigateur docker
-        rmdir "$empty"
         echo "Image talixio-navigateur construite : à donner à une cible « docker » du maître (examples/catalogue)."
         return
     fi

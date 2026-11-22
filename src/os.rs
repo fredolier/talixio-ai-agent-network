@@ -36,19 +36,43 @@ pub fn set_mode(path: &Path, mode: u32) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Ce compte peut-il écrire ce fichier ou ce dossier ? Sous Unix : la réponse du système, montage
-/// en lecture seule compris (root peut tout, sauf là). Sous Windows : l'attribut de lecture seule.
-pub fn writable(path: &Path) -> bool {
+/// Ce compte est-il hors d'état de modifier ce fichier ou ce dossier, maintenant et plus tard ?
+/// Oui si le système de fichiers est monté en lecture seule ; sinon il faut qu'il n'en soit pas
+/// le propriétaire (un propriétaire se rend ses droits quand il veut) et que le système lui
+/// refuse l'écriture. Toute réponse douteuse vaut « non ». Sous Windows, rien de tel n'est
+/// vérifié : la réponse est toujours non.
+pub fn out_of_reach(path: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;
-        let Ok(c) = std::ffi::CString::new(path.as_os_str().as_bytes()) else { return true };
-        // SAFETY : `c` est une chaîne C valide pour la durée de l'appel.
-        unsafe { libc::access(c.as_ptr(), libc::W_OK) == 0 }
+        use std::os::unix::fs::MetadataExt;
+        let c = std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|_| format!("{} : chemin invalide", path.display()))?;
+        // SAFETY : `c` est une chaîne C valide ; `vfs` est rempli par l'appel avant d'être lu.
+        let read_only = unsafe {
+            let mut vfs: libc::statvfs = std::mem::zeroed();
+            libc::statvfs(c.as_ptr(), &mut vfs) == 0 && (vfs.f_flag & libc::ST_RDONLY) != 0
+        };
+        if read_only {
+            return Ok(());
+        }
+        let meta = std::fs::symlink_metadata(path).map_err(|e| format!("{} : {e}", path.display()))?;
+        // SAFETY : appels sans effet de bord, sur une chaîne C valide.
+        let euid = unsafe { libc::geteuid() };
+        if meta.uid() == euid {
+            return Err(format!("{} appartient au compte du maître", path.display()));
+        }
+        // avec les droits effectifs du process, capacités comprises
+        let denied = unsafe { libc::faccessat(libc::AT_FDCWD, c.as_ptr(), libc::W_OK, libc::AT_EACCESS) } != 0;
+        let errno = std::io::Error::last_os_error().raw_os_error();
+        if denied && matches!(errno, Some(libc::EACCES) | Some(libc::EROFS)) {
+            Ok(())
+        } else {
+            Err(format!("le compte du maître peut écrire {}", path.display()))
+        }
     }
     #[cfg(not(unix))]
     {
-        std::fs::metadata(path).map(|m| !m.permissions().readonly()).unwrap_or(true)
+        Err(format!("sous Windows, rien ne vérifie que le maître ne peut pas écrire {}", path.display()))
     }
 }
 

@@ -804,8 +804,8 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value, resumed: Option<&str>) -> 
             }
         }
     }
-    // l'empreinte d'une commande suit sa règle : l'agent n'a pas à la recopier
-    for rule in caps.exec.iter_mut().filter(|r| r.sha256.is_none()) {
+    // l'empreinte d'une commande suit sa règle : elle vient toujours de ce parent, jamais de la demande
+    for rule in caps.exec.iter_mut() {
         rule.sha256 = node.caps.exec.iter().find(|own| own.program == rule.program && own.sha256.is_some()).and_then(|own| own.sha256.clone());
     }
     let model = input["model"].as_str().map(str::to_string).unwrap_or_else(|| node.model());
@@ -1014,8 +1014,12 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value, resumed: Option<&str>) -> 
     node.send_child(&boot.agent_id, Msg::Instruction { text: mission }, true)?;
     node.emit("spawn", format!("agent {name} ({}) créé — rôle : {}{}", boot.agent_id, boot.role, if permanent { " — permanent" } else { "" }));
     node.tree_dirty.notify_one();
+    let from_role = match template {
+        Some(template) => format!(" Rôle installé « {} » : ses consignes et ses commandes ({}) lui ont été données.", boot.role, template.exec.len()),
+        None => String::new(),
+    };
     Ok(format!(
-        "agent « {name} » créé (identifiant {}). Sa mission lui est transmise ; son compte rendu arrivera dans un prochain message.",
+        "agent « {name} » créé (identifiant {}).{from_role} Sa mission lui est transmise ; son compte rendu arrivera dans un prochain message.",
         boot.agent_id
     ))
 }

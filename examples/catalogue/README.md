@@ -30,7 +30,8 @@ talixio-agent pack show catalogue
   et ses cadres restent sur les sites de la liste ; ce qu'elle charge pour se construire doit
   venir d'un nom public, en https ; ni image, ni téléchargement ; profil jeté à chaque lecture ;
   60 s au plus. Les lignes de tableau sont rendues sur une ligne.
-- les rôles « collecteur », « rédacteur », « vérificateur » : leurs consignes et leurs commandes.
+- les rôles `catalogue/collecteur`, `catalogue/rédacteur`, `catalogue/vérificateur` : leurs
+  consignes et leurs commandes.
 - `consigne.md` : la consigne à remettre au maître, à coller dans une tâche planifiée
   (`talixio-agent pack show catalogue --file consigne.md`).
 

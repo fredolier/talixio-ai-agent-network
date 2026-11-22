@@ -29,9 +29,9 @@ async fn fake_model(State(program): State<String>, Json(body): Json<Value>) -> J
     let finish = |summary: String| call("finish_mission", json!({ "outcome": "achieved", "summary": summary, "evidence": "sortie lue" }));
     let message = match (is_root, last["role"].as_str().unwrap()) {
         (true, "user") if text.contains("salue") => {
-            assert!(system.contains("# Rôles installés") && system.contains("- salueur : Dit bonjour."), "{system}");
+            assert!(system.contains("# Rôles installés") && system.contains("- bonjour/salueur : Dit bonjour."), "{system}");
             let name = if text.contains("encore") { "second" } else { "premier" };
-            call("spawn_agent", json!({ "name": name, "role": "salueur", "objective": "Dis bonjour.", "success_criteria": "Le bonjour est rendu." }))
+            call("spawn_agent", json!({ "name": name, "role": "bonjour/salueur", "objective": "Dis bonjour.", "success_criteria": "Le bonjour est rendu." }))
         }
         (true, _) => say("C'est noté."),
         (false, "user") => {
@@ -143,7 +143,7 @@ async fn un_paquet_installe_sert_et_reste_verifie() {
     std::fs::write(&config, text(false)).unwrap();
     let refused = agent(&["root", "--config", config.to_str().unwrap()]);
     assert!(!refused.status.success());
-    assert!(String::from_utf8_lossy(&refused.stderr).contains("peut écrire"), "{}", String::from_utf8_lossy(&refused.stderr));
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("ne doit pouvoir modifier"), "{}", String::from_utf8_lossy(&refused.stderr));
 
     // accepté pour l'essai : l'agent créé par son rôle reçoit consignes et commande, et la lance
     std::fs::write(&config, text(true)).unwrap();

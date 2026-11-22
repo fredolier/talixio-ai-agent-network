@@ -366,6 +366,22 @@ impl RootConfig {
                 bail!("packs_dir doit être un chemin absolu");
             }
             let installed = crate::pack::load_installed(dir, !cfg.packs_unprotected).context("paquets installés")?;
+            let real = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+            let inside = |program: &Path| program.starts_with(dir) || program.starts_with(&real);
+            // une commande de paquet ne se réécrit pas à la main : sa règle vient du paquet, avec son empreinte
+            if let Some(rule) = cfg.capabilities.exec.iter().find(|rule| inside(&rule.program)) {
+                bail!("la règle sur {} est dans le dossier des paquets : elle vient du paquet installé, retirez-la de [capabilities]", rule.program.display());
+            }
+            // le plafond d'une cible ne cite, sous ce dossier, que des commandes installées ; il en
+            // reçoit l'empreinte, que l'agent vérifiera là-bas avant chaque lancement
+            for (name, target) in &mut cfg.targets {
+                for rule in target.capabilities.exec.iter_mut().filter(|rule| inside(&rule.program)) {
+                    let Some(known) = installed.exec.iter().find(|k| k.program == rule.program && k.args == rule.args && rule.cwd.is_none()) else {
+                        bail!("[targets.{name}] : {} n'est pas une commande d'un paquet installé (talixio-agent pack verify)", rule.describe());
+                    };
+                    rule.sha256 = known.sha256.clone();
+                }
+            }
             cfg.capabilities.exec.extend(installed.exec);
             cfg.pack_roles = installed.roles;
             cfg.pack_names = installed.names;
