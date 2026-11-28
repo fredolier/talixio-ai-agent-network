@@ -7,6 +7,36 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.24.1"
+date = "2026-11-28"
+title = "Premiers audits avec un vrai modèle"
+summary = "Le paquet « audit » a tourné sur deux dépôts publics avec un modèle ouvert de taille moyenne. Ce que ces essais ont montré est corrigé : refus expliqués aux agents, contrôle mécanique des citations d'un rapport."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Paquet `audit`, version 2 : commande `check-report <clone> <rapport>`. Pour chaque fichier, ligne et commit cités par le rapport, elle dit s'il existe et montre la ligne ; elle signale les sections vides ou disparues. Elle ne juge pas : le rôle `verifier` compare, et le `lead` la lance avant lui."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Les règles de commandes sont montrées aux agents avec des emplacements entre chevrons (`<read-path>`, `<write-path>`, `<arg>`) : un modèle recopiait `{read}` tel quel. Les fichiers de configuration et les paquets gardent leur notation."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Un refus dit quoi faire : commande refusée avec les formes permises et un exemple, budget d'un enfant manquant avec l'endroit où l'écrire, dossier à créer d'abord, commandes d'un rôle installé à ne pas recopier. Chaque agent lit son budget dans ses consignes."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Rôles du paquet `audit` : le clone et le dossier du rapport sont séparés (seul le second est inscriptible par les agents), un seul rédacteur à la fois, preuves écrites `chemin:ligne`, mission d'un agent réduite à trois chemins. `brief.md` donne au maître les étapes et les nombres."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Revue indépendante de `check-report` : le contenu d'un dépôt ne peut plus se faire passer pour une ligne du contrôle (texte nettoyé, noms à saut de ligne écartés), un rapport trop long ou trop chargé est signalé au lieu d'être ignoré."
+
+[[release.changes]]
+kind = "attention"
+text = "Avec un modèle ouvert de taille moyenne, un audit coûte 1 à 2,5 millions de tokens pour un dépôt de quelques centaines de lignes et son rapport n'est pas fiable sans relecture : `check-report` le montre. Réinstaller le paquet (`pack install audit --replace`) : son identifiant change."
+
+[[release]]
 version = "0.24.0"
 date = "2026-11-28"
 title = "Des secrets pour les commandes"

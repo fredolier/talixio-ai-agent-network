@@ -97,14 +97,15 @@ pub fn specs(node: &Node) -> Vec<ToolSpec> {
         ));
     }
     if !caps.exec.is_empty() {
-        let allowed = caps.exec.iter().map(|r| r.describe()).collect::<Vec<_>>().join(" ; ");
+        let allowed = caps.exec.iter().map(|r| r.shown()).collect::<Vec<_>>().join(" ; ");
         tools.push(spec(
             "run_command",
             format!(
                 "Lance un programme, sans shell (pas de redirection, de tube ni de variable), par son chemin absolu. \
-                 Seules ces commandes sont autorisées — « * » : un argument libre, jamais une option ; « ** » : une \
-                 suite d'arguments libres, sans option ; « {{read}} » / « {{write}} » : un chemin que tu as le droit \
-                 de lire / d'écrire : {allowed}."
+                 Seules ces formes sont autorisées. Dans `args`, mets une valeur à la place de chaque emplacement \
+                 entre chevrons — <read-path> / <write-path> : un chemin que tu as le droit de lire / d'écrire ; \
+                 <arg> : un argument libre, jamais une option ; <args...> : une suite d'arguments libres, sans \
+                 option. Formes : {allowed}."
             ),
             json!({
                 "program": { "type": "string" },
@@ -152,7 +153,7 @@ pub fn specs(node: &Node) -> Vec<ToolSpec> {
                                 "type": "object",
                                 "properties": {
                                     "program": { "type": "string", "description": "Chemin absolu du programme." },
-                                    "args": { "type": "array", "items": { "type": "string" }, "description": "Recopie exacte des arguments d'une de tes règles. Omis : arguments libres, seulement si ta propre règle les laisse libres." },
+                                    "args": { "type": "array", "items": { "type": "string" }, "description": "Recopie exacte des arguments d'une de tes formes, emplacements entre chevrons compris (<read-path>, <arg>…). Omis : arguments libres, seulement si ta propre règle les laisse libres." },
                                     "cwd": { "type": "string", "description": "Dossier d'exécution, s'il figure dans ta règle." }
                                 },
                                 "required": ["program"]
@@ -164,7 +165,7 @@ pub fn specs(node: &Node) -> Vec<ToolSpec> {
                             "properties": { "max_children": { "type": "integer" }, "max_depth": { "type": "integer" } },
                             "required": ["max_children", "max_depth"]
                         },
-                        "max_tokens": { "type": "integer", "description": "Budget de tokens, descendance comprise." },
+                        "max_tokens": { "type": "integer", "description": "Budget de tokens, descendance comprise. Obligatoire si tu as toi-même un budget : au plus ce qu'il t'en reste." },
                         "models": { "type": "array", "items": { "type": "string" }, "description": format!(
                             "Modèles de service confiés en plus de son modèle de conversation (alias : nature) : {}. Omis : aucun.",
                             node.natures().iter().filter(|(_, n)| *n != "llm").map(|(a, n)| format!("{a} : {n}")).collect::<Vec<_>>().join(", ")
@@ -808,6 +809,7 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value, resumed: Option<&str>) -> 
     // un rôle installé (paquet) : ses consignes et les règles de ses commandes viennent du paquet
     // a secret reaches a command through an installed role only: never because a request says so
     caps.exec.iter_mut().for_each(|rule| {
+        rule.args.iter_mut().flatten().for_each(crate::policy::ExecRule::unshow);
         rule.secrets.clear();
         rule.env.clear();
     });
@@ -862,8 +864,16 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value, resumed: Option<&str>) -> 
     let ceiling = match &target {
         None => {
             // les dossiers sont accordés par leur chemin réel : un lien ne peut pas élargir les droits
-            caps.canonicalize()?;
-            node.rights().check_grant(&caps)?;
+            caps.canonicalize().map_err(|e| match e.contains("os error 2") {
+                // the usual cause: a directory meant for the child that nobody has created yet
+                true => format!("{e}. A directory given to a child must exist: create it first with make_dir."),
+                false => e,
+            })?;
+            node.rights().check_grant(&caps).map_err(|e| match e.starts_with("commande") {
+                true if template.is_some() => format!("{e}. The role \"{role}\" already brings its commands: leave \"exec\" out, or copy one of your own rules exactly (program and args)."),
+                true => format!("{e}. Copy one of your own rules exactly (program and args)."),
+                false => e,
+            })?;
             None
         }
         Some(target) => {

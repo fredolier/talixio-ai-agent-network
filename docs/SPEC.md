@@ -668,10 +668,27 @@ Demandé le 2026-11-20. Rien n'est codé.
     - *Où vit git.* Les données git d'un clone sont gardées hors du dossier de l'agent
       (`~/.local/state/talixio-audit/`, sous le compte de l'agent) : il faut que ce dossier ne
       soit donné à aucun agent (seizième passe, F1).
-    - *Limites.* Pas encore essayé avec un vrai modèle : les commandes ont été essayées à la
-      main sur un dépôt public, pas les rôles. Les dépôts privés attendent la décision 44. Il
-      faut `git`, `bash` et `python3` là où tournent les agents (l'image vide du maître ne les a
-      pas : une cible Docker dédiée reste à écrire). `fetch-repo` clone depuis n'importe quel
+    - *Premiers essais réels* (2026-11-28, v0.24.1 ; OVHcloud AI Endpoints, `gpt-oss-120b`, clé
+      de l'utilisateur ; `dtolnay/itoa` trois fois, `pallets/itsdangerous` deux fois ; environ
+      8 millions de tokens en tout). La chaîne tient : le maître crée le `lead`, qui clone,
+      ouvre le rapport, crée ses cinq agents, et le maître rend son tableau. Un audit coûte 1 à
+      2,5 millions de tokens et 6 à 9 minutes pour un dépôt de quelques centaines de lignes,
+      dont plus de la moitié chez le `lead` (sa conversation grossit à chaque tour). Défauts
+      vus et corrigés : refus sans explication (budget, dossier absent, règle recopiée de
+      travers) qui faisaient tourner le maître en rond ; `{read}` recopié tel quel (les règles
+      sont montrées avec `<read-path>`, `<arg>`) ; budget de 2 000 tokens donné à un enfant
+      (chaque agent lit son budget) ; rapport écrit dans le clone (dossier `report/` séparé) ;
+      mission du vérificateur réduite par le `lead` à « pas de section vide » ; numéros de ligne
+      faux que personne ne relevait (commande `check-report`, dix-huitième passe).
+      Défaut restant, de conception : le rapport est un seul fichier que chaque agent réécrit
+      en entier ; ce modèle y remplace les titres du gabarit par les siens et efface le travail
+      des autres. `check-report` le signale (titres disparus), il ne l'empêche pas. À faire : un
+      fichier par rôle, assemblés par une commande. Avec ce modèle, le rapport n'est pas fiable
+      sans relecture ; à comparer avec un modèle plus fort.
+    - *Limites.* Les dépôts privés passent par un secret (décision 44), non essayé avec un vrai
+      jeton. Il faut `git`, `bash` et `python3` là où tournent les agents (image `audit`).
+      Le maître ne passe pas par un mandataire d'entreprise qui déchiffre (autorités de
+      confiance embarquées seulement) : vu sur le banc d'essai, contourné par un relais local. `fetch-repo` clone depuis n'importe quel
       hôte https que l'agent nomme. Le contenu lu est plafonné (256 ko par fichier, 60 ko par
       réponse de commande). La licence de l'auditeur n'est pas déclarée dans son dépôt : même
       propriétaire, à régulariser.
@@ -919,6 +936,27 @@ les seules options passées à `claude`, sans contrôle de ce qu'il fait réelle
 | K10 | Basse | Filtre des secrets de l'environnement sensible à la casse (Windows ne l'est pas). | ✅ Comparaison sans casse. Ce que `claude_env` laisse passer reste à la charge de l'exploitant (noté). |
 | K11 | Basse | `<état>/claude` pouvait être un lien symbolique posé avant le démarrage. | ✅ Refusé au démarrage. |
 | K12 | Basse | Une invite commençant par « / » pouvait être prise pour une commande de `claude`. | ✅ Jamais en tête d'invite (et `--disable-slash-commands`). |
+
+### Dix-huitième passe (2026-11-28) : `check-report` et les refus expliqués aux agents
+
+Revue indépendante avant publication, sur banc (dépôts et rapports hostiles fabriqués, dépôt de
+données construit comme par `fetch-repo`). Conclusion : rien de critique ni de haut ; ni
+injection d'option vers git, ni lecture hors de l'arbre commité, ni exécution. La faiblesse
+réelle : le contenu du dépôt pouvait se faire passer pour une ligne de verdict du contrôle, et le
+contrôle pouvait être sauté ou tué sans le dire. Les messages de refus (`check_exec`,
+`check_grant`, budget dans les consignes) ne montrent à un agent que ses propres règles.
+
+| # | Gravité | Constat | Traitement |
+|---|---|---|---|
+| R1 | moyen | Un chemin suivi contenant un saut de ligne forgeait des lignes « exists » ou « WRONG » entières (rejoué). | ✅ Noms non imprimables ou trop longs écartés de la liste ; tout fragment venu du dépôt ou du rapport passe par un nettoyage (une ligne, caractères imprimables, longueur bornée). |
+| R2 | bas/moyen | Retour chariot, ESC, U+2028 dans une ligne citée ou un sujet de commit. | ✅ Même nettoyage. |
+| R3 | bas | Le titre de section, pris au rapport, était imprimé tel quel entre crochets. | ✅ Seul le numéro de section est imprimé. |
+| R4 | moyen/bas | Au-delà de 400 citations, le reste était ignoré sans le dire. | ✅ Compté et signalé comme un défaut. |
+| R5 | bas/moyen | Expressions quadratiques : une ligne de 60 000 caractères coûtait une minute, et le contrôle ne rendait rien. | ✅ Ligne de plus de 2 000 caractères signalée et non lue ; l'expression des citations ne repart plus de chaque position. |
+| R6 | bas | Erreur de mémoire en citant beaucoup de gros fichiers. | ✅ Un seul fichier gardé en mémoire à la fois. |
+| R7 | bas | `HOME` vide ou relatif : dépôt de données cherché sous le dossier courant. | ✅ Refusé ; propriétaire du dépôt de données vérifié. |
+| R8 | bas | Un chemin inventé passait pour existant si son nom de fichier était unique. | ✅ Un chemin plus court n'est admis que s'il termine un seul chemin suivi, à un « / ». |
+| R9 | info | Plage : seule la première ligne est montrée (désormais dit) ; faux « EMPTY » sur un texte entre chevrons (seuls les marqueurs du gabarit comptent) ; mot en lettres hexadécimales pris pour un commit (écarté) ; commit hors de l'historique audité compté présent (il doit être un ancêtre du commit audité) ; code de retour de `ls-tree` ignoré (vérifié). | ✅ |
 
 ### Dix-septième passe (2026-11-28) : les secrets des commandes (décision 44)
 

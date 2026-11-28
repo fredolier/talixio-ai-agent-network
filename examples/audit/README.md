@@ -30,6 +30,9 @@ talixio-agent pack show audit
 - `repo-git <clone> <question>`: nine read-only questions (files, search, history, recent,
   commit, show, diff, blame, authors). Answers are cut at 60,000 bytes, and say so.
 - `new-report <file.md>`: the empty report, nine sections.
+- `check-report <clone> <report.md>`: what the report cites, checked mechanically: each file and
+  line, each commit, with the cited line printed beside it; sections left empty. It does not judge
+  whether the line says what the report claims: the verifier does.
 - `brief.md`: the message to send to the master
   (`talixio-agent pack show audit --file brief.md`).
 

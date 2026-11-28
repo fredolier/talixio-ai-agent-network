@@ -43,6 +43,7 @@ const EMBEDDED: &[(&str, Files)] = &[(
         ("repo-map", include_bytes!("../packs/audit/repo-map")),
         ("repo-git", include_bytes!("../packs/audit/repo-git")),
         ("new-report", include_bytes!("../packs/audit/new-report")),
+        ("check-report", include_bytes!("../packs/audit/check-report")),
     ],
 )];
 

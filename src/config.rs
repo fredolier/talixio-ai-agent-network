@@ -269,7 +269,7 @@ impl Target {
             if paths.is_empty() { "aucun".to_string() } else { paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ") }
         };
         let caps = &self.capabilities;
-        let commands = if caps.exec.is_empty() { "aucune".to_string() } else { caps.exec.iter().map(|r| r.describe()).collect::<Vec<_>>().join(" ; ") };
+        let commands = if caps.exec.is_empty() { "aucune".to_string() } else { caps.exec.iter().map(|r| r.shown()).collect::<Vec<_>>().join(" ; ") };
         format!("{place} — droits au plus : lecture {} ; écriture {} ; commandes {commands}", list(&caps.fs_read), list(&caps.fs_write))
     }
 }

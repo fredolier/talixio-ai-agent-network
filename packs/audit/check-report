@@ -1,0 +1,134 @@
+#!/usr/bin/python3 -I
+"""Checks, without judging, what an audit report cites: does each file and line exist in the
+fetched repository, does each commit exist, is a section still empty. For each citation that
+resolves, prints the line itself, so that a reader can compare it with what the report claims.
+It reads the report, tracked files and the git data fetch-repo keeps apart; it runs nothing.
+Usage: check-report <clone> <report.md>"""
+import hashlib, os, re, resource, subprocess, sys
+from pathlib import Path
+
+if len(sys.argv) != 3 or not sys.argv[2].endswith(".md"): sys.exit("check-report: usage: check-report <clone> <report.md>")
+T = Path(sys.argv[1]).resolve()
+HOME = os.environ.get("HOME", "")
+if not os.path.isabs(HOME): sys.exit("check-report: HOME is not an absolute path")   # else the store would be looked for under the current directory
+STORE = Path(HOME).resolve() / ".local/state/talixio-audit" / (hashlib.sha256(str(T).encode()).hexdigest()[:40] + ".git")
+if not STORE.is_dir() or STORE.stat().st_uid != os.getuid(): sys.exit("check-report: not a fetched repository (use fetch-repo first)")
+resource.setrlimit(resource.RLIMIT_AS, (2 << 30, 2 << 30))
+REPORT = Path(sys.argv[2])
+if REPORT.is_symlink() or not REPORT.is_file() or REPORT.stat().st_size > 2 * 1024 * 1024:
+    sys.exit("check-report: the report is not a plain file of 2 MiB at most")
+MAX_FILE, MAX_OUT, MAX_CITES, MAX_LINE = 2 * 1024 * 1024, 60000, 400, 2000
+
+
+def safe(value, limit=160):
+    """Text from the repository or the report, made unable to pass for a line of this program:
+    one line, printable characters only, bounded."""
+    value = "".join(c if c.isprintable() else "?" for c in str(value))
+    return value[:limit] + ("…" if len(value) > limit else "")
+
+
+def git(*args):
+    """Read-only questions to the git data: no hook, no pager, no conversion, a time limit."""
+    cmd = ["git", f"--git-dir={STORE}", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat", "-c", "core.fsmonitor=false",
+           "-c", "core.quotePath=false", "-c", "log.showSignature=false", "--no-pager", *args]
+    try:
+        return subprocess.run(cmd, capture_output=True, timeout=60, stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        sys.exit("check-report: git took too long")
+
+
+listing = git("ls-tree", "-r", "--name-only", "-z", "--full-tree", "HEAD")
+if listing.returncode != 0: sys.exit("check-report: the fetched repository cannot be read")
+# a name with a line break or a control character could not be cited anyway
+tracked = [p for p in listing.stdout.decode("utf-8", "replace").split("\0") if p and p.isprintable() and len(p) <= 400]
+known = set(tracked)
+by_name = {}
+for p in tracked: by_name.setdefault(p.rsplit("/", 1)[-1], []).append(p)
+last = (None, None)
+
+
+def lines_of(path):
+    """The lines of a tracked file, as committed (what an agent wrote in the clone does not count).
+    Only the last file read is kept: a report citing many large files costs no memory."""
+    global last
+    if last[0] != path:
+        size = git("cat-file", "-s", f"HEAD:{path}").stdout.strip()
+        if not size.isdigit() or int(size) > MAX_FILE: last = (path, None)
+        else: last = (path, git("cat-file", "blob", f"HEAD:{path}").stdout.decode("utf-8", "replace").split("\n"))
+    return last[1]
+
+
+def resolve(name):
+    name = name.strip("`*\"'()[],. ").removeprefix("./")
+    if name in known: return name, None
+    # a shorter path is accepted when it is the end of exactly one tracked path, at a "/"
+    hits = [h for h in by_name.get(name.rsplit("/", 1)[-1], []) if h.endswith("/" + name)]
+    if len(hits) == 1: return hits[0], None
+    return None, ("no such tracked file" if not hits else "several files end with this path: " + safe(", ".join(hits[:5]), 400))
+
+
+text = REPORT.read_text("utf-8", "replace")
+# file:line, file#L12, "file line 12", "file, lines 12-30"
+CITE = re.compile(r"(?<![\w./+@-])`?([\w./+@-]*[\w+@-]\.[A-Za-z0-9]{1,8}|[\w./+@-]*(?:Makefile|Dockerfile|LICENSE[\w-]*))`?"
+                  r"(?::|#L|,?\s+lines?\s+)(\d{1,7})(?:\s*[-–‑—]\s*L?(\d{1,7}))?")
+COMMIT = re.compile(r"(?<![0-9a-fA-F/.\w])([0-9a-f]{7,40})(?![0-9a-fA-F\w])")
+out, bad, seen, section, skipped = [], 0, set(), "header", 0
+for number, raw in enumerate(text.split("\n"), 1):
+    if len(raw) > MAX_LINE:
+        bad += 1; out.append(f"WRONG  report line {number} is longer than {MAX_LINE} characters: not checked"); continue
+    head = re.match(r"##\s+(\d+)", raw)
+    if head: section = "section " + head.group(1)
+    elif raw.startswith("## "): section = "section ?"
+    for m in CITE.finditer(raw):
+        key = (m.group(1), m.group(2), m.group(3))
+        if key in seen: continue
+        if len(seen) >= MAX_CITES: skipped += 1; continue
+        seen.add(key)
+        first, end = int(m.group(2)), int(m.group(3) or m.group(2))
+        shown = f"{m.group(1)}:{first}" + (f"-{end}" if end != first else "")
+        path, why = resolve(m.group(1))
+        shown = safe(shown, 200)
+        if path is None: bad += 1; out.append(f"WRONG  [{section}] {shown}: {why}"); continue
+        body = lines_of(path)
+        if body is None: out.append(f"?      [{section}] {shown}: file too large or unreadable, not checked"); continue
+        count = len(body) - (1 if body and body[-1] == "" else 0)
+        if first < 1 or end < first or end > count:
+            bad += 1; out.append(f"WRONG  [{section}] {shown}: {path} has {count} lines"); continue
+        out.append(f"exists [{section}] {path}:{first}" + (f"-{end} (first of {end - first + 1} lines shown)" if end != first else "") + " | " + safe(body[first - 1].strip()))
+    for m in COMMIT.finditer(raw):
+        sha = m.group(1)
+        # a word made of hexadecimal letters only ("defaced") is not a commit
+        if sha in seen or sha.isdigit() or sha.isalpha(): continue
+        if len(seen) >= MAX_CITES: skipped += 1; continue
+        seen.add(sha)
+        found = git("log", "-1", "--format=%h %as %s", f"{sha}^{{commit}}", "--")
+        # in the audited history, not merely somewhere in what was fetched
+        if found.returncode == 0 and git("merge-base", "--is-ancestor", sha, "HEAD").returncode == 0:
+            out.append(f"exists [{section}] commit " + safe(found.stdout.decode("utf-8", "replace").strip()))
+        else: bad += 1; out.append(f"WRONG  [{section}] commit {sha}: no such commit")
+
+# a section left as the template gave it: only its heading, table header or <placeholder>
+parts = re.split(r"(?m)^##\s+(.*)$", text)
+for title, body in zip(parts[1::2], parts[2::2]):
+    kept = [l for l in body.split("\n") if l.strip() and not l.startswith("###") and not re.fullmatch(r"\s*\|[\s|:-]*\|\s*", l)]
+    rows = [l for l in kept if l.lstrip().startswith("|")]
+    prose = [l.strip() for l in kept if not l.lstrip().startswith("|")]
+    prose = [l for l in prose if len(l) <= MAX_LINE and not re.fullmatch(r"(\*\*[^*]*\*\*:?)? ?<[^>]*>", l)]
+    number = re.match(r"\s*(\d+)", title)
+    if len(rows) <= 1 and not prose: bad += 1; out.append(f"EMPTY  [section {number.group(1) if number else '?'}] nothing written under this heading")
+# a section whose heading is gone: an agent rewrote the report instead of filling its part
+present = {m.group(1) for m in re.finditer(r"(?m)^##\s+(\d)\.", text)}
+for n in "123456789":
+    if n not in present: bad += 1; out.append(f"EMPTY  [section {n}] its heading (\"## {n}. ...\") is missing from the report")
+# the placeholders of the report template itself, still in place
+TEMPLATE = ["<name>", "<url>", "<sha>", "<date of commit>", "<date>", "<transcripts, examples", "<the user, on", "<five lines at most", "<with quotes and sources>",
+            "<from the first commits", "<what it is for; what success", "<Where it moved away", "<instruction lines, estimated", "<the rigour, tests and gates", "<What could not be told"]
+for mark in TEMPLATE:
+    if mark in text: bad += 1; out.append(f"EMPTY  template text left in place: {mark}…")
+if skipped: bad += skipped; out.insert(0, f"WRONG  {skipped} further citations not checked (limit {MAX_CITES}): the report cites too much to be verified")
+
+cites = sum(1 for l in out if l.startswith(("exists", "WRONG", "?")))
+print(f"check-report: {cites} citations, {bad} problems (WRONG: the citation does not resolve; EMPTY: nothing written).")
+print("A line marked \"exists\" shows what is at that place: whether it says what the report claims is for a reader to judge.")
+result = "\n".join(out)
+print(result[:MAX_OUT] + ("\n[answer cut]" if len(result) > MAX_OUT else ""))

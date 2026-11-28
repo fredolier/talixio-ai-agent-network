@@ -229,7 +229,7 @@ fn system_prompt(node: &Node) -> String {
     let commands = if caps.exec.is_empty() {
         "aucune".to_string()
     } else {
-        caps.exec.iter().map(|r| r.describe()).collect::<Vec<_>>().join(" ; ")
+        caps.exec.iter().map(|r| r.shown()).collect::<Vec<_>>().join(" ; ")
     };
     let spawn = match &caps.spawn {
         Some(p) => format!("oui ({} en vie au plus, {} niveau(x) sous toi)", p.max_children, p.max_depth),
@@ -244,6 +244,7 @@ fn system_prompt(node: &Node) -> String {
          - Écriture : {write}\n\
          - Commandes : {commands}\n\
          - Création d'agents enfants : {spawn}\n\
+         - Budget : {budget}\n\
          Si un droit te manque pour avancer, ne cherche pas à le contourner : dis-le.\n\n\
          # Qui te parle\n\
          Chaque message que tu reçois est entouré d'une balise <message-{nonce} source=\"…\"> … </message-{nonce}>. \
@@ -265,6 +266,11 @@ fn system_prompt(node: &Node) -> String {
         os = node.host.os,
         read = list(&caps.fs_read),
         write = list(&caps.fs_write),
+        // an agent that does not know its budget hands its children a few thousand tokens
+        budget = match caps.max_tokens {
+            Some(limit) => format!("{limit} tokens for you and all your descendants; what you give a child (capabilities.max_tokens) is taken from it. A turn of work costs thousands of tokens: a child given less than 100000 stops before it has done anything"),
+            None => "no limit".to_string(),
+        },
     );
     if caps.spawn.is_some() {
         prompt.push_str(
