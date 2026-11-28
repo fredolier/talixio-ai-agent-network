@@ -680,11 +680,26 @@ Demandé le 2026-11-20. Rien n'est codé.
       (chaque agent lit son budget) ; rapport écrit dans le clone (dossier `report/` séparé) ;
       mission du vérificateur réduite par le `lead` à « pas de section vide » ; numéros de ligne
       faux que personne ne relevait (commande `check-report`, dix-huitième passe).
-      Défaut restant, de conception : le rapport est un seul fichier que chaque agent réécrit
-      en entier ; ce modèle y remplace les titres du gabarit par les siens et efface le travail
-      des autres. `check-report` le signale (titres disparus), il ne l'empêche pas. À faire : un
-      fichier par rôle, assemblés par une commande. Avec ce modèle, le rapport n'est pas fiable
-      sans relecture ; à comparer avec un modèle plus fort.
+      Le rapport unique, réécrit en entier par chaque agent, était écrasé : ce modèle y
+      remplaçait les titres du gabarit par les siens.
+    - *Un fichier par partie* (2026-11-28, v0.25.0, « chaque agent écrit son propre rapport
+      et […] un autre agent consolide » ; « un rapport bien formaté, joliment, en HTML, hyper
+      lisible »). `new-report <dossier>` crée onze fichiers (`0-header.md`, `summary.md`,
+      `1-goal.md` … `9-gaps.md`), chacun avec un seul rédacteur. Rôle `audit/editor` : il lit
+      toutes les parties, rend les contradictions au `lead` (qui les renvoie au rédacteur),
+      écrit le résumé et les manques. `build-report <dossier> [titre]` assemble `report.md` et
+      `report.html` (une page autonome, sans script ni ressource distante, tout le texte
+      échappé) ; les titres viennent de la commande. Dix-neuvième passe de sécurité.
+    - *Essais avec Qwen3.5 397B* (OVHcloud). Un `lead` a dépensé ses 3 millions de tokens à
+      appeler 94 fois `list_agents` en attendant ses enfants : l'outil dit maintenant de finir
+      son tour (le compte rendu arrive seul), et n'a plus été appelé à la passe suivante.
+      Passe suivante sur `pallets/itsdangerous` : onze parties écrites chacune par son agent,
+      aucune écrasée, `report.html` construit par le `lead` ; 54 citations, dont 52 se
+      résolvent (deux plages dépassent d'une ligne la fin du fichier). Coût : 2,4 millions de
+      tokens ; chaque agent spécialisé approche ses 400 000 (il lit large, et chaque tour
+      renvoie toute sa conversation). Arrêtée avant le vérificateur. Formulaire du 2026-11-28 :
+      envoi par e-mail et vers un salon, destinataires fixés par l'exploitant, tout fichier
+      lisible par l'agent ; branche de travail : plus tard.
     - *Limites.* Les dépôts privés passent par un secret (décision 44), non essayé avec un vrai
       jeton. Il faut `git`, `bash` et `python3` là où tournent les agents (image `audit`).
       Le maître ne passe pas par un mandataire d'entreprise qui déchiffre (autorités de
@@ -936,6 +951,25 @@ les seules options passées à `claude`, sans contrôle de ce qu'il fait réelle
 | K10 | Basse | Filtre des secrets de l'environnement sensible à la casse (Windows ne l'est pas). | ✅ Comparaison sans casse. Ce que `claude_env` laisse passer reste à la charge de l'exploitant (noté). |
 | K11 | Basse | `<état>/claude` pouvait être un lien symbolique posé avant le démarrage. | ✅ Refusé au démarrage. |
 | K12 | Basse | Une invite commençant par « / » pouvait être prise pour une commande de `claude`. | ✅ Jamais en tête d'invite (et `--disable-slash-commands`). |
+
+### Dix-neuvième passe (2026-11-28) : `new-report`, `build-report` et la page HTML du rapport
+
+Revue indépendante avant publication, sur banc : parties et titres hostiles, 1,7 million de
+compositions aléatoires passées au rendu avec une liste blanche de balises, page chargée dans
+Chromium (aucune requête, aucun script, aucun événement). Conclusion : aucun texte d'un agent
+n'arrive hors échappement dans `report.html` ; aucune sortie du dossier atteignable avec les
+outils d'un agent. Le défaut réel était ailleurs : l'assemblage cachait au contrôle les
+sections manquantes.
+
+| # | Gravité | Constat | Traitement |
+|---|---|---|---|
+| H1 | moyen | Une partie supprimée, vidée, trop grosse ou remplacée par un lien devenait une phrase que `check-report` prenait pour du texte : plus de « EMPTY » (régression). | ✅ Ce qui manque est écrit entre chevrons, la forme que le contrôle lit comme vide ; marqueurs ajoutés au contrôle ; en-tête, résumé et parties trop grosses comptés manquants. |
+| H2 | bas | Chaque partie était lue deux fois : `report.md` et `report.html` pouvaient différer si un agent écrivait pendant l'assemblage. | ✅ Une seule lecture. |
+| H3 | bas | `report.md` garde le texte des parties tel quel (une image ou un lien y resterait actif dans un afficheur Markdown). | ✅ Dit par la commande et par le rôle : c'est `report.html` qu'on ouvre et qu'on envoie. |
+| H4 | bas | Vérification puis réouverture d'une partie ; fichier temporaire rouvert s'il existait (lien dur). Non atteignable par un agent aujourd'hui. | ✅ Partie lue par un seul descripteur (`O_NOFOLLOW`, fichier ordinaire, taille bornée) ; fichier temporaire créé neuf (`O_EXCL`) ; `new-report` n'écrit que dans des fichiers neufs. |
+| H5 | info | Espaces insécables et fines remplacées par « ? ». | ✅ Gardées comme espaces. |
+| H6 | info | Texte sur la ligne d'ouverture d'un bloc de code absent de la page. | ✅ Gardé. |
+| H7 | info | Le gabarit `report.md` du paquet n'est pas vérifié par empreinte au lancement (seul le programme l'est) : ne compte que si le dossier des paquets est inscriptible. | ❌ Noté. |
 
 ### Dix-huitième passe (2026-11-28) : `check-report` et les refus expliqués aux agents
 

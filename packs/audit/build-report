@@ -1,0 +1,176 @@
+#!/usr/bin/python3 -I
+"""Puts an audit report together from its parts (the files new-report created, one per section,
+each filled by one agent), and writes it twice in the same directory: report.md, and report.html,
+a single page made to be read, with no script and nothing fetched from anywhere.
+The headings come from here, not from the parts: an agent cannot lose or rename a section.
+Usage: build-report <report directory> [title]"""
+import html, os, re, stat, sys, unicodedata
+from pathlib import Path
+
+if len(sys.argv) not in (2, 3): sys.exit("build-report: usage: build-report <report directory> [title]")
+D = Path(sys.argv[1])
+if D.is_symlink() or not D.is_dir(): sys.exit("build-report: not a report directory (use new-report first)")
+MAX_PART, MAX_LINE = 400 * 1024, 4000
+SECTIONS = [("1-goal.md", "1. Goal"), ("2-design.md", "2. Intended design, next to what is there"),
+            ("3-verdicts.md", "3. Verdict for each part"), ("4-commands.md", "4. The commands and scripts of the repository"),
+            ("5-code-review.md", "5. Code review"), ("6-setup.md", "6. AI-assistant and automation setup"),
+            ("7-divergence.md", "7. Divergence"), ("8-plan.md", "8. Plan back to the goal"), ("9-gaps.md", "9. Gaps")]
+NOTE = ("Each finding gives its evidence (`path:line` from the root of the repository, a commit, or a transcript entry), "
+        "a confidence (high, medium, low), the smallest fix, and the risk of that fix. Numbers come from the map file beside this report.")
+
+
+def clean(text):
+    """One part, as text that cannot break the page: printable characters, bounded lines, and no
+    heading above the third level (the first two belong to the report)."""
+    out = []
+    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        # spaces of every kind (no-break, thin) stay spaces; what cannot be seen becomes "?"
+        line = "".join(c if c.isprintable() or c == "\t" else " " if unicodedata.category(c) == "Zs" else "?" for c in line)[:MAX_LINE]
+        out.append(re.sub(r"^#{1,2}(?!#)\s*", "### ", line))
+    return "\n".join(out).strip("\n")
+
+
+TOO_LARGE = f"<This part is larger than {MAX_PART // 1024} KiB and was left out.>"
+
+
+def part(name):
+    """A part, read once, through the file itself: never a link, a pipe or a directory."""
+    try: fd = os.open(D / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError: return None
+    with os.fdopen(fd, "rb") as f:
+        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode): return None
+        data = f.read(MAX_PART + 1)
+    if len(data) > MAX_PART: return TOO_LARGE
+    return clean(data.decode("utf-8", "replace")) or None
+
+
+# each part is read once: the two files written below say the same thing
+PARTS = {name: part(name) for name in ["0-header.md", "summary.md"] + [n for n, _ in SECTIONS]}
+
+
+title = "".join(c if c.isprintable() else "?" for c in (sys.argv[2] if len(sys.argv) == 3 else D.resolve().parent.name))[:120] or "repository"
+# what is missing is written between angle brackets, the form check-report reads as "empty"
+missing = [name for name, body in PARTS.items() if not body or body == TOO_LARGE]
+md = [f"# Audit of {title}", ""]
+header, summary = PARTS["0-header.md"], PARTS["summary.md"]
+md += [header if header else "<No header was written.>", ""]
+md += ["**In short:** " + (summary if summary else "<No summary was written.>"), "", NOTE, ""]
+for name, heading in SECTIONS:
+    md += [f"## {heading}", "", PARTS[name] or "<Nothing was written for this section.>", ""]
+markdown = "\n".join(md)
+
+# ---- a small, strict rendering to HTML: everything is escaped first, then a few marks are read
+INLINE = re.compile(r"`([^`]+)`|\*\*([^*]+)\*\*|(?<![\w*])\*([^*\s][^*]*)\*(?![\w*])")
+
+
+def inline(text):
+    text = html.escape(text, quote=True)
+    return INLINE.sub(lambda m: f"<code>{m.group(1)}</code>" if m.group(1) else f"<strong>{m.group(2)}</strong>" if m.group(2) else f"<em>{m.group(3)}</em>", text)
+
+
+def cells(line):
+    return [c.strip() for c in re.split(r"(?<!\\)\|", line.strip().strip("|"))]
+
+
+def render(text):
+    out, lines, i = [], text.split("\n"), 0
+    while i < len(lines):
+        line = lines[i]
+        if not line.strip(): i += 1; continue
+        if line.startswith("```"):
+            block = [line[3:]] if line[3:].strip() else []; i += 1   # nothing of a part is left out of the page
+            while i < len(lines) and not lines[i].startswith("```"): block.append(lines[i]); i += 1
+            out.append("<pre><code>" + html.escape("\n".join(block)) + "</code></pre>"); i += 1; continue
+        head = re.match(r"(#{1,4})\s+(.*)", line)
+        if head:
+            level = len(head.group(1)); label = head.group(2)
+            anchor = f' id="s{label[0]}"' if level == 2 and label[:1].isdigit() else ""
+            out.append(f"<h{level}{anchor}>{inline(label)}</h{level}>"); i += 1; continue
+        if line.lstrip().startswith("|") and i + 1 < len(lines) and re.fullmatch(r"\s*\|[\s|:-]*\|\s*", lines[i + 1]):
+            head_cells = cells(line); i += 2; rows = []
+            while i < len(lines) and lines[i].lstrip().startswith("|"): rows.append(cells(lines[i])); i += 1
+            bare = not any(head_cells)
+            table = ['<div class="scroll"><table' + (' class="facts"' if bare else "") + ">"]
+            if not bare: table.append("<thead><tr>" + "".join(f"<th>{inline(c)}</th>" for c in head_cells) + "</tr></thead>")
+            table.append("<tbody>")
+            for row in rows:
+                tags = []
+                for n, c in enumerate(row):
+                    label = head_cells[n].lower() if n < len(head_cells) else ""
+                    level = c.strip("* ").lower()
+                    mark = f' class="lv {level}"' if label.startswith("confidence") and level in ("high", "medium", "low") else ""
+                    tags.append(f"<th scope=\"row\">{inline(c)}</th>" if bare and n == 0 else f"<td{mark}>{inline(c)}</td>")
+                table.append("<tr>" + "".join(tags) + "</tr>")
+            if not rows and not bare: table.append(f'<tr><td class="none" colspan="{len(head_cells)}">No entry.</td></tr>')
+            out.append("\n".join(table) + "</tbody></table></div>"); continue
+        if re.match(r"\s*([-*]|\d+[.)])\s+", line):
+            ordered = bool(re.match(r"\s*\d", line)); items = []
+            while i < len(lines) and re.match(r"\s*([-*]|\d+[.)])\s+", lines[i]):
+                items.append(re.sub(r"^\s*([-*]|\d+[.)])\s+", "", lines[i])); i += 1
+            tag = "ol" if ordered else "ul"
+            out.append(f"<{tag}>" + "".join(f"<li>{inline(x)}</li>" for x in items) + f"</{tag}>"); continue
+        para = []
+        while i < len(lines) and lines[i].strip() and not re.match(r"(#{1,4}\s|```|\s*\||\s*([-*]|\d+[.)])\s+)", lines[i]): para.append(lines[i]); i += 1
+        if not para: para.append(lines[i]); i += 1
+        out.append("<p>" + "<br>".join(inline(x) for x in para) + "</p>")
+    return "\n".join(out)
+
+
+CSS = """
+:root{--bg:#fbfaf7;--card:#fff;--ink:#1d2330;--soft:#5b6472;--line:#e3e0d8;--accent:#1f5f8b;--code:#f1efe9;
+--high:#8a1f1f;--highbg:#fbe9e7;--medium:#7a5200;--mediumbg:#fdf3d8;--low:#2d5f3f;--lowbg:#e6f3ea}
+@media (prefers-color-scheme:dark){:root{--bg:#14171c;--card:#1b1f26;--ink:#e6e8ec;--soft:#9aa3b2;--line:#2c323c;--accent:#7fb8e0;
+--code:#252a33;--high:#ffb4a8;--highbg:#4a1f1c;--medium:#f3d08a;--mediumbg:#453410;--low:#a6dbb8;--lowbg:#1c3a28}}
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:1040px;margin:0 auto;padding:32px 20px 64px}
+h1{font-size:1.9rem;line-height:1.2;margin:0 0 20px;text-wrap:balance}
+h2{font-size:1.3rem;margin:44px 0 14px;padding-top:18px;border-top:1px solid var(--line)}
+h3{font-size:1.05rem;margin:24px 0 8px}h4{font-size:1rem;margin:18px 0 6px}
+p{margin:10px 0}ul,ol{margin:10px 0;padding-left:24px}li{margin:4px 0}
+code{background:var(--code);padding:1px 5px;border-radius:4px;font:0.88em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}
+pre{background:var(--code);padding:12px 14px;border-radius:8px;overflow-x:auto}pre code{background:none;padding:0}
+.lead{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:8px;padding:14px 18px;margin:18px 0;font-size:1.05rem}
+.lead p{margin:6px 0}.note{color:var(--soft);font-size:.9rem}
+nav{margin:18px 0 6px;font-size:.92rem}nav a{display:inline-block;margin:0 14px 6px 0;color:var(--accent);text-decoration:none}nav a:hover{text-decoration:underline}
+.scroll{overflow-x:auto;margin:12px 0;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:.93rem}
+th,td{text-align:left;vertical-align:top;padding:9px 12px;border-bottom:1px solid var(--line)}
+thead th{font-size:.8rem;text-transform:uppercase;letter-spacing:.04em;color:var(--soft);white-space:nowrap}
+tbody tr:last-child td,tbody tr:last-child th{border-bottom:0}
+table.facts th{width:11rem;color:var(--soft);font-weight:600;white-space:nowrap}
+td.none{color:var(--soft);font-style:italic}
+td.lv{font-weight:600;white-space:nowrap}td.high{color:var(--high);background:var(--highbg)}td.medium{color:var(--medium);background:var(--mediumbg)}td.low{color:var(--low);background:var(--lowbg)}
+footer{margin-top:48px;color:var(--soft);font-size:.85rem}
+@media print{body{background:#fff}main{max-width:none;padding:0}.scroll{overflow:visible;border:0}nav{display:none}h2{break-after:avoid}tr{break-inside:avoid}}
+"""
+page = [f'<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">',
+        f"<title>Audit of {html.escape(title)}</title><style>{CSS}</style></head><body><main>",
+        f"<h1>Audit of {html.escape(title)}</h1>",
+        render(header) if header else "<p><em>No header was written.</em></p>",
+        '<div class="lead">' + (render(summary) if summary else "<p><em>No summary was written.</em></p>") + "</div>",
+        "<nav>" + "".join(f'<a href="#s{h[0]}">{html.escape(h)}</a>' for _, h in SECTIONS) + "</nav>",
+        f'<p class="note">{inline(NOTE)}</p>']
+for name, heading in SECTIONS:
+    body = PARTS[name]
+    page.append(f'<h2 id="s{heading[0]}">{html.escape(heading)}</h2>')
+    page.append(render(body) if body else "<p><em>Nothing was written for this section.</em></p>")
+page.append("<footer>Written by agents from outside the repository, which was neither changed nor run. Every citation can be checked against the repository.</footer></main></body></html>")
+
+
+def write(name, text):
+    path = D / name
+    if path.is_symlink(): sys.exit(f"build-report: {name} is a link")
+    tmp = D / (name + ".tmp")
+    try: os.unlink(tmp)
+    except FileNotFoundError: pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)   # a new file, never one found there
+    with os.fdopen(fd, "w", encoding="utf-8") as f: f.write(text + "\n")
+    os.replace(tmp, path)
+
+
+write("report.md", markdown)
+write("report.html", "\n".join(page))
+print(f"wrote {D / 'report.md'} and {D / 'report.html'}")
+print("report.html is the one to open or send: report.md keeps the parts as written, for check-report.")
+if missing: print("not written, or too large: " + ", ".join(missing))

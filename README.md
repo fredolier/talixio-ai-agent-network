@@ -72,7 +72,7 @@ A few intended uses; the first two have been tried, the others are what the tool
 - **Audit, then fix, kept apart.** One agent diagnoses a machine read-only and reports; its
   parent then decides whether to send a fixing agent, with different permissions.
 - **Auditing a list of repositories.** The bundled `audit` pack gives one lead agent per
-  repository and five specialised roles (goal, code review, assistant setup, plan, verifier),
+  repository and six specialised roles (goal, code review, assistant setup, plan, editor, verifier),
   and returns a critical report without changing the repository. Not yet tried with a real
   model. See [`examples/audit`](examples/audit).
 - **Secrets for commands.** A token or a password goes to one command of an installed pack,

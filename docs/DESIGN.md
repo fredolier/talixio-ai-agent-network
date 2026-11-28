@@ -399,10 +399,13 @@ changes or runs the repository. Commands: `fetch-repo` (read-only https clone: n
 submodule, no LFS; the git data is kept outside every directory agents can write, so a
 tampered clone cannot make git run anything), `repo-map` (reproducible numbers about the repository),
 `repo-git` (nine fixed read-only questions: `files`, `search`, `history`, `recent`, `commit`,
-`show`, `diff`, `blame`, `authors`), `new-report` and `check-report` (resolves every file, line
+`show`, `diff`, `blame`, `authors`), `new-report` (one file for each part of the report, each
+with one writer), `build-report` (assembles the parts into `report.md` and a self-contained
+`report.html`; the headings come from the command) and `check-report` (resolves every file, line
 and commit a report cites and prints the cited line; it does not judge). Roles: one `lead` per repository, which
-creates `goal`, `code-reviewer`, `setup-reviewer`, `planner` and a read-only `verifier` that
-tries to refuse the report. The report on disk is the shared memory between agents. The pack
+creates `goal`, `code-reviewer`, `setup-reviewer`, `planner`, an `editor` that consolidates
+(summary, gaps, contradictions between parts) and a read-only `verifier` that tries to refuse
+the report. The parts on disk are the shared memory between agents. The pack
 derives from Talixio AI Claude Auditor. A private repository is read with a token the operator
 adds as a secret for `fetch-repo` (section 3.10), with the address prefix it is valid for; the
 command offers it to no other address. First runs with a real model (an open-weight model of

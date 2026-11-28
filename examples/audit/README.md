@@ -7,11 +7,12 @@ and nothing from them is ever run.
 
 | Agent | What it does | What it may do |
 |---|---|---|
-| `audit/lead` | runs one audit, closes the report | fetch the repository, map it, ask git questions, create the five agents below |
-| `audit/goal` | finds what the repository is for, sketches the simplest design that meets it | read the clone, write the report |
-| `audit/code-reviewer` | judges the code against the goal | read the clone, write the report |
-| `audit/setup-reviewer` | judges the AI-assistant setup, the CI and the contribution rules | read the clone, write the report |
-| `audit/planner` | proposes how to simplify without losing what works | read the clone, write the report |
+| `audit/lead` | runs one audit, closes the report | fetch the repository, map it, ask git questions, build and check the report, create the six agents below |
+| `audit/goal` | finds what the repository is for, sketches the simplest design that meets it | read the clone, write its own parts of the report |
+| `audit/code-reviewer` | judges the code against the goal | read the clone, write its own parts of the report |
+| `audit/setup-reviewer` | judges the AI-assistant setup, the CI and the contribution rules | read the clone, write its own parts of the report |
+| `audit/planner` | proposes how to simplify without losing what works | read the clone, write its own parts of the report |
+| `audit/editor` | consolidates the parts: summary, gaps, contradictions between agents | read the clone and the parts, write its own |
 | `audit/verifier` | tries to refuse the report: every finding must cite a file and line or a commit | read only |
 
 The commands and the roles form the "audit" pack (`packs/audit` in the repository, shipped in the
@@ -29,7 +30,10 @@ talixio-agent pack show audit
   estimate, call graph, duplication, growth). Heuristics: leads to verify, not findings.
 - `repo-git <clone> <question>`: nine read-only questions (files, search, history, recent,
   commit, show, diff, blame, authors). Answers are cut at 60,000 bytes, and say so.
-- `new-report <file.md>`: the empty report, nine sections.
+- `new-report <directory>`: opens the report, one file for each part, each with one writer.
+- `build-report <directory> [title]`: puts the parts together into `report.md` and
+  `report.html`, a single page made to be read (no script, nothing fetched). The headings come
+  from the command: an agent cannot lose a section or write over another agent's work.
 - `check-report <clone> <report.md>`: what the report cites, checked mechanically: each file and
   line, each commit, with the cited line printed beside it; sections left empty. It does not judge
   whether the line says what the report claims: the verifier does.

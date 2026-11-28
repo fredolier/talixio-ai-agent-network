@@ -44,6 +44,7 @@ const EMBEDDED: &[(&str, Files)] = &[(
         ("repo-git", include_bytes!("../packs/audit/repo-git")),
         ("new-report", include_bytes!("../packs/audit/new-report")),
         ("check-report", include_bytes!("../packs/audit/check-report")),
+        ("build-report", include_bytes!("../packs/audit/build-report")),
     ],
 )];
 
@@ -619,7 +620,7 @@ mod tests {
         let packs = Pack::available(None).unwrap();
         assert!(packs.iter().any(|p| p.manifest.name == "catalogue" && p.manifest.roles.len() == 3));
         let audit = packs.iter().find(|p| p.manifest.name == "audit").expect("audit pack");
-        assert_eq!(audit.manifest.roles.len(), 6);
+        assert_eq!(audit.manifest.roles.len(), 7);
         // only the lead fetches; the verifier, like every reviewer, only asks read-only questions
         for role in &audit.manifest.roles {
             assert_eq!(role.commands.contains(&"fetch-repo".to_string()), role.name == "lead", "{}", role.name);

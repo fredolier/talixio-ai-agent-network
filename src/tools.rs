@@ -191,7 +191,12 @@ pub fn specs(node: &Node) -> Vec<ToolSpec> {
             json!({ "agent": { "type": "string", "description": "Nom ou identifiant de l'enfant." } }),
             &["agent"],
         ));
-        tools.push(spec("list_agents", "Liste tes enfants et leur état.".into(), json!({}), &[]));
+        tools.push(spec(
+            "list_agents",
+            "Liste tes enfants et leur état. Ce n'est pas une façon d'attendre : le compte rendu d'un enfant t'arrive de lui-même, dans un message. Pour attendre, termine ton tour sans rien appeler.".into(),
+            json!({}),
+            &[],
+        ));
     }
     if node.providers.is_some() {
         tools.push(spec(
@@ -474,7 +479,10 @@ pub async fn execute(node: &Arc<Node>, name: &str, input: &Value) -> Result<Stri
                 .iter()
                 .map(|c| format!("{} ({}) — rôle : {} — état : {:?} — {} descendant(s)", c.name, c.id, c.role, c.status, c.children.len()))
                 .collect();
-            Ok(lines.join("\n"))
+            // polling costs a whole turn each time, and the report comes by itself
+            let working = children.iter().any(|c| format!("{:?}", c.status) == "Working");
+            let wait = if working { "\nA child at work reports to you by itself, in a message, when it is done: do not call list_agents again to wait. End your turn now, with no tool call; you will be woken." } else { "" };
+            Ok(format!("{}{wait}", lines.join("\n")))
         }
         "memory_write" => {
             node.store.remember(text(input, "key")?, text(input, "content")?)?;
