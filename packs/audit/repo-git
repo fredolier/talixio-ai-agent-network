@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Reads the history of a fetched repository, and nothing else: a fixed set of read-only git
-# questions, each with a bounded answer. Nothing from the repository is run.
+# questions, each with a bounded answer. Answers come from the git data fetch-repo keeps apart
+# from the files, at the commit it checked out: nothing an agent writes changes them, and
+# nothing from the repository is run.
 #   repo-git <clone> files [path]            tracked files (with sizes)
 #   repo-git <clone> search <pattern> [path] lines matching an extended regular expression
 #   repo-git <clone> history [path]          commits, oldest first: hash, date, subject
@@ -10,27 +12,35 @@
 #   repo-git <clone> diff <rev> <path>       what that commit changed in that file
 #   repo-git <clone> blame <path>            who last changed each line, and when
 #   repo-git <clone> authors                 commits per author
-set -euo pipefail
+set -uo pipefail
 refuse() { echo "repo-git: $*" >&2; exit 2; }
 [[ $# -ge 2 && $# -le 4 ]] || refuse "usage: repo-git <clone> <question> [arguments] (see the pack's description)"
 repo="$1"; what="$2"; a="${3:-}"; b="${4:-}"
-[[ -d "$repo/.git" ]] || refuse "$repo is not a fetched repository"
+[[ -d "$repo" && ! -L "$repo" && -n "${HOME:-}" ]] || refuse "$repo is not a fetched repository"
+store="$(cd "$HOME" && pwd -P)/.local/state/talixio-audit/$(printf %s "$(cd "$repo" && pwd -P)" | sha256sum | cut -c1-40).git"
+[[ -d "$store" ]] || refuse "$repo is not a fetched repository (use fetch-repo first)"
 for arg in "$a" "$b"; do [[ "$arg" != -* ]] || refuse "an argument cannot start with a dash"; done
 rev() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._/~^-]{0,199}$ && "$1" != *..* ]] || refuse "revision refused"; }
 path() { [[ -n "$1" && "$1" != /* && "$1" != *..* && "$1" != *:* ]] || refuse "path refused (relative to the repository, no .., no colon)"; }
-# the machine's and the account's configuration are ignored; no hook, no pager, no external diff or text conversion
-g() { timeout 60 git -C "$repo" -c core.hooksPath=/dev/null -c core.pager=cat -c core.fsmonitor=false -c core.quotePath=false -c color.ui=false --no-pager "$@"; }
-cap() { head -c 60000; }
+ulimit -v 2097152 2>/dev/null || true   # 2 GiB of memory: a pattern cannot take the machine
+# no hook, no pager, no external diff, no text conversion, no signature check, no later download
+g() { timeout --foreground -k 5 60 git --git-dir="$store" -c core.hooksPath=/dev/null -c core.pager=cat -c core.fsmonitor=false \
+        -c core.quotePath=false -c color.ui=false -c log.showSignature=false -c grep.threads=1 \
+        -c core.packedGitLimit=512m -c core.packedGitWindowSize=64m --no-pager "$@"; }
+# a bounded answer, and a word when it was cut
+cap() { head -c 60000; [[ -z "$(head -c 1 | tr -d '\0')" ]] || printf '\n[answer cut at 60000 bytes: ask for a narrower path]\n'; cat >/dev/null; }
 
 case "$what" in
-  files)   [[ -z "$b" ]] || refuse "files takes one path at most"; if [[ -n "$a" ]]; then path "$a"; g ls-tree -r -l --full-tree HEAD -- "$a"; else g ls-tree -r -l --full-tree HEAD; fi | cap ;;
-  search)  [[ -n "$a" ]] || refuse "search needs a pattern"; if [[ -n "$b" ]]; then path "$b"; g grep -n -I -E --no-textconv -e "$a" HEAD -- "$b"; else g grep -n -I -E --no-textconv -e "$a" HEAD; fi | cut -c1-400 | cap || true ;;
-  history) [[ -z "$b" ]] || refuse "history takes one path at most"; if [[ -n "$a" ]]; then path "$a"; g log --reverse --format='%h %as %s' -- "$a"; else g log --reverse --format='%h %as %s'; fi | cap ;;
-  recent)  [[ -z "$b" ]] || refuse "recent takes one path at most"; if [[ -n "$a" ]]; then path "$a"; g log -100 --format='%h %as %an: %s' -- "$a"; else g log -100 --format='%h %as %an: %s'; fi | cap ;;
+  files)   [[ -z "$b" ]] || refuse "files takes one path at most"; if [[ -n "$a" ]]; then path "$a"; g ls-tree -r -l --full-tree HEAD -- "$a"; else g ls-tree -r -l --full-tree HEAD --; fi | cap ;;
+  search)  [[ -n "$a" ]] || refuse "search needs a pattern"; [[ ${#a} -le 200 ]] || refuse "pattern too long"
+           if [[ -n "$b" ]]; then path "$b"; g grep -n -I -E --no-textconv -e "$a" HEAD -- "$b"; else g grep -n -I -E --no-textconv -e "$a" HEAD --; fi | cut -c1-400 | cap ;;
+  history) [[ -z "$b" ]] || refuse "history takes one path at most"; if [[ -n "$a" ]]; then path "$a"; g log --reverse --format='%h %as %s' HEAD -- "$a"; else g log --reverse --format='%h %as %s' HEAD --; fi | cap ;;
+  recent)  [[ -z "$b" ]] || refuse "recent takes one path at most"; if [[ -n "$a" ]]; then path "$a"; g log -100 --format='%h %as %an: %s' HEAD -- "$a"; else g log -100 --format='%h %as %an: %s' HEAD --; fi | cap ;;
   commit)  [[ -n "$a" && -z "$b" ]] || refuse "commit needs one revision"; rev "$a"; g show --no-ext-diff --no-textconv --stat --format='%H%n%an, %ad%n%n%B' "$a" -- | cap ;;
-  show)    [[ -n "$a" && -n "$b" ]] || refuse "show needs a revision and a path"; rev "$a"; path "$b"; g show --no-ext-diff --no-textconv "$a:$b" | cap ;;
+  show)    [[ -n "$a" && -n "$b" ]] || refuse "show needs a revision and a path"; rev "$a"; path "$b"; g show --no-ext-diff --no-textconv "$a:$b" -- | cap ;;
   diff)    [[ -n "$a" && -n "$b" ]] || refuse "diff needs a revision and a path"; rev "$a"; path "$b"; g show --no-ext-diff --no-textconv --format='%h %as %s' "$a" -- "$b" | cap ;;
-  blame)   [[ -n "$a" && -z "$b" ]] || refuse "blame needs one path"; path "$a"; g blame --date=short -- "$a" | cut -c1-300 | cap ;;
-  authors) [[ -z "$a" ]] || refuse "authors takes no argument"; g shortlog -sn HEAD | cap ;;
+  blame)   [[ -n "$a" && -z "$b" ]] || refuse "blame needs one path"; path "$a"; g blame --no-textconv --date=short HEAD -- "$a" | cut -c1-300 | cap ;;
+  authors) [[ -z "$a" ]] || refuse "authors takes no argument"; g shortlog -sn HEAD -- | cap ;;
   *) refuse "unknown question: $what" ;;
 esac
+exit 0

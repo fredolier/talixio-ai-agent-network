@@ -665,6 +665,9 @@ Demandé le 2026-11-20. Rien n'est codé.
       réponse, le rapport dit « but non confirmé » (`brief.md`, la consigne à donner au maître).
     - *Rapport seulement.* Rien n'est changé dans le dépôt audité ni lancé depuis lui. La
       correction (branche, demande de fusion) viendra avec un rôle distinct et d'autres droits.
+    - *Où vit git.* Les données git d'un clone sont gardées hors du dossier de l'agent
+      (`~/.local/state/talixio-audit/`, sous le compte de l'agent) : il faut que ce dossier ne
+      soit donné à aucun agent (seizième passe, F1).
     - *Limites.* Pas encore essayé avec un vrai modèle : les commandes ont été essayées à la
       main sur un dépôt public, pas les rôles. Les dépôts privés attendent la décision 44. Il
       faut `git`, `bash` et `python3` là où tournent les agents (l'image vide du maître ne les a
@@ -909,6 +912,28 @@ les seules options passées à `claude`, sans contrôle de ce qu'il fait réelle
 | K10 | Basse | Filtre des secrets de l'environnement sensible à la casse (Windows ne l'est pas). | ✅ Comparaison sans casse. Ce que `claude_env` laisse passer reste à la charge de l'exploitant (noté). |
 | K11 | Basse | `<état>/claude` pouvait être un lien symbolique posé avant le démarrage. | ✅ Refusé au démarrage. |
 | K12 | Basse | Une invite commençant par « / » pouvait être prise pour une commande de `claude`. | ✅ Jamais en tête d'invite (et `--disable-slash-commands`). |
+
+### Seizième passe (2026-11-28) : le paquet « audit » (décision 43)
+
+Revue indépendante des quatre scripts, attaques rejouées (dépôts hostiles fabriqués, serveur
+local, git 2.43). Neuf constats.
+
+| # | Gravité | Constat | Traitement |
+|---|---|---|---|
+| F1 | critique | L'agent écrit dans son dossier, donc dans le `.git` du clone : `core.fsmonitor`, filtres, `core.worktree`, `insteadOf`, `gpg.program`, `alternates`… faisaient exécuter du code, écrire et lire hors des droits par les trois scripts (treize variantes rejouées). | ✅ Les données git sortent du dossier : `~/.local/state/talixio-audit/<empreinte du chemin>.git`, jamais dans un dossier donné aux agents (refusé sinon). `repo-git` et `repo-map` n'interrogent que ce dépôt-là, au commit extrait ; `blame` lit les objets. Rejoué : un `.git/config` posé dans le clone n'a plus d'effet. |
+| F2 | critique (dès qu'un jeton existe) | Le jeton était offert à tout hôte que l'agent nomme. | ✅ `AUDIT_READ_URL` obligatoire avec le jeton : il n'est offert qu'à ce préfixe d'adresse (vérifié par le script, puis par git avec `credential.<url>.helper`), et n'existe que pour la commande réseau. |
+| F3 | haut | `fetch-repo` reprenait tout dépôt existant sous `<dossier>/<nom>`, lien compris. | ✅ Seul un clone fait par `fetch-repo` (son dépôt à part existe, même adresse) est mis à jour ; sinon refus ; liens refusés. |
+| F4 | moyen | `timeout` sortait git du groupe que le programme arrête. | ✅ `timeout --foreground`, 110 s ; un clone inachevé est retiré. |
+| F5 | moyen | Ni mémoire ni taille bornées (une recherche montait à 11 Go). | ✅ en partie : mémoire bornée (2 à 4 Gio), fichiers de plus de 2 Mo comptés sans être lus, débit minimal, objets vérifiés. ❌ pas de quota sur la taille totale d'un clone. |
+| F6 | bas | Un dépôt hostile faisait échouer `repo-map` (noms de fichiers, JSON inattendu). | ✅ listes en `-z`, structures vérifiées. |
+| F7 | bas | Un fichier `HEAD` à la racine cassait `search` et `authors`. | ✅ `--` après la révision. |
+| F8 | bas | Hôtes internes joignables (adresses en chiffres). | ✅ en partie : un nom avec une lettre et un point est exigé. Liste d'hôtes permis : avec les secrets (décision 44). |
+| F9 | info | Motif dans `find`, réponse coupée sans le dire, clone tué à moitié. | ✅ |
+
+Trouvé sain : premier clone d'un arbre hostile (rien ne s'exécute), liens de l'arbre non
+suivis, redirections refusées, jeton absent des lignes de commande et des fichiers, validation
+des adresses, noms, révisions et chemins. Non essayé : vrai serveur https hostile, systèmes de
+fichiers insensibles à la casse, clone qui remplit le disque.
 
 ### Quinzième passe (2026-11-22) : l'écran des paquets (décision 41)
 

@@ -4,13 +4,18 @@ call graph (instructions -> commands -> code), duplication, growth. It reads tra
 git history; it never imports or runs anything from the target.
 Usage: repo-map <clone> <out.md>
 Adapted from scripts/map.py of Talixio AI Claude Auditor."""
-import json, re, subprocess, sys
+import hashlib, json, os, re, resource, subprocess, sys
 from collections import Counter, defaultdict
 from itertools import combinations
 from pathlib import Path
 
 if len(sys.argv) != 3 or not sys.argv[2].endswith(".md"): sys.exit("repo-map: usage: repo-map <clone> <out.md>")
 T = Path(sys.argv[1]).resolve()
+# the git data fetch-repo keeps apart from the files: nothing written in the clone reaches git
+STORE = Path(os.environ.get("HOME", "/nonexistent")).resolve() / ".local/state/talixio-audit" / (hashlib.sha256(str(T).encode()).hexdigest()[:40] + ".git")
+if not STORE.is_dir(): sys.exit("repo-map: not a fetched repository (use fetch-repo first)")
+resource.setrlimit(resource.RLIMIT_AS, (4 << 30, 4 << 30))
+MAX_FILE = 2 * 1024 * 1024       # a larger file is counted, not read
 LANG = {"py": "Python", "sh": "Shell", "bash": "Shell", "js": "JavaScript", "mjs": "JavaScript", "cjs": "JavaScript",
         "ts": "TypeScript", "tsx": "TypeScript", "jsx": "JavaScript", "go": "Go", "rs": "Rust", "java": "Java",
         "rb": "Ruby", "php": "PHP", "cs": "C#", "c": "C", "h": "C", "cpp": "C++", "kt": "Kotlin", "swift": "Swift",
@@ -27,7 +32,8 @@ CASE = re.compile(r"^\s*([a-z][\w-]*(?:\|[a-z][\w-]*)*)\)", re.M)
 
 
 def git(*args):
-    return subprocess.run(["git", "-C", str(T), "-c", "core.quotePath=false", *args], capture_output=True, text=True, errors="replace", check=True).stdout
+    return subprocess.run(["git", f"--git-dir={STORE}", "-c", "core.quotePath=false", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
+                           "-c", "log.showSignature=false", "--no-pager", *args], capture_output=True, text=True, errors="replace", check=True, timeout=100).stdout
 
 
 def kind(p, plugin):
@@ -56,7 +62,7 @@ def category(p, k):
 
 def read(p):
     f = T / p
-    if f.is_symlink() or not f.is_file(): return None
+    if f.is_symlink() or not f.is_file() or f.stat().st_size > MAX_FILE: return None
     b = f.read_bytes()
     return None if b"\0" in b[:8192] else b.decode("utf-8", "replace")
 
@@ -86,7 +92,7 @@ def command_lines(text, scripts):
 
 def main():
     out = []; w = out.append
-    modes = dict((l.split("\t")[1], l.split()[0]) for l in git("ls-files", "-s").splitlines())
+    modes = dict((r.split("\t", 1)[1], r.split()[0]) for r in git("ls-tree", "-r", "-z", "HEAD").split("\0") if "\t" in r)
     plugin = any(p.startswith(".claude-plugin/") for p in modes)
     files = {}                                     # path -> (kind, category, text or None)
     for p in sorted(modes):
@@ -99,7 +105,7 @@ def main():
     agg = defaultdict(lambda: [0, 0, 0])
     for p, (k, c, text) in files.items():
         lang = "(binary)" if text is None else LANG.get(p.rsplit(".", 1)[-1].lower(), "Other")
-        a = agg[(c, lang)]; a[0] += 1; a[1] += 0 if text is None else text.count("\n"); a[2] += (T / p).lstat().st_size
+        a = agg[(c, lang)]; a[0] += 1; a[1] += 0 if text is None else text.count("\n"); a[2] += (T / p).lstat().st_size if (T / p).exists() or (T / p).is_symlink() else 0
     w(table(["Category", "Language", "Files", "Lines", "Bytes"], [(c, l, *v) for (c, l), v in sorted(agg.items())]))
 
     # 2. Claude Code material
@@ -122,13 +128,15 @@ def main():
         if k not in ("settings", "mcp", "hook") or not p.endswith(".json"): continue
         try: j = json.loads(text)
         except Exception as e: w(f"- `{p}`: not valid JSON ({e})"); continue
-        perms = j.get("permissions", {}) if isinstance(j, dict) else {}
+        if not isinstance(j, dict): w(f"- `{p}`: not a JSON object"); continue
+        perms = j.get("permissions"); perms = perms if isinstance(perms, dict) else {}
         w(f"- `{p}`: keys {sorted(j)}" + (f"; defaultMode `{perms.get('defaultMode', 'default')}`" if k == "settings" else ""))
         for mode in ("allow", "ask", "deny"):
-            if perms.get(mode): w(f"  - {mode} ({len(perms[mode])}): " + ", ".join(f"`{r}`" for r in perms[mode]))
+            if isinstance(perms.get(mode), list) and perms[mode]: w(f"  - {mode} ({len(perms[mode])}): " + ", ".join(f"`{r}`" for r in perms[mode]))
         for event, groups in (j.get("hooks") or {}).items() if isinstance(j.get("hooks"), dict) else []:
-            for g in groups:
-                w(f"  - hook {event} [{g.get('matcher', '*')}]: " + ", ".join(f"`{h.get('command', h.get('type'))}`" for h in g.get("hooks", [])))
+            for g in groups if isinstance(groups, list) else []:
+                if not isinstance(g, dict) or not isinstance(g.get("hooks", []), list): w(f"  - hook {event}: unexpected structure"); continue
+                w(f"  - hook {event} [{g.get('matcher', '*')}]: " + ", ".join(f"`{h.get('command', h.get('type'))}`" for h in g.get("hooks", []) if isinstance(h, dict)))
     w("")
 
     # 3. Call graph
@@ -187,7 +195,8 @@ def main():
     rows = []
     for sha, date in sample:
         b = Counter(); n = Counter()
-        for l in git("ls-tree", "-r", "-l", sha).splitlines():
+        for l in git("ls-tree", "-r", "-l", "-z", sha).split("\0"):
+            if "\t" not in l: continue
             meta, p = l.split("\t", 1); size = meta.split()[3]; k = kind(p, plugin); c = "instructions" if k in INSTR else category(p, k)
             b[c] += int(size) if size.isdigit() else 0; n["files"] += 1; n["skills"] += p.endswith("SKILL.md")
         rows.append((date, f"`{sha[:8]}`", n["files"], n["skills"], b["instructions"], b["code"], b["tests"], b["docs"]))

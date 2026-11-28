@@ -17,6 +17,10 @@ kind = "nouveau"
 text = "Paquet `audit`, d'après Talixio AI Claude Auditor : `fetch-repo` clone un dépôt https en lecture seule, `repo-map` le mesure, `repo-git` lit son historique par neuf questions fixes, `new-report` ouvre le rapport. Rôles `audit/lead`, `goal`, `code-reviewer`, `setup-reviewer`, `planner`, `verifier`. `talixio-agent pack show audit --file brief.md` donne la consigne à remettre au maître."
 
 [[release.changes]]
+kind = "sécurité"
+text = "Paquet `audit` : les données git d'un clone sont gardées hors du dossier de l'agent, qui ne peut donc rien faire exécuter à git ; un jeton de lecture n'est offert qu'à l'adresse à laquelle il est lié. Revue de sécurité indépendante, corrections rejouées."
+
+[[release.changes]]
 kind = "attention"
 text = "Le paquet `audit` n'a pas encore servi avec un vrai modèle, ne lit que des dépôts publics (les secrets des commandes ne sont pas encore là) et demande `git`, `bash` et `python3` là où tournent les agents."
 

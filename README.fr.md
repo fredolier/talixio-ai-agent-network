@@ -498,7 +498,7 @@ route, mode de déploiement) passe par une revue de sécurité.
 ## Sécurité
 
 Une faille ne se signale pas dans un ticket public : voir [SECURITY.md](SECURITY.md). Ce contre
-quoi le projet se défend, ses limites connues et le bilan des quinze revues de sécurité déjà
+quoi le projet se défend, ses limites connues et le bilan des seize revues de sécurité déjà
 faites sont dans [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Licence

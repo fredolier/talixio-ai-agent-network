@@ -499,7 +499,7 @@ review.
 ## Security
 
 A vulnerability is not reported in a public issue: see [SECURITY.md](SECURITY.md). What the
-project defends against, its known limits and the outcome of the fifteen security reviews done
+project defends against, its known limits and the outcome of the sixteen security reviews done
 so far are in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## License
