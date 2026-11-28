@@ -542,6 +542,7 @@ reviewer's.
 | 17 | Secrets for commands: vault, link messages, API, redaction | 9: 2 medium, 5 low, 2 info | 8 fixed, 1 noted (environment of a running command readable by same-account agents) |
 | 18 | `check-report` (audit pack) and the refusal messages shown to agents | 9: 2 medium, 6 low, 1 info | 9 fixed |
 | 19 | `build-report` (audit pack): parts assembled into Markdown and a standalone HTML page | 7: 1 medium, 5 low, 1 info | 6 fixed, 1 noted |
+| 20 | `notify` pack: `send-mail` and `send-webhook` | 8: 2 medium, 3 low, 3 info | 7 fixed, 1 noted (check-then-open race common to `{read}` commands) |
 
 Findings knowingly left open:
 

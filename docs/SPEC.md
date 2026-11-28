@@ -972,6 +972,26 @@ les seules options passées à `claude`, sans contrôle de ce qu'il fait réelle
 | K11 | Basse | `<état>/claude` pouvait être un lien symbolique posé avant le démarrage. | ✅ Refusé au démarrage. |
 | K12 | Basse | Une invite commençant par « / » pouvait être prise pour une commande de `claude`. | ✅ Jamais en tête d'invite (et `--disable-slash-commands`). |
 
+### Vingtième passe (2026-11-28) : le paquet `notify` (`send-mail`, `send-webhook`)
+
+Revue indépendante avant publication, sur banc (faux serveur de courrier chiffré et faux salon
+locaux, aucun service réel contacté). Aucun constat critique ni haut. Tenu sous essai : pas
+d'injection d'en-tête par le sujet ni par le nom du fichier, enveloppe toujours égale à la liste
+de l'exploitant, jamais de mot de passe avant le chiffrement, certificat vérifié avant tout envoi,
+redirections et mandataires ignorés, adresses ressemblantes refusées, liens, tubes et fichiers
+trop gros refusés, adresse secrète jamais affichée.
+
+| # | Gravité | Constat | Traitement |
+|---|---|---|---|
+| N1 | moyen | Un lien écrit par l'agent dans le titre ou le texte était publié tel quel : un salon va chercher les liens qu'il montre (aperçus, images), donc l'agent choisissait un tiers qui recevait ce qu'il avait mis dans l'adresse. | ✅ Aperçus coupés (Slack, Discord), notations de lien masqué et d'image cassées (Discord, Teams), chevrons échappés (Teams), plus aucun lien actif dans le titre. Le comportement des vrais salons n'est pas essayé. |
+| N2 | moyen | Le type de la pièce jointe venait du nom du fichier : `.eml` s'affichait comme un message transféré, `.ics` comme une invitation, d'autres donnaient un courrier mal formé. | ✅ Liste courte de types admis ; le reste part en octets bruts. |
+| N3 | bas | Un mot encodé (`=?utf-8?…?=`) dans le sujet faisait afficher des caractères que le nettoyage n'avait pas vus. | ✅ Cassé avant l'envoi. |
+| N4 | bas | Erreurs non prévues affichées avec la trace Python (dossier donné pour fichier, réponse HTTP mal formée, hôte ou port mal écrit). | ✅ Vérifié avant ; toute autre erreur ne donne que son genre. |
+| N5 | bas | Seul le mot de passe littéral était masqué dans la réponse du serveur (pas sa forme base64). | ✅ Plus aucun mot du serveur n'est affiché : code et genre de l'erreur seulement. |
+| N6 | info | Les erreurs montraient à l'agent des réglages (adresses refusées, nom d'hôte). | ✅ Même traitement que N5. |
+| N7 | info | Un serveur de courrier qui répond au compte-gouttes tenait la commande jusqu'à l'arrêt par le maître. | ✅ Limite de 100 secondes dans la commande. Ajoutés : date et identifiant du message, titre par défaut si vide. |
+| N8 | info | `{read}` est vérifié puis le fichier rouvert par son chemin : course possible pour qui pourrait créer un lien dans un dossier parent. Commun à toutes les commandes `{read}` ; aucun outil d'agent ne crée de lien. | ❌ Noté. |
+
 ### Dix-neuvième passe (2026-11-28) : `new-report`, `build-report` et la page HTML du rapport
 
 Revue indépendante avant publication, sur banc : parties et titres hostiles, 1,7 million de
