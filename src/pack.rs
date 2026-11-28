@@ -46,6 +46,14 @@ const EMBEDDED: &[(&str, Files)] = &[(
         ("check-report", include_bytes!("../packs/audit/check-report")),
         ("build-report", include_bytes!("../packs/audit/build-report")),
     ],
+), (
+    "notify",
+    &[
+        (MANIFEST, include_bytes!("../packs/notify/pack.toml")),
+        ("guide.md", include_bytes!("../packs/notify/guide.md")),
+        ("send-mail", include_bytes!("../packs/notify/send-mail")),
+        ("send-webhook", include_bytes!("../packs/notify/send-webhook")),
+    ],
 )];
 
 #[derive(Clone, Debug, Deserialize)]

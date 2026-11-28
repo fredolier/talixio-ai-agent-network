@@ -753,6 +753,26 @@ Demandé le 2026-11-20. Rien n'est codé.
       modèle et sur disque) ; une variable d'environnement de l'agent (héritée par toutes ses
       commandes) ; le maître qui clone lui-même pour ses enfants (ne vaut que pour git).
 
+45. **Envoyer un travail au dehors : le paquet « notify »** (2026-11-28, « un autre agent ou
+    quelque chose qui puisse envoyer un mail ou envoyer quelque part le rapport […] un agent
+    d'envoi sur un channel, soit mail, soit autre chose » ; formulaire du 2026-11-28 : les deux
+    canaux, destinataires fixés par l'exploitant, tout fichier lisible par l'agent).
+    - *Deux commandes, un rôle.* `send-mail <fichier> [sujet]` : le fichier part en pièce
+      jointe (10 Mio au plus), par SMTP chiffré seulement (465, ou STARTTLS). `send-webhook
+      <fichier texte> [titre]` : le début du texte est publié dans un salon (webhook entrant
+      Slack, Discord ou Teams, ou une adresse https qui prend du JSON) ; un webhook ne prend
+      pas de fichier. Rôle `notify/sender`.
+    - *Qui choisit quoi.* L'agent choisit le fichier, parmi ceux qu'il peut lire, et un sujet.
+      L'exploitant choisit tout le reste, une fois, avec le secret (décision 44) : mot de passe
+      et, à côté, serveur, compte, expéditeur, destinataires ; adresse du webhook et son genre.
+      Rien dans une demande, un fichier ou un rapport ne change la destination ; les commandes
+      ne suivent aucune redirection et n'emploient aucun mandataire.
+    - *Risque accepté.* Un agent qui tient ces commandes peut envoyer aux destinataires tout
+      fichier qu'il lit : ne donner le rôle qu'à des agents qui ne lisent rien que ces
+      destinataires ne puissent voir. Dit dans `guide.md`.
+    - *Limites.* Essayé contre de faux serveurs locaux, pas encore avec un vrai compte de
+      messagerie ni un vrai salon. La page HTML part en pièce jointe, jamais dans le corps.
+
 ## 5. Architecture
 
 ```

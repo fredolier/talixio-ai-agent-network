@@ -7,6 +7,24 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.26.0"
+date = "2026-11-28"
+title = "Envoyer un rapport : e-mail et salon"
+summary = "Paquet « notify » : un agent envoie un fichier par e-mail ou publie un texte dans un salon. Il choisit le fichier ; les destinataires et le salon sont les vôtres, fixés une fois avec le secret."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Paquet `notify` : `send-mail <fichier> [sujet]` envoie un fichier en pièce jointe (10 Mio au plus, connexion chiffrée seulement) ; `send-webhook <fichier texte> [titre]` publie le début d'un texte dans un salon Slack, Discord ou Teams, ou vers une adresse https qui prend du JSON. Rôle `notify/sender`."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Compte de messagerie, expéditeur, destinataires et adresse du salon sont des secrets et des réglages de l'exploitant (page « Secrets ») : aucune demande, aucun fichier, aucun rapport ne peut les changer. Les commandes ne suivent aucune redirection et n'emploient aucun mandataire. Revue de sécurité indépendante."
+
+[[release.changes]]
+kind = "attention"
+text = "Un agent qui tient ces commandes peut envoyer à vos destinataires tout fichier qu'il peut lire : ne donnez le rôle `notify/sender` qu'à des agents qui ne lisent rien que ces destinataires ne puissent voir. `talixio-agent pack show notify --file guide.md` explique la mise en place."
+
+[[release]]
 version = "0.25.0"
 date = "2026-11-28"
 title = "Un rapport d'audit par parties, consolidé, en une page HTML"

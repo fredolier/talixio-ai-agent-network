@@ -73,8 +73,12 @@ A few intended uses; the first two have been tried, the others are what the tool
   parent then decides whether to send a fixing agent, with different permissions.
 - **Auditing a list of repositories.** The bundled `audit` pack gives one lead agent per
   repository and six specialised roles (goal, code review, assistant setup, plan, editor, verifier),
-  and returns a critical report without changing the repository. Not yet tried with a real
-  model. See [`examples/audit`](examples/audit).
+  and returns a critical report without changing the repository: each agent writes its own
+  part, and the parts are assembled into one self-contained HTML page. See
+  [`examples/audit`](examples/audit).
+- **Sending work out.** The bundled `notify` pack sends a file by e-mail or posts a text to a
+  Slack, Discord or Teams channel. An agent chooses the file; the recipients and the channel
+  are yours, set once with the secret.
 - **Secrets for commands.** A token or a password goes to one command of an installed pack,
   for one run, never to a model: added on the master ("Secrets" page), tied to a command and
   to roles, sealed on its way to the agent that runs the command, removed from its output.
