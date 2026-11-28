@@ -59,7 +59,7 @@ def lines_of(path):
 
 
 def resolve(name):
-    name = name.strip("`*\"'()[],. ").removeprefix("./")
+    name = name.lstrip("`*\"'([, ").rstrip("`*\"')],. ").removeprefix("./")   # a leading dot belongs to the name (.github/...)
     if name in known: return name, None
     # a shorter path is accepted when it is the end of exactly one tracked path, at a "/"
     hits = [h for h in by_name.get(name.rsplit("/", 1)[-1], []) if h.endswith("/" + name)]
@@ -121,7 +121,7 @@ present = {m.group(1) for m in re.finditer(r"(?m)^##\s+(\d)\.", text)}
 for n in "123456789":
     if n not in present: bad += 1; out.append(f"EMPTY  [section {n}] its heading (\"## {n}. ...\") is missing from the report")
 # the placeholders of the report template itself, still in place
-TEMPLATE = ["<name>", "<url>", "<sha>", "<date of commit>", "<date>", "<transcripts, examples", "<the user, on", "<five lines at most", "<with quotes and sources>",
+TEMPLATE = ["<No header was written", "<No summary was written", "<Nothing was written for this section", "<This part is larger than", "<url>", "<sha>", "<date of commit>", "<date>", "<transcripts, examples", "<the user, on", "<five lines at most", "<with quotes and sources>",
             "<from the first commits", "<what it is for; what success", "<Where it moved away", "<instruction lines, estimated", "<the rigour, tests and gates", "<What could not be told"]
 for mark in TEMPLATE:
     if mark in text: bad += 1; out.append(f"EMPTY  template text left in place: {mark}…")

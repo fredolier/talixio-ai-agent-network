@@ -7,6 +7,36 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.25.0"
+date = "2026-11-28"
+title = "Un rapport d'audit par parties, consolidé, en une page HTML"
+summary = "Chaque agent écrit sa partie du rapport dans son propre fichier, un agent consolide, une commande assemble le tout en une page HTML lisible. Catalogue OVHcloud mis à jour."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Paquet `audit`, version 3 : `new-report <dossier>` crée un fichier par partie du rapport, chacun avec un seul rédacteur ; `build-report <dossier> [titre]` les assemble en `report.md` et `report.html`, une page autonome (ni script, ni ressource distante) faite pour être lue et envoyée. Les titres viennent de la commande : un agent ne peut plus perdre une section ni écraser le travail d'un autre."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Rôle `audit/editor` : il lit toutes les parties, rend les contradictions entre elles, écrit le résumé et ce que l'audit n'a pas pu dire."
+
+[[release.changes]]
+kind = "correction"
+text = "Un agent qui attend ses enfants ne les interroge plus en boucle : `list_agents` dit de finir son tour, le compte rendu arrive seul. Un chef d'audit y avait dépensé tout son budget."
+
+[[release.changes]]
+kind = "amélioration"
+text = "Catalogue : modèles d'OVHcloud relevés le 2026-11-28 auprès du fournisseur (onze ajouts, dont Qwen3.5 397B, DeepSeek V4.1 Flash, Mistral Small 3.2, Llama 3.3 70B, Gemma 4), avec leurs prix."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Revue indépendante de `build-report` et de la page HTML : aucun texte d'un agent n'y arrive hors échappement ; une section manquante est de nouveau signalée par `check-report` ; parties lues une seule fois, jamais à travers un lien."
+
+[[release.changes]]
+kind = "attention"
+text = "Réinstaller le paquet (`pack install audit --replace`) : son identifiant change, `new-report` prend un dossier et non plus un fichier, et le maître doit permettre six agents au chef (`max_children`)."
+
+[[release]]
 version = "0.24.1"
 date = "2026-11-28"
 title = "Premiers audits avec un vrai modèle"
