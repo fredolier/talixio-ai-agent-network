@@ -71,6 +71,10 @@ A few intended uses; the first two have been tried, the others are what the tool
 - **Reading the web with a real browser**, in a separate container, on an allowed list of sites.
 - **Audit, then fix, kept apart.** One agent diagnoses a machine read-only and reports; its
   parent then decides whether to send a fixing agent, with different permissions.
+- **Auditing a list of repositories.** The bundled `audit` pack gives one lead agent per
+  repository and five specialised roles (goal, code review, assistant setup, plan, verifier),
+  and returns a critical report without changing the repository. Not yet tried with a real
+  model; public repositories only for now (`talixio-agent pack show audit`).
 - **Scheduled tasks.** A mission run again every day or every week ("Tasks" page).
 - **Permanent agents.** An agent that comes back with its memory every time the master restarts.
 - **A team for a long mission**, where each agent gets a model that fits: a small model to
@@ -495,7 +499,7 @@ review.
 ## Security
 
 A vulnerability is not reported in a public issue: see [SECURITY.md](SECURITY.md). What the
-project defends against, its known limits and the outcome of the fifteen security reviews done
+project defends against, its known limits and the outcome of the sixteen security reviews done
 so far are in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## License

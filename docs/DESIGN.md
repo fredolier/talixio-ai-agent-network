@@ -344,12 +344,23 @@ Manifest fields are single-line, bounded and free of control characters, or the 
 | `pack tui` | Full-screen browser over the same operations and checks: `i` install, `r` remove, `v` verify, `q` quit, each change confirmed explicitly. It shows whether the source is signed and how much of a pack's text has been read. |
 | `pack keygen --out <file>`, `pack publish --from <packs> --out <dir> --key-file <file>` | For publishers: create a signing key (private part in a 0600 file) and write a signed repository. |
 
-Sources: the packs embedded in the executable (currently `catalogue`), a local directory
+Sources: the packs embedded in the executable (currently `catalogue` and `audit`), a local directory
 (`--from`, unsigned), or a signed repository (`--depot` with `--key`). Destination: `--dir`,
 `TALIXIO_PACKS`, or `/opt/talixio/packs` as root with the dedicated account. An installed role is
 named `pack/role`: `spawn_agent` with that name gives the child the role's instructions and
 commands, while directories, budget and mission remain the master's choice within its own
 capabilities. Installed roles are visible, read-only, through `GET /api/roles` (Decision 39).
+
+**The `audit` pack.** Audits git repositories from outside and writes a report; it never
+changes or runs the repository. Commands: `fetch-repo` (read-only https clone: no hook, no
+submodule, no LFS; the git data is kept outside every directory agents can write, so a
+tampered clone cannot make git run anything), `repo-map` (reproducible numbers about the repository),
+`repo-git` (nine fixed read-only questions: `files`, `search`, `history`, `recent`, `commit`,
+`show`, `diff`, `blame`, `authors`) and `new-report`. Roles: one `lead` per repository, which
+creates `goal`, `code-reviewer`, `setup-reviewer`, `planner` and a read-only `verifier` that
+tries to refuse the report. The report on disk is the shared memory between agents. The pack
+derives from Talixio AI Claude Auditor. It has not been run with a real model yet, reads public
+repositories only, and needs `git`, `bash` and `python3` where the agents run.
 
 ## 5. Operating modes
 
@@ -442,7 +453,7 @@ use. **It is not yet a stable interface**: paths and payloads may change between
 
 Every new surface (tool, link message, API route, deployment mode) goes through a dedicated
 security review by a reviewer independent of the author of the change, by reading and, where
-possible, by reproducing attacks. Fifteen passes have been made so far. Confirmed findings are
+possible, by reproducing attacks. Sixteen passes have been made so far. Confirmed findings are
 fixed and, where practical, replayed as tests (`tests/security.rs` and others). Severities are the
 reviewer's.
 
@@ -463,6 +474,7 @@ reviewer's.
 | 13 | Dedicated account installation | 12: 1 high, 3 medium, 5 low, 3 info | 10 fixed, 2 noted |
 | 14 | Signed pack repository | 12: 1 high, 3 medium, 7 low, 1 info | 11 fixed, 1 noted |
 | 15 | Pack TUI | 12: 2 high, 4 medium, 6 low | Fixed except 2 noted items |
+| 16 | `audit` pack: `fetch-repo`, `repo-git`, `repo-map`, `new-report` | 9: 2 critical, 1 high, 2 medium, 3 low, 1 info | 8 fixed, 1 partly (no clone size quota) |
 
 Findings knowingly left open:
 
@@ -484,6 +496,9 @@ Findings knowingly left open:
 - **Service and supply chain.** `PrivateTmp`, `ProtectHome` and `ProtectSystem=strict` are not
   evaluated on a real systemd (pass 13). Build actions and base images are referenced by tag, not
   digest (passes 6, 10).
+- **Audit pack.** No quota on the total size of a clone (time, memory and single-file limits
+  only). `fetch-repo` reaches any public-looking https host the agent names; a token is offered
+  only to the address prefix the operator bound it to (pass 16).
 - **Other.** Third-party scripts on a page read by the example browser script can send what they
   see to any public name (pass 10). A scheduled task survives a change of API token (pass 9).
   The pack TUI does not restore the terminal on SIGTERM or SIGHUP (pass 15).
@@ -528,6 +543,11 @@ Findings knowingly left open:
   API errors, CLI output, release notes) are in French for now.
 
 **Open questions**
+
+- Secrets for commands (for example a read-only git token for `fetch-repo`). Proposed design,
+  not implemented: secrets are kept by the master, managed from the interface, bound by the
+  operator to a pack command and to roles, held as a capability that only attenuates, and
+  delivered sealed to the requesting agent for one run of that command, never to the model.
 
 - Who publishes the official pack repository and where its signing key is kept.
 - Which OS confinement mechanism to adopt first, and whether a containerised master should move

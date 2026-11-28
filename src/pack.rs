@@ -33,6 +33,17 @@ const EMBEDDED: &[(&str, Files)] = &[(
         ("lire-page", include_bytes!("../packs/catalogue/lire-page")),
         ("sites.txt", include_bytes!("../packs/catalogue/sites.txt")),
     ],
+), (
+    "audit",
+    &[
+        (MANIFEST, include_bytes!("../packs/audit/pack.toml")),
+        ("brief.md", include_bytes!("../packs/audit/brief.md")),
+        ("report.md", include_bytes!("../packs/audit/report.md")),
+        ("fetch-repo", include_bytes!("../packs/audit/fetch-repo")),
+        ("repo-map", include_bytes!("../packs/audit/repo-map")),
+        ("repo-git", include_bytes!("../packs/audit/repo-git")),
+        ("new-report", include_bytes!("../packs/audit/new-report")),
+    ],
 )];
 
 #[derive(Clone, Debug, Deserialize)]
@@ -508,6 +519,12 @@ mod tests {
     fn les_paquets_embarques_sont_valides() {
         let packs = Pack::available(None).unwrap();
         assert!(packs.iter().any(|p| p.manifest.name == "catalogue" && p.manifest.roles.len() == 3));
+        let audit = packs.iter().find(|p| p.manifest.name == "audit").expect("audit pack");
+        assert_eq!(audit.manifest.roles.len(), 6);
+        // only the lead fetches; the verifier, like every reviewer, only asks read-only questions
+        for role in &audit.manifest.roles {
+            assert_eq!(role.commands.contains(&"fetch-repo".to_string()), role.name == "lead", "{}", role.name);
+        }
         assert!(packs[0].describe().contains("lire-page * *"));
     }
 

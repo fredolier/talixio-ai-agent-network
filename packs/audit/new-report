@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Writes the empty audit report (the sections every audit fills in) to a new file.
+#   new-report <file.md>
+set -euo pipefail
+[[ $# -eq 1 && "$1" == *.md ]] || { echo "new-report: usage: new-report <file.md>" >&2; exit 2; }
+[[ ! -e "$1" ]] || { echo "new-report: $1 already exists" >&2; exit 2; }
+cp -- "$(dirname "$(readlink -f "$0")")/report.md" "$1"
+chmod u+w "$1"
+echo "wrote $1"
