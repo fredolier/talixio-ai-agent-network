@@ -26,4 +26,7 @@ Agents IA autonomes en grappe, en Rust. Un seul exécutable (`talixio-agent`).
   répond et dont les réponses sont relues), jamais par une question posée dans le texte d'une
   réponse : il y répond, et la réponse est relue avant
   d'agir. Les choix proposés disent ce que chacun entraîne ; la recommandation vient en premier.
+  Le formulaire existe déjà : la page privée « Questions Talixio Agent Network ». Pour une nouvelle
+  série de questions, la republier avec un nouvel identifiant de formulaire ; les réponses se lisent
+  dans sa collection `answers/<identifiant>`.
 - Ne pas ouvrir de pull request sans demande explicite.
