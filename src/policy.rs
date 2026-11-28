@@ -252,7 +252,7 @@ impl Capabilities {
                     && rule.env.iter().all(|name| own.env.contains(name))
             });
             if !covered {
-                return Err(format!("commande « {} » : hors de vos propres droits", rule.describe()));
+                return Err(format!("commande « {} » : hors de vos propres droits", rule.shown()));
             }
         }
         for model in &child.models {
@@ -263,7 +263,8 @@ impl Capabilities {
         if let Some(limit) = self.max_tokens {
             match child.max_tokens {
                 Some(wanted) if wanted <= limit => {}
-                _ => return Err(format!("budget : l'enfant doit avoir un max_tokens d'au plus {limit}")),
+                // said in full: a model that reads "budget" alone puts the number anywhere but here
+                _ => return Err(format!("capabilities.max_tokens: required, a whole number of at most {limit} (what is left of your own budget, descendants included); it goes inside \"capabilities\"")),
             }
         }
         for (nature, wanted) in &child.max_calls {
@@ -326,9 +327,39 @@ impl Capabilities {
             .iter()
             .filter(|rule| rule.program == program)
             .find_map(|rule| rule.allows(args, self, denied).map(|resolved| (rule, resolved)))
-            .ok_or_else(|| format!("commande non autorisée : {} {}", program.display(), args.join(" ")))
+            .ok_or_else(|| {
+                // say what would have passed: a refusal with no reason is tried again, differently wrong
+                let forms: Vec<String> = self.exec.iter().filter(|rule| rule.program == program).map(ExecRule::shown).collect();
+                let why = match forms.is_empty() {
+                    true => "this program is not one of your commands".to_string(),
+                    false => {
+                        // a worked example: a model that copies "{read}" as it stands needs to see a path in its place
+                        let path = |list: &[PathBuf]| list.first().map(|p| p.display().to_string()).unwrap_or_else(|| "/a/path".into());
+                        let example = self.exec.iter().find(|rule| rule.program == program).and_then(|rule| rule.args.as_ref()).map(|args| {
+                            args.iter()
+                                .map(|arg| match arg.as_str() {
+                                    "{read}" => path(&self.fs_read),
+                                    "{write}" => path(&self.fs_write),
+                                    "*" | "**" => "word".to_string(),
+                                    fixed => fixed.to_string(),
+                                })
+                                .collect::<Vec<_>>()
+                                .join(" ")
+                        });
+                        format!(
+                            "this program is allowed in these forms only: {}. <read-path> (<write-path>) stands for a path at or under a directory you may read (write), <arg> for one argument that is not an option; same number of arguments.{}",
+                            forms.join(" ; "),
+                            example.map(|e| format!(" For example, args for the first form: {e}")).unwrap_or_default()
+                        )
+                    }
+                };
+                format!("commande non autorisée : {} {} ({why})", program.display(), args.join(" "))
+            })
     }
 }
+
+/// The slots of a rule, as written in configuration and as shown to an agent.
+const SLOTS: [(&str, &str); 4] = [("{read}", "<read-path>"), ("{write}", "<write-path>"), ("*", "<arg>"), ("**", "<args...>")];
 
 impl ExecRule {
     fn allows(&self, args: &[String], caps: &Capabilities, denied: &[PathBuf]) -> Option<Vec<String>> {
@@ -357,6 +388,25 @@ impl ExecRule {
             });
         }
         given.next().is_none().then_some(resolved)
+    }
+
+    /// The rule as an agent reads it: `{read}` and `*` are the notation of configuration files,
+    /// and a model copies them as they stand; placeholders in angle brackets it fills in.
+    pub fn shown(&self) -> String {
+        match &self.args {
+            Some(args) => {
+                let args: Vec<&str> = args.iter().map(|arg| SLOTS.iter().find(|(raw, _)| raw == arg).map_or(arg.as_str(), |(_, shown)| shown)).collect();
+                format!("{} {}", self.program.display(), args.join(" ")).trim().to_string()
+            }
+            None => format!("{} (any arguments)", self.program.display()),
+        }
+    }
+
+    /// What an agent wrote back when it copies one of its rules for a child: the same slots.
+    pub fn unshow(arg: &mut String) {
+        if let Some((raw, _)) = SLOTS.iter().find(|(_, shown)| shown == arg) {
+            *arg = raw.to_string();
+        }
     }
 
     pub fn describe(&self) -> String {

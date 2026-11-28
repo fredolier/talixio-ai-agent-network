@@ -217,7 +217,9 @@ An agent can do only what `[capabilities]` lists.
 Argument patterns in an exec rule: a literal matches that exact argument; `"*"` is one free
 argument that is never an option (nothing starting with `-`); `"{read}"` and `"{write}"` are paths
 checked against the agent's read or write directories; `"**"`, last, is a run of free arguments
-without options. Every process started by an agent gets a cleaned environment (Decision 6), bounded
+without options. Agents are shown these slots as `<read-path>`, `<write-path>`, `<arg>` and
+`<args...>` (a model copies braces and stars as they stand), and a refused command is answered
+with the allowed forms and a worked example. Every process started by an agent gets a cleaned environment (Decision 6), bounded
 output (64 KiB per stream) and a process group (a Job Object on Windows) that is killed when the
 command ends, times out, or the agent stops.
 
@@ -397,13 +399,15 @@ changes or runs the repository. Commands: `fetch-repo` (read-only https clone: n
 submodule, no LFS; the git data is kept outside every directory agents can write, so a
 tampered clone cannot make git run anything), `repo-map` (reproducible numbers about the repository),
 `repo-git` (nine fixed read-only questions: `files`, `search`, `history`, `recent`, `commit`,
-`show`, `diff`, `blame`, `authors`) and `new-report`. Roles: one `lead` per repository, which
+`show`, `diff`, `blame`, `authors`), `new-report` and `check-report` (resolves every file, line
+and commit a report cites and prints the cited line; it does not judge). Roles: one `lead` per repository, which
 creates `goal`, `code-reviewer`, `setup-reviewer`, `planner` and a read-only `verifier` that
 tries to refuse the report. The report on disk is the shared memory between agents. The pack
 derives from Talixio AI Claude Auditor. A private repository is read with a token the operator
 adds as a secret for `fetch-repo` (section 3.10), with the address prefix it is valid for; the
-command offers it to no other address. The pack has not been run with a real model yet, and
-needs `git`, `bash` and `python3` where the agents run (`examples/audit` has an image).
+command offers it to no other address. First runs with a real model (an open-weight model of
+middle size) showed reports whose citations existed but pointed at the wrong line: hence
+`check-report`, and a clone kept apart from the one directory agents write in. The pack needs `git`, `bash` and `python3` where the agents run (`examples/audit` has an image).
 
 ## 5. Operating modes
 
@@ -521,6 +525,7 @@ reviewer's.
 | 15 | Pack TUI | 12: 2 high, 4 medium, 6 low | Fixed except 2 noted items |
 | 16 | `audit` pack: `fetch-repo`, `repo-git`, `repo-map`, `new-report` | 9: 2 critical, 1 high, 2 medium, 3 low, 1 info | 8 fixed, 1 partly (no clone size quota) |
 | 17 | Secrets for commands: vault, link messages, API, redaction | 9: 2 medium, 5 low, 2 info | 8 fixed, 1 noted (environment of a running command readable by same-account agents) |
+| 18 | `check-report` (audit pack) and the refusal messages shown to agents | 9: 2 medium, 6 low, 1 info | 9 fixed |
 
 Findings knowingly left open:
 

@@ -9,7 +9,7 @@
 
 **In short:** <five lines at most: the main conclusion, the biggest gain available, what must be kept.>
 
-Each finding gives its evidence (`file:line`, a commit, or a transcript entry), a confidence (high, medium,
+Each finding gives its evidence (`path:line` from the root of the repository, a commit, or a transcript entry), a confidence (high, medium,
 low), the smallest fix, and the risk of that fix. Numbers come from the map file beside this report.
 
 ## 1. Goal
@@ -31,7 +31,7 @@ original intent differ>
 | Part | Serves | Verdict | Evidence | Confidence |
 |---|---|---|---|---|
 
-## 4. The commands behind the skills
+## 4. The commands and scripts of the repository
 
 | Command | What it does | Called by | Contract, failures, stops | Finding |
 |---|---|---|---|---|
