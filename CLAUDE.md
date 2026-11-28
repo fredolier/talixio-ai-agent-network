@@ -22,4 +22,7 @@ Agents IA autonomes en grappe, en Rust. Un seul exécutable (`talixio-agent`).
   public est `docs/DESIGN.md`, à tenir à jour avec le code. Publier : `scripts/publier-main.sh`
   (dans la branche de travail seulement), qui pose sur `main` un commit du même arbre moins ces
   fichiers.
+- Toute question au propriétaire passe par un formulaire (outil de questions à choix), jamais
+  par une question posée dans le texte d'une réponse : il y répond, et la réponse est relue avant
+  d'agir. Les choix proposés disent ce que chacun entraîne ; la recommandation vient en premier.
 - Ne pas ouvrir de pull request sans demande explicite.
