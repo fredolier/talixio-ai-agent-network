@@ -1,0 +1,35 @@
+# An image for repository audits (the "audit" pack): the master, and the agents it creates next
+# to itself, with what the pack's commands need — git, bash, python3, GNU coreutils — and nothing
+# else. No key, no compiler, no package manager cache.
+#
+#   ./tools.sh build audit && ./tools.sh pack install audit
+#   TALIXIO_CONFIG=examples/audit/talixio.toml ./tools.sh run audit
+#
+# The pack itself is not in the image: you install it on this machine and the master receives it
+# read-only at /packs (it can neither install nor change it). HOME is /data/home, outside the
+# directories granted to agents: the pack keeps its git data there, where no agent can write.
+
+FROM rust:1-alpine AS build
+RUN apk add --no-cache build-base
+WORKDIR /src
+COPY Cargo.toml Cargo.lock catalog.toml releases.toml ./
+COPY src src
+COPY packs packs
+COPY web/dist web/dist
+RUN cargo build --release --locked && strip target/release/talixio-agent
+
+FROM debian:stable-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates git python3 \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --uid 65532 --no-create-home --home-dir /data/home talixio \
+ && mkdir -p /data/work /data/home && chown -R 65532:65532 /data && chmod -R 700 /data
+COPY --from=build /src/target/release/talixio-agent /talixio-agent
+COPY examples/audit/talixio.toml /config/talixio.toml
+USER 65532:65532
+ENV HOME=/data/home PATH=/usr/local/bin:/usr/bin:/bin
+WORKDIR /data
+VOLUME /data
+EXPOSE 7700
+ENTRYPOINT ["/talixio-agent"]
+CMD ["root", "--config", "/config/talixio.toml"]

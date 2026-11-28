@@ -58,6 +58,8 @@ type ServiceReply = Result<ServiceResponse, ServiceFail>;
 
 /// Attente maximale de la réponse à un appel de service : un peu plus que le délai du maître chez le fournisseur.
 const SERVICE_TIMEOUT: Duration = Duration::from_secs(660);
+/// A secret is a short answer from the master's own disk: no reason to wait long.
+const SECRET_TIMEOUT: Duration = Duration::from_secs(20);
 const LINK_CUT: &str = "le lien avec le parent a été coupé pendant l'appel : il a pu aboutir, il est compté";
 
 /// Le lien d'un enfant vers son parent.
@@ -66,6 +68,7 @@ pub struct Uplink {
     connected: watch::Sender<bool>,
     pending: Mutex<HashMap<String, oneshot::Sender<ModelReply>>>,
     pending_services: Mutex<HashMap<String, oneshot::Sender<ServiceReply>>>,
+    pending_secrets: Mutex<HashMap<String, oneshot::Sender<Result<String, String>>>>,
     last_recv_seq: AtomicU64,
 }
 
@@ -84,6 +87,7 @@ impl Uplink {
             connected: watch::channel(false).0,
             pending: Mutex::new(HashMap::new()),
             pending_services: Mutex::new(HashMap::new()),
+            pending_secrets: Mutex::new(HashMap::new()),
             last_recv_seq: AtomicU64::new(0),
         }
     }
@@ -156,7 +160,28 @@ impl Uplink {
         }
     }
 
+    /// Asks the parent for the secrets of a command. Not asked twice: the command runs without.
+    pub async fn secret_request(&self, ask: crate::secrets::SecretAsk) -> Result<String, String> {
+        let request_id = random_hex(1);
+        let (tx, rx) = oneshot::channel();
+        self.pending_secrets.lock().unwrap().insert(request_id.clone(), tx);
+        if !self.is_connected() {
+            self.pending_secrets.lock().unwrap().remove(&request_id);
+            return Err("parent out of reach".into());
+        }
+        self.send(Msg::SecretRequest { request_id: request_id.clone(), ask: Box::new(ask) });
+        match tokio::time::timeout(SECRET_TIMEOUT, rx).await {
+            Ok(Ok(reply)) => reply,
+            Ok(Err(_)) => Err("the link to the parent was cut".into()),
+            Err(_) => {
+                self.pending_secrets.lock().unwrap().remove(&request_id);
+                Err("the parent did not answer in time".into())
+            }
+        }
+    }
+
     fn fail_pending(&self) {
+        self.pending_secrets.lock().unwrap().clear();
         for (_, tx) in self.pending_services.lock().unwrap().drain() {
             let _ = tx.send(Err(ServiceFail { reason: LINK_CUT.into(), spent: true }));
         }
@@ -385,6 +410,11 @@ fn child_receive(node: &Arc<Node>, uplink: &Arc<Uplink>, frame: Frame, ended: &m
                     (None, error) => Err(ServiceFail { reason: crate::clean(&error.unwrap_or_else(|| "réponse vide".into()), 500, false), spent }),
                 };
                 let _ = tx.send(reply);
+            }
+        }
+        Msg::SecretResponse { request_id, sealed, error } => {
+            if let Some(tx) = uplink.pending_secrets.lock().unwrap().remove(&request_id) {
+                let _ = tx.send(sealed.filter(|s| s.len() <= 64 * 1024).ok_or_else(|| crate::clean(&error.unwrap_or_else(|| "empty answer".into()), 300, false)));
             }
         }
         Msg::StopDescendant { target } => {
@@ -740,6 +770,20 @@ fn parent_receive(node: &Arc<Node>, child_id: &str, frame: Frame) -> Vec<Frame> 
                 let msg = match node.service_for_child(&child_id, &origin, *request).await {
                     Ok(response) => Msg::ServiceResponse { request_id, response: Some(Box::new(response)), error: None, spent: true },
                     Err(fail) => Msg::ServiceResponse { request_id, response: None, error: Some(fail.reason), spent: fail.spent },
+                };
+                let _ = node.send_child(&child_id, msg, false);
+            });
+        }
+        Msg::SecretRequest { request_id, ask } => {
+            if request_id.len() > 64 {
+                return replies;
+            }
+            let node = node.clone();
+            let child_id = child_id.to_string();
+            tokio::spawn(async move {
+                let msg = match node.secret_for_child(&child_id, *ask).await {
+                    Ok(sealed) => Msg::SecretResponse { request_id, sealed: Some(sealed), error: None },
+                    Err(error) => Msg::SecretResponse { request_id, sealed: None, error: Some(error) },
                 };
                 let _ = node.send_child(&child_id, msg, false);
             });

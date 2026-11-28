@@ -91,6 +91,8 @@ pub struct Node {
     pub targets: BTreeMap<String, Target>,
     /// Rôles des paquets installés. Seul le maître en a.
     pub pack_roles: BTreeMap<String, crate::pack::InstalledRole>,
+    /// The master's vault of secrets for commands. No other agent has one.
+    pub vault: Option<crate::secrets::Vault>,
     /// Signale que l'arbre a changé et doit être renvoyé au parent.
     pub tree_dirty: Notify,
     /// Où en est la mission confiée par le parent.
@@ -232,6 +234,8 @@ pub struct ChildRec {
     /// Événements d'un descendant que l'arbre ne montre pas encore : gardés, en nombre borné,
     /// jusqu'au prochain arbre reçu de cet enfant.
     pub early_events: Vec<crate::protocol::ActivityEvent>,
+    /// The role its parent gave it: what the master goes by when a secret is tied to a role.
+    pub role: String,
     /// La cible où il a été déployé, s'il n'est pas sur la machine du parent.
     pub target: Option<Target>,
     pub process: Option<tokio::process::Child>,
@@ -362,6 +366,7 @@ impl Node {
             advertise: cfg.advertise.clone(),
             targets: cfg.targets.clone(),
             pack_roles: cfg.pack_roles.clone(),
+            vault: Some(crate::secrets::Vault::open(&cfg.state_dir, cfg.secret_commands.clone())?),
             tree_dirty: Notify::new(),
             mission: Mutex::new(Mission::default()),
         };
@@ -408,7 +413,8 @@ impl Node {
             log_max_bytes: boot.log_max_bytes,
             advertise: None,
             targets: BTreeMap::new(),
-            pack_roles: BTreeMap::new(),
+            pack_roles: boot.pack_roles.clone(),
+            vault: None,
             tree_dirty: Notify::new(),
             mission: Mutex::new(Mission::default()),
         };
@@ -611,6 +617,82 @@ impl Node {
         self.meter.lock().unwrap().settle_call(nature, spent);
         self.tree_dirty.notify_one();
         result
+    }
+
+    /// The secrets a command of this agent receives for one run. Anything that goes wrong
+    /// leaves the command without them: it runs, and says itself what it lacks.
+    pub async fn secrets_for(&self, rule: &crate::policy::ExecRule) -> Vec<crate::secrets::Given> {
+        use crate::secrets::{Ask, Asker, SecretAsk};
+        let result: Result<Vec<crate::secrets::Given>, String> = async {
+            if let Some(vault) = &self.vault {
+                let (given, notes) = vault.resolve(&Asker { agent: &self.id, role: None, remote: false }, &rule.program, &rule.secrets);
+                notes.into_iter().for_each(|note| self.emit("secret", note));
+                return Ok(given);
+            }
+            let uplink = self.uplink.as_ref().ok_or("no parent to ask")?;
+            let ask = Ask::new()?;
+            let request = SecretAsk { origin: self.id.clone(), role: None, remote: false, program: rule.program.clone(), variables: rule.secrets.clone(), key: ask.public.clone() };
+            let binding = request.binding();
+            let sealed = uplink.secret_request(request).await?;
+            ask.open(&binding, &sealed)
+        }
+        .await;
+        match result {
+            // only what the rule declares as a secret, and plain settings with a harmless name
+            Ok(given) => given.into_iter().filter(|g| if g.secret { rule.secrets.contains(&g.name) } else { crate::pack::variable_shape_ok(&g.name) }).collect(),
+            Err(reason) => {
+                self.emit("error", format!("secrets of {}: {}", rule.program.display(), crate::clean(&reason, 300, false)));
+                Vec::new()
+            }
+        }
+    }
+
+    /// Answers a request for secrets: the master from its vault, sealed for the asker; any
+    /// other agent by passing it up.
+    pub async fn secret(&self, ask: crate::secrets::SecretAsk) -> Result<String, String> {
+        match (&self.vault, &self.uplink) {
+            (Some(vault), _) => {
+                let asker = crate::secrets::Asker { agent: &ask.origin, role: Some(ask.role.as_deref().ok_or("no role")?), remote: ask.remote };
+                let (given, notes) = vault.resolve(&asker, &ask.program, &ask.variables);
+                notes.into_iter().for_each(|note| self.emit("secret", note));
+                crate::secrets::seal(&ask.binding(), &ask.key, &given)
+            }
+            (None, Some(uplink)) => uplink.secret_request(ask).await,
+            (None, None) => Err("no vault".into()),
+        }
+    }
+
+    /// The request of a child, or one it relays: checked against what this parent gave the
+    /// child, and stamped with what this parent knows (the role, another machine).
+    pub async fn secret_for_child(&self, child_id: &str, mut ask: crate::secrets::SecretAsk) -> Result<String, String> {
+        ask.origin = crate::clean(&ask.origin, 64, false);
+        if ask.variables.len() > 8 || ask.key.len() != 64 {
+            return Err("request refused".into());
+        }
+        {
+            let children = self.children.lock().unwrap();
+            let child = children.get(child_id).ok_or("unknown child")?;
+            if child.stopped {
+                return Err("agent stopped".into());
+            }
+            // nothing below a child holds more than the child: its own rule must carry these secrets
+            let held = child.caps.exec.iter().any(|rule| rule.program == ask.program && ask.variables.iter().all(|v| rule.secrets.contains(v)));
+            if !held {
+                return Err("this agent does not hold a command that accepts these secrets".into());
+            }
+            if ask.origin == child_id {
+                ask.role = Some(child.role.clone());
+                ask.remote = false;
+            } else if ask.role.is_none() {
+                return Err("request refused".into());
+            }
+            ask.remote |= child.target.as_ref().is_some_and(|target| target.kind != "docker");
+        }
+        // and this agent must still hold it itself
+        if !self.caps.exec.iter().any(|rule| rule.program == ask.program && ask.variables.iter().all(|v| rule.secrets.contains(v))) {
+            return Err("this agent does not hold a command that accepts these secrets".into());
+        }
+        self.secret(ask).await
     }
 
     /// Traite l'appel de service d'un enfant, après avoir vérifié qu'il y a droit.

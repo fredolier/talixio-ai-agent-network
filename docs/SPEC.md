@@ -678,8 +678,15 @@ Demandé le 2026-11-20. Rien n'est codé.
 
 44. **Les secrets des commandes** (2026-11-28, « voir comment passer des secrets aux agents
     enfants de manière sécurisée […] les gérer depuis le maître : ajouter, éditer, activer,
-    désactiver, et décider vers quels agents enfants ils partent »). **Conception proposée,
-    pas encore écrite ; à confirmer (Q15) avant d'ouvrir cette surface.**
+    désactiver, et décider vers quels agents enfants ils partent »). **Conception confirmée par
+    le formulaire (Q15) et écrite le 2026-11-28 (`src/secrets.rs`) ; revue de sécurité
+    indépendante en cours, pas encore publiée sur `main`.** Écarts avec la proposition : le
+    droit n'est pas une liste `secrets` à part mais un champ de la règle de la commande
+    (`ExecRule.secrets`), que seul un rôle installé apporte à un agent (jamais la demande d'un
+    modèle) ; un secret est lié à une commande, une variable et des rôles (un autre usage est un
+    autre secret) ; un nom de rôle « paquet/rôle » ne peut être qu'un rôle installé que le
+    créateur détient ; les variables d'un paquet commencent par son nom (`AUDIT_…`) ; l'hôte
+    lié au jeton est un réglage d'accompagnement (`env`) que le script exige.
     - *Principe.* Un secret ne va jamais à un agent : il va à **une commande**, le temps d'un
       lancement. Le modèle ne le voit ni dans ses consignes, ni dans ses outils, ni dans une
       sortie. C'est la même règle que pour les clés des modèles, qui restent chez le maître.
@@ -817,7 +824,7 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 | Q12 | Un maître lui-même dans Docker doit-il pouvoir lancer des agents dans d'autres conteneurs ? Comment ? | **Tranchée (2026-11-22) : oui, par le socket Docker de la machine (décision 36)**, « dans un premier temps » ; à terme, le maître ira dans une machine virtuelle. Écartés : Docker dans Docker (conteneur privilégié, pire pour une isolation moindre). Le maître installé sur la machine reste possible. |
 | Q13 | Dépôt officiel de paquets : qui publie, où vit la clé. | Ouverte. Le mécanisme est prêt (décision 40) ; il manque une clé Talixio (sa partie publique dans `TRUSTED_KEYS`) et une adresse. Proposition : clé fabriquée et gardée hors ligne par Talixio, signature faite à la main à chaque publication (pas dans la CI, dont un secret volé signerait n'importe quoi), dépôt servi comme fichiers statiques (pages du dépôt GitHub ou site Talixio). |
 | Q14 | Passage du programme lui-même en anglais et en deux langues : messages du journal, erreurs de l'API, ligne de commande, écran des paquets, notes de version, catalogue, configuration d'exemple, consignes données aux agents, commentaires du code. | Ouverte. L'interface web est faite (décision 42). Proposition pour la suite : (1) commentaires et noms de tests en anglais, sans effet sur le comportement ; (2) messages en anglais par défaut avec le français au choix (`TALIXIO_LANG`, `lang` dans la configuration), le journal gardant des codes stables que l'interface traduit ; (3) consignes des agents en anglais, à essayer avec de vrais modèles avant de changer, car elles pèsent sur leur conduite. |
-| Q15 | Secrets des commandes (décision 44) : la conception proposée convient-elle ? | Ouverte. À trancher : (a) lien par rôle (proposé) ou par agent nommé ; (b) secrets permis vers une cible ssh, ou seulement même machine et conteneurs (proposé : refusés vers ssh par défaut, permis secret par secret) ; (c) l'hôte lié au jeton est-il obligatoire (proposé : oui) ; (d) le maître lui-même peut-il employer un secret, ou seulement ses enfants. |
+| Q15 | Secrets des commandes (décision 44) : la conception proposée convient-elle ? | **Tranchée le 2026-11-28 (formulaire)** : (a) lien par rôle ; (b) refusé vers une cible ssh par défaut, permis secret par secret ; (c) hôte lié au jeton obligatoire (exigé par `fetch-repo`) ; (d) le maître aussi peut employer un secret, si l'exploitant le coche. |
 | Q11 | Répertoire des rôles (R1–R3). | Une table SQLite chez le maître. Écriture : à chaque `spawn_agent`, le rôle remonte par le lien, de parent en parent ; à chaque fin de mission, son résultat. Lecture : un outil `find_role` (recherche par mots, puis par embeddings quand F1 existera), dont la demande remonte au maître comme une demande de modèle. Sécurité, à trancher avant de coder : un rôle enregistré contient des instructions écrites par un agent, donc un texte qui peut avoir été empoisonné et que d'autres agents reliront. Il doit être présenté comme une donnée à évaluer, jamais comme une consigne ; ne jamais porter de droits (les droits restent accordés par le parent, dans la limite des siens) ; et un rôle « approuvé » par l'humain doit se distinguer d'un rôle seulement observé. Fuite : un agent d'une branche lit ce qu'une autre branche a écrit ; prévoir de quoi cloisonner. |
 
 ## 7. Sécurité

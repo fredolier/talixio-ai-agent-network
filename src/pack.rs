@@ -71,6 +71,43 @@ pub struct Command {
     /// Arguments permis, comme dans une règle `exec`. Obligatoires : un paquet ne donne jamais
     /// une commande à arguments libres.
     pub args: Vec<String>,
+    /// Environment variables the command accepts a secret in (a token, a password). The
+    /// operator decides, on the master, which secret goes there and for which roles.
+    #[serde(default)]
+    pub secrets: Vec<String>,
+    /// Plain settings that go with those secrets (the address a token is valid for, a user
+    /// name): the operator fills them next to the secret, and they travel with it.
+    #[serde(default)]
+    pub env: Vec<String>,
+}
+
+/// A command of an installed pack that accepts secrets: what the master shows to the operator.
+#[derive(Clone, Debug, Serialize)]
+pub struct SecretCommand {
+    /// `pack/program`.
+    pub name: String,
+    pub program: PathBuf,
+    pub secrets: Vec<String>,
+    pub env: Vec<String>,
+    /// The installed roles that hold this command.
+    pub roles: Vec<String>,
+}
+
+/// The name of a variable a pack may receive: its own, in capitals, so that it cannot be one
+/// that the system, the shell or a tool gives a meaning to (`PATH`, `LD_PRELOAD`, `GIT_…`).
+pub fn variable_ok(pack: &str, name: &str) -> bool {
+    let prefix = format!("{}_", pack.to_uppercase().replace('-', "_"));
+    name.len() > prefix.len() && name.starts_with(&prefix) && variable_shape_ok(name)
+}
+
+/// The shape alone, for an agent that does not know which pack a command comes from.
+pub fn variable_shape_ok(name: &str) -> bool {
+    const TAKEN: [&str; 14] = ["LD_", "DYLD_", "GIT_", "BASH_", "PYTHON", "NODE_", "NPM_", "PERL", "RUBY", "JAVA_", "SSH_", "LC_", "XDG_", "TALIXIO_"];
+    (3..=64).contains(&name.len())
+        && name.contains('_')
+        && name.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+        && !TAKEN.iter().any(|taken| name.starts_with(taken))
+        && !crate::spawn::SAFE_ENV.contains(&name)
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -110,7 +147,7 @@ pub struct Pack {
 }
 
 /// Un rôle installé, prêt à servir : ses consignes et les règles de ses commandes.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct InstalledRole {
     pub pack: String,
     /// La version et l'identifiant (empreinte du contenu) du paquet dont il vient.
@@ -120,10 +157,31 @@ pub struct InstalledRole {
     pub exec: Vec<ExecRule>,
 }
 
+/// The installed roles a child receives: none unless it may create agents, and then only the
+/// roles whose every command it holds itself (a role never brings a command its user lacks).
+pub fn roles_for_child(roles: &BTreeMap<String, InstalledRole>, caps: &crate::policy::Capabilities) -> BTreeMap<String, InstalledRole> {
+    if caps.spawn.is_none() {
+        return BTreeMap::new();
+    }
+    let own = |rule: &ExecRule| caps.exec.iter().find(|own| own.program == rule.program && own.args == rule.args);
+    let mut kept = BTreeMap::new();
+    for (name, role) in roles.iter().filter(|(_, role)| role.exec.iter().all(|rule| own(rule).is_some())) {
+        let mut role = role.clone();
+        // nor a secret its user's own rule does not carry
+        for rule in &mut role.exec {
+            let held = own(rule).map(|own| own.secrets.clone()).unwrap_or_default();
+            rule.secrets.retain(|name| held.contains(name));
+        }
+        kept.insert(name.clone(), role);
+    }
+    kept
+}
+
 /// Ce que le maître tire des paquets installés.
 #[derive(Default)]
 pub struct Installed {
     pub exec: Vec<ExecRule>,
+    pub secret_commands: Vec<SecretCommand>,
     pub roles: BTreeMap<String, InstalledRole>,
     pub names: Vec<String>,
     /// L'identifiant de chaque paquet installé, par nom.
@@ -192,6 +250,23 @@ impl Pack {
             }
             if command.description.as_ref().is_some_and(|d| !plain_line(d, 300)) {
                 bail!("commande « {} » : description invalide (une ligne de 300 caractères au plus)", command.program);
+            }
+            // the variables it receives are its own: never one the system or a tool gives a meaning to
+            let variables: Vec<&String> = command.secrets.iter().chain(&command.env).collect();
+            if let Some(bad) = variables.iter().find(|v| !variable_ok(&manifest.name, v)) {
+                bail!(
+                    "command \"{}\": variable \"{}\" refused (capitals, digits and underscores, starting with \"{}_\")",
+                    command.program,
+                    crate::clean(bad, 80, false),
+                    manifest.name.to_uppercase().replace('-', "_")
+                );
+            }
+            if variables.len() > 8 || variables.iter().any(|v| variables.iter().filter(|w| w == &v).count() > 1) || (command.secrets.is_empty() && !command.env.is_empty()) {
+                bail!("command \"{}\": at most 8 variables, each named once, and `env` only next to `secrets`", command.program);
+            }
+            // one program, one declaration: a rule with fewer arguments does not receive less or more
+            if manifest.commands.iter().any(|other| other.program == command.program && (other.secrets != command.secrets || other.env != command.env)) {
+                bail!("command \"{}\": every rule of a program declares the same `secrets` and `env`", command.program);
             }
         }
         for role in &manifest.roles {
@@ -297,6 +372,9 @@ impl Pack {
             out.push_str(&format!("  {} {}\n", command.program, command.args.join(" ")));
             if let Some(text) = &command.description {
                 out.push_str(&format!("      {text}\n"));
+            }
+            if !command.secrets.is_empty() {
+                out.push_str(&format!("      accepts a secret in: {} ; with: {}\n", command.secrets.join(", "), if command.env.is_empty() { "-".into() } else { command.env.join(", ") }));
             }
         }
         if m.commands.is_empty() {
@@ -478,6 +556,7 @@ pub fn load_installed(dir: &Path, strict: bool) -> Result<Installed> {
                 args: Some(command.args.clone()),
                 cwd: None,
                 sha256: Some(sha256_hex(&pack.files[&command.program])),
+                secrets: command.secrets.clone(),
             });
         }
         let id = pack.id();
@@ -486,6 +565,15 @@ pub fn load_installed(dir: &Path, strict: bool) -> Result<Installed> {
             // maître nomme lui-même
             let exec = rules.iter().filter(|r| role.commands.iter().any(|c| r.program.file_name().is_some_and(|f| f == c.as_str()))).cloned().collect();
             installed.roles.insert(format!("{name}/{}", role.name), InstalledRole { pack: name.clone(), version: pack.manifest.version.clone(), pack_id: id.clone(), role: role.clone(), exec });
+        }
+        // the commands that accept secrets, once per program: every rule of a program declares the same
+        for command in pack.manifest.commands.iter().filter(|c| !c.secrets.is_empty()) {
+            let full = format!("{name}/{}", command.program);
+            if installed.secret_commands.iter().any(|known| known.name == full) {
+                continue;
+            }
+            let roles = pack.manifest.roles.iter().filter(|r| r.commands.contains(&command.program)).map(|r| format!("{name}/{}", r.name)).collect();
+            installed.secret_commands.push(SecretCommand { name: full, program: dest.join(&command.program), secrets: command.secrets.clone(), env: command.env.clone(), roles });
         }
         installed.exec.extend(rules);
         installed.names.push(format!("{name} {} ({})", pack.manifest.version, &id[..12]));
@@ -541,6 +629,15 @@ mod tests {
         assert!(installed.roles["catalogue/rédacteur"].exec.is_empty());
         let rule = installed.exec[0].clone();
         check_program(&rule).unwrap();
+        // a child that creates no agent receives no role; one that does receives the roles whose
+        // commands it holds, and never a role that would bring a command it lacks
+        let mut caps = crate::policy::Capabilities { exec: installed.exec.clone(), ..Default::default() };
+        assert!(roles_for_child(&installed.roles, &caps).is_empty());
+        caps.spawn = Some(crate::policy::SpawnPolicy { max_children: 2, max_depth: 1, targets: vec!["local".into()] });
+        assert_eq!(roles_for_child(&installed.roles, &caps).len(), installed.roles.len());
+        caps.exec.clear();
+        let kept = roles_for_child(&installed.roles, &caps);
+        assert!(kept.contains_key("catalogue/rédacteur") && !kept.contains_key("catalogue/collecteur"));
         // ce compte peut écrire le dossier : le maître, lui, refuse
         assert!(format!("{:#}", load_installed(tmp.path(), true).err().unwrap()).contains("ne doit pouvoir modifier"));
 

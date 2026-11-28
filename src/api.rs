@@ -75,7 +75,10 @@ pub async fn start_listener(
             .route("/api/tasks", get(tasks).post(task_create))
             .route("/api/tasks/{id}", post(task_update))
             .route("/api/tasks/{id}/delete", post(task_delete))
-            .route("/api/tasks/{id}/run", post(task_run));
+            .route("/api/tasks/{id}/run", post(task_run))
+            .route("/api/secrets", get(secrets).post(secret_create))
+            .route("/api/secrets/{name}", post(secret_update))
+            .route("/api/secrets/{name}/delete", post(secret_delete));
     }
     let router = router.layer(axum::middleware::map_response(harden));
     let app = router.with_state(App {
@@ -386,6 +389,61 @@ async fn task_delete(State(app): State<App>, headers: HeaderMap, Path(id): Path<
         return denied;
     }
     changed(crate::schedule::delete(&app.node, &id))
+}
+
+/// The secrets for commands: listed without their values, which no route gives back.
+async fn secrets(State(app): State<App>, headers: HeaderMap) -> Response {
+    if let Err(denied) = authorize(&app, &headers) {
+        return denied;
+    }
+    match &app.node.vault {
+        Some(vault) => Json(vault.list()).into_response(),
+        None => error(StatusCode::NOT_FOUND, "no vault here"),
+    }
+}
+
+/// One change to the vault, written in the journal by name: who may use what, never a value.
+fn secret_change(app: &App, what: &str, name: &str, change: impl FnOnce(&crate::secrets::Vault) -> Result<Value, String>) -> Response {
+    let Some(vault) = &app.node.vault else {
+        return error(StatusCode::NOT_FOUND, "no vault here");
+    };
+    let result = change(vault);
+    if let Ok(view) = &result {
+        let to = match (view["command"].as_str(), view["roles"].as_array()) {
+            (Some(command), Some(roles)) => format!(
+                " — {} of {}, for {}{}{}",
+                view["variable"].as_str().unwrap_or(""),
+                command,
+                roles.iter().filter_map(Value::as_str).chain(view["master"].as_bool().unwrap_or(false).then_some("the master")).collect::<Vec<_>>().join(", "),
+                if view["remote"].as_bool().unwrap_or(false) { ", other machines included" } else { "" },
+                if view["enabled"].as_bool().unwrap_or(true) { "" } else { " (disabled)" },
+            ),
+            _ => String::new(),
+        };
+        app.node.emit("secret", format!("secret {} {what} from the interface{to}", crate::clean(name, 40, false)));
+    }
+    changed(result)
+}
+
+async fn secret_create(State(app): State<App>, headers: HeaderMap, Json(body): Json<Value>) -> Response {
+    if let Err(denied) = authorize(&app, &headers) {
+        return denied;
+    }
+    secret_change(&app, "added", body["name"].as_str().unwrap_or(""), |vault| vault.create(&body))
+}
+
+async fn secret_update(State(app): State<App>, headers: HeaderMap, Path(name): Path<String>, Json(body): Json<Value>) -> Response {
+    if let Err(denied) = authorize(&app, &headers) {
+        return denied;
+    }
+    secret_change(&app, "changed", &name, |vault| vault.update(&name, &body))
+}
+
+async fn secret_delete(State(app): State<App>, headers: HeaderMap, Path(name): Path<String>) -> Response {
+    if let Err(denied) = authorize(&app, &headers) {
+        return denied;
+    }
+    secret_change(&app, "deleted", &name, |vault| vault.delete(&name))
 }
 
 async fn task_run(State(app): State<App>, headers: HeaderMap, Path(id): Path<String>) -> Response {

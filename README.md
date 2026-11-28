@@ -74,7 +74,10 @@ A few intended uses; the first two have been tried, the others are what the tool
 - **Auditing a list of repositories.** The bundled `audit` pack gives one lead agent per
   repository and five specialised roles (goal, code review, assistant setup, plan, verifier),
   and returns a critical report without changing the repository. Not yet tried with a real
-  model; public repositories only for now (`talixio-agent pack show audit`).
+  model. See [`examples/audit`](examples/audit).
+- **Secrets for commands.** A token or a password goes to one command of an installed pack,
+  for one run, never to a model: added on the master ("Secrets" page), tied to a command and
+  to roles, sealed on its way to the agent that runs the command, removed from its output.
 - **Scheduled tasks.** A mission run again every day or every week ("Tasks" page).
 - **Permanent agents.** An agent that comes back with its memory every time the master restarts.
 - **A team for a long mission**, where each agent gets a model that fits: a small model to

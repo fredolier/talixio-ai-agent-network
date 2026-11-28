@@ -19,6 +19,7 @@ pub mod policy;
 pub mod protocol;
 pub mod releases;
 pub mod schedule;
+pub mod secrets;
 pub mod spawn;
 pub mod store;
 pub mod tls;
