@@ -67,7 +67,7 @@ pub fn linked(state_dir: &Path) -> Vec<String> {
 }
 
 /// Écrit un fichier fermé aux autres comptes : créé vide et fermé, puis seulement rempli, puis mis en place.
-fn write_private(path: &Path, content: &[u8]) -> Result<(), String> {
+pub(crate) fn write_private(path: &Path, content: &[u8]) -> Result<(), String> {
     use std::io::Write;
     let tmp = path.with_extension("tmp");
     let _ = std::fs::remove_file(&tmp);

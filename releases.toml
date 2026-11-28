@@ -7,6 +7,36 @@
 # « attention » : ce qu'il faut faire ou savoir avant de mettre à jour.
 
 [[release]]
+version = "0.24.0"
+date = "2026-11-28"
+title = "Des secrets pour les commandes"
+summary = "Un jeton ou un mot de passe va à une commande d'un paquet, le temps d'un lancement, jamais à un modèle. Et une image Docker pour le paquet « audit »."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Page « Secrets » et routes `/api/secrets` : ajouter un secret, changer sa valeur, l'activer, le désactiver, le supprimer, et choisir la commande et les rôles qui le reçoivent (le maître aussi, si vous le cochez). La valeur ne s'affiche plus jamais."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Un paquet déclare les variables où une commande accepte un secret (`secrets`, `env` dans `pack.toml`). Paquet `audit` : `fetch-repo` lit un dépôt privé avec un jeton de lecture lié à un préfixe d'adresse (`AUDIT_READ_URL`, terminé par « / »)."
+
+[[release.changes]]
+kind = "nouveau"
+text = "Image `audit` (`./tools.sh up audit`) et exemple `examples/audit` : le maître et ses agents avec `git`, `bash` et `python3`."
+
+[[release.changes]]
+kind = "sécurité"
+text = "Un secret est demandé au maître par le lien, scellé pour l'agent qui lance la commande (les agents intermédiaires ne peuvent pas le lire), posé dans l'environnement de cette seule commande et retiré de sa sortie. Seul un rôle installé apporte ce droit ; refusé vers une cible ssh sauf accord secret par secret. Revue de sécurité indépendante, corrections rejouées."
+
+[[release.changes]]
+kind = "correction"
+text = "Les rôles installés arrivent maintenant aux agents qui peuvent en créer d'autres : un `audit/lead` peut créer ses agents de rôle."
+
+[[release.changes]]
+kind = "attention"
+text = "Un nom de rôle contenant « / » doit désormais être un rôle installé. Après le remplacement d'un paquet, rouvrez et enregistrez les secrets de ses commandes : ils ne sont plus remis tant que ce n'est pas fait."
+
+[[release]]
 version = "0.23.0"
 date = "2026-11-28"
 title = "Un paquet pour auditer des dépôts"

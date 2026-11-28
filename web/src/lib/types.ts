@@ -196,3 +196,33 @@ export interface TasksData {
   now_ms: number
   max: number
 }
+
+/** A secret for a command, as the master shows it: never its value. */
+export interface Secret {
+  name: string
+  enabled: boolean
+  command: string
+  variable: string
+  roles: string[]
+  master: boolean
+  remote: boolean
+  env: Record<string, string>
+  updated_ms: number
+  used_ms: number
+  used_by: string
+  /** The command's program is no longer the one this secret was saved for. */
+  stale: boolean
+}
+
+/** A command of an installed pack that accepts secrets. */
+export interface SecretCommand {
+  name: string
+  secrets: string[]
+  env: string[]
+  roles: string[]
+}
+
+export interface SecretsData {
+  secrets: Secret[]
+  commands: SecretCommand[]
+}

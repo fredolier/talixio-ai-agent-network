@@ -57,6 +57,7 @@ fn enroll(node: &Node, id: &str, name: &str, token: &str) {
             mission_open: false,
             reports: 0,
             early_events: Vec::new(),
+            role: "r".into(),
             target: None,
             process: None,
         },
@@ -409,4 +410,45 @@ async fn keys_stay_out_of_reach_of_children() {
     assert_eq!(std::fs::read_to_string(home.join("cle-api")).unwrap(), "sk-secret");
     // et l'interdit descend encore d'un niveau : il fait partie de ce que cet enfant transmettrait
     assert!(node.deny.contains(&home.join("cle-api")));
+}
+
+/// A request for secrets is checked by each parent against what it gave the child: an agent
+/// without the command, a role it writes itself, a request it claims to relay, all fail.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_child_cannot_talk_its_way_to_a_secret() {
+    use talixio_agent::policy::ExecRule;
+    use talixio_agent::secrets::{Ask, SecretAsk};
+    let tmp = tempfile::tempdir().unwrap();
+    let (node, _rx) = root(tmp.path(), "");
+    enroll(&node, "a-child", "child", "t");
+    let ask = |origin: &str, role: Option<&str>| SecretAsk {
+        origin: origin.into(),
+        role: role.map(str::to_string),
+        remote: false,
+        program: "/packs/demo/show".into(),
+        variables: vec!["DEMO_TOKEN".into()],
+        key: Ask::new().unwrap().public,
+    };
+    // the child holds no command that accepts this secret
+    let refused = node.secret_for_child("a-child", ask("a-child", Some("demo/holder"))).await.unwrap_err();
+    assert!(refused.contains("does not hold"), "{refused}");
+    // it holds the command, without the secret
+    let rule = |secrets: &[&str]| ExecRule { program: "/packs/demo/show".into(), args: Some(vec![]), cwd: None, sha256: None, secrets: secrets.iter().map(|s| s.to_string()).collect(), env: Vec::new() };
+    node.children.lock().unwrap().get_mut("a-child").unwrap().caps.exec = vec![rule(&[])];
+    assert!(node.secret_for_child("a-child", ask("a-child", None)).await.is_err());
+    // it holds both, but this parent does not: nothing goes through an agent that lacks the right
+    node.children.lock().unwrap().get_mut("a-child").unwrap().caps.exec = vec![rule(&["DEMO_TOKEN"])];
+    let refused = node.secret_for_child("a-child", ask("a-child", None)).await.unwrap_err();
+    assert!(refused.contains("does not hold"), "{refused}");
+    // a relayed request without the role its parent should have written; one for an agent the
+    // child never created, under a role it could not have given (the child cannot create agents)
+    assert!(node.secret_for_child("a-child", ask("a-other", None)).await.is_err());
+    let refused = node.secret_for_child("a-child", ask("a-ghost", Some("demo/holder"))).await.unwrap_err();
+    assert!(refused.contains("could have created"), "{refused}");
+    // a role text that hides something, an unknown child, a bad key
+    assert!(node.secret_for_child("a-child", ask("a-child", Some("demo/holder\u{202e}\nx"))).await.is_err());
+    assert!(node.secret_for_child("a-ghost", ask("a-ghost", None)).await.is_err());
+    let mut bad = ask("a-child", None);
+    bad.key = "00".into();
+    assert!(node.secret_for_child("a-child", bad).await.is_err());
 }

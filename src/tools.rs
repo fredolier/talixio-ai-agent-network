@@ -721,6 +721,12 @@ async fn run_command(node: &Arc<Node>, input: &Value) -> Result<String, String> 
         .stderr(Stdio::piped())
         .kill_on_drop(true);
     spawn::apply_safe_env(&mut command);
+    // the secrets this command accepts: asked of the master for this run, set for this command
+    // alone, kept nowhere else
+    let given = if rule.secrets.is_empty() { Vec::new() } else { node.secrets_for(rule).await };
+    for variable in &given {
+        command.env(&variable.name, &variable.value);
+    }
     // son propre groupe de process : à la fin, tout ce que la commande a lancé part avec elle
     crate::os::isolate(&mut command);
     let mut child = command.spawn().map_err(|e| format!("lancement impossible : {e}"))?;
@@ -739,7 +745,11 @@ async fn run_command(node: &Arc<Node>, input: &Value) -> Result<String, String> 
             _ => (Vec::new(), true),
         }
     };
-    let (stdout, stderr) = (collect(stdout).await, collect(stderr).await);
+    let (mut stdout, mut stderr) = (collect(stdout).await, collect(stderr).await);
+    // the model never reads a secret, even one the command printed
+    crate::secrets::redact(&mut stdout.0, stdout.1, &given);
+    crate::secrets::redact(&mut stderr.0, stderr.1, &given);
+    drop(given);
     let Ok(status) = status else {
         return Err(format!("commande interrompue après {} s", COMMAND_TIMEOUT.as_secs()));
     };
@@ -796,11 +806,26 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value, resumed: Option<&str>) -> 
         value => serde_json::from_value(value.clone()).map_err(|e| format!("droits invalides : {e}"))?,
     };
     // un rôle installé (paquet) : ses consignes et les règles de ses commandes viennent du paquet
+    // a secret reaches a command through an installed role only: never because a request says so
+    caps.exec.iter_mut().for_each(|rule| {
+        rule.secrets.clear();
+        rule.env.clear();
+    });
     let template = node.pack_roles.get(&role);
+    // "pack/role" names an installed role: an agent cannot make one up, nor borrow the name of
+    // one it does not hold (the master ties secrets to these names)
+    if template.is_none() && role.contains('/') {
+        return Err(format!("role \"{}\": not an installed role you hold (a name with \"/\" is one of a pack)", crate::clean(&role, 80, false)));
+    }
     if let Some(template) = template {
         for rule in &template.exec {
-            if !caps.exec.iter().any(|r| r.program == rule.program && r.args == rule.args) {
-                caps.exec.push(rule.clone());
+            match caps.exec.iter_mut().find(|r| r.program == rule.program && r.args == rule.args) {
+                // the role decides which secrets its commands accept, not the request
+                Some(asked) => {
+                    asked.secrets = rule.secrets.clone();
+                    asked.env = rule.env.clone();
+                }
+                None => caps.exec.push(rule.clone()),
             }
         }
     }
@@ -901,6 +926,8 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value, resumed: Option<&str>) -> 
         ceiling,
         log_max_bytes: node.log_max_bytes,
         natures: node.natures().iter().filter(|(alias, _)| caps.models.contains(alias)).map(|(a, n)| (a.clone(), n.clone())).collect(),
+        // a child that may create agents can use the installed roles whose commands it holds itself
+        pack_roles: crate::pack::roles_for_child(&node.pack_roles, &caps),
     };
     // sa configuration part scellée : il ne l'ouvrira qu'avec la clé que ce parent lui remettra
     let seal_key = crate::config::Envelope::new_key().map_err(|e| e.to_string())?;
@@ -956,6 +983,7 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value, resumed: Option<&str>) -> 
                 mission_open: false,
                 reports: 0,
                 early_events: Vec::new(),
+                role: boot.role.clone(),
                 target: target.clone(),
                 process: None,
             },

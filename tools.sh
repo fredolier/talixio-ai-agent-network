@@ -4,8 +4,9 @@
 #   ./tools.sh up            construit l'image vide et lance le maître
 #   ./tools.sh up claude     pareil, avec la commande `claude` (abonnement Claude Pro ou Max)
 #   ./tools.sh login         connecte `claude` à votre abonnement, une fois (lien à ouvrir, code à recoller)
-#   ./tools.sh build [claude]   construit seulement
-#   ./tools.sh run [claude]     lance seulement (l'image doit exister)
+#   ./tools.sh up audit      pareil, avec git, bash et python3 : le paquet « audit » (examples/audit)
+#   ./tools.sh build [claude|audit]   construit seulement
+#   ./tools.sh run [claude|audit]     lance seulement (l'image doit exister)
 #   ./tools.sh build navigateur   construit l'image des AGENTS qui lisent le web avec un navigateur
 #                                 (talixio-navigateur ; pas une image du maître : voir examples/catalogue)
 #   ./tools.sh pack tui|list|show <nom>|install <nom>|remove <nom>|verify
@@ -71,7 +72,9 @@ variant() {
     case "${1:-}" in
         "") IMAGE="talixio-agent"; DOCKERFILE="Dockerfile"; PIDS=256; MEMORY=1g ;;
         claude) IMAGE="talixio-agent:claude"; DOCKERFILE="docker/Dockerfile.claude"; PIDS=512; MEMORY=3g ;;
-        *) die "image inconnue : « $1 » (rien, ou « claude »)" ;;
+        # the master and its agents with git, bash and python3: the "audit" pack (examples/audit)
+        audit) IMAGE="talixio-agent:audit"; DOCKERFILE="docker/Dockerfile.audit"; PIDS=512; MEMORY=4g ;;
+        *) die "image inconnue : « $1 » (rien, « claude » ou « audit »)" ;;
     esac
 }
 
@@ -185,10 +188,13 @@ agents_down() {
 # Les paquets : la commande `pack` de l'exécutable de l'image, lancée à votre compte sur le dossier
 # de cette machine. Le maître n'y est pour rien, et ne reçoit le dossier qu'en lecture seule.
 pack() {
-    local image=talixio-agent:claude
-    docker image inspect "$image" >/dev/null 2>&1 || image=talixio-agent
-    docker image inspect "$image" >/dev/null 2>&1 || die "aucune image du maître : ./tools.sh build"
-    if [ "$image" = talixio-agent:claude ]; then fresh "$image" "./tools.sh build claude"; else fresh "$image" "./tools.sh build"; fi
+    # the `pack` command is the same in every image of the master: take the first one built
+    local image="" tag
+    for tag in :audit :claude ""; do
+        if docker image inspect "talixio-agent$tag" >/dev/null 2>&1; then image="talixio-agent$tag"; break; fi
+    done
+    [ -n "$image" ] || die "aucune image du maître : ./tools.sh build"
+    fresh "$image" "./tools.sh build ${tag#:}"
     case "$PACKS" in *:*) die "dossier de paquets refusé : « : » dans son chemin" ;; esac
     mkdir -p "$PACKS"
     # vos propres paquets : TALIXIO_PACKS_FROM, un dossier avec un sous-dossier par paquet

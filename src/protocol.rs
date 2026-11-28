@@ -39,6 +39,9 @@ pub enum Msg {
     /// Appel d'un modèle de service (transcription, voix, image, plongements, prévision,
     /// décision), relayé de même. Chaque parent revérifie le droit, la taille et le quota.
     ServiceRequest { request_id: String, origin: String, request: Box<ServiceRequest> },
+    /// The secrets of a command about to run, asked of the master, which alone keeps them. Each
+    /// parent checks the right again and writes who asks; the answer is sealed for the asker.
+    SecretRequest { request_id: String, ask: Box<crate::secrets::SecretAsk> },
 
     // --- parent → enfant
     /// Le parent prouve qui il est, et met l'enfant au défi avec son propre aléa.
@@ -62,6 +65,14 @@ pub enum Msg {
         /// Sans réponse : la demande est-elle quand même partie chez le fournisseur ?
         #[serde(default)]
         spent: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    SecretResponse {
+        request_id: String,
+        /// What the command receives, sealed for the key of the request: the agents in between cannot read it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sealed: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },

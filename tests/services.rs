@@ -480,6 +480,7 @@ fn enroll(node: &Node, id: &str, caps: Capabilities) {
             mission_open: false,
             reports: 0,
             early_events: Vec::new(),
+            role: "r".into(),
             target: None,
             process: None,
         },

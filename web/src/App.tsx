@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { BookUser, Boxes, Building2, CalendarClock, History, Languages, LogOut, Menu, MessageSquare, Moon, Network, ScrollText, Sun, Terminal } from 'lucide-react'
+import { BookUser, Boxes, Building2, CalendarClock, History, KeyRound, Languages, LogOut, Menu, MessageSquare, Moon, Network, ScrollText, Sun, Terminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -17,6 +17,7 @@ import { ModelsView } from '@/views/ModelsView'
 import { ProvidersView } from '@/views/ProvidersView'
 import { ReleasesView } from '@/views/ReleasesView'
 import { RolesView } from '@/views/RolesView'
+import { SecretsView } from '@/views/SecretsView'
 import { TasksView } from '@/views/TasksView'
 import { TreeView } from '@/views/TreeView'
 
@@ -29,6 +30,7 @@ const VIEWS = [
   { id: 'modeles', label: tx('Models'), icon: Boxes, group: 'control' },
   { id: 'roles', label: tx('Roles'), icon: BookUser, group: 'control' },
   { id: 'taches', label: tx('Tasks'), icon: CalendarClock, group: 'control' },
+  { id: 'secrets', label: tx('Secrets'), icon: KeyRound, group: 'control' },
   { id: 'nouveautes', label: tx("What's new"), icon: History, group: 'version' },
 ] as const
 type ViewId = (typeof VIEWS)[number]['id']
@@ -232,6 +234,7 @@ function Shell({ cluster, logout, theme }: { cluster: Cluster; logout: () => voi
         {view === 'modeles' && <ModelsView cluster={cluster} />}
         {view === 'roles' && <RolesView cluster={cluster} />}
         {view === 'taches' && <TasksView cluster={cluster} />}
+        {view === 'secrets' && <SecretsView cluster={cluster} />}
         {view === 'nouveautes' && <ReleasesView cluster={cluster} />}
         </Guard>
       </main>

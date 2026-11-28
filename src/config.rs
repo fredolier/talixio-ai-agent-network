@@ -74,6 +74,9 @@ pub struct RootConfig {
     /// Les paquets installés, nom et version (jamais lus dans le fichier).
     #[serde(skip)]
     pub pack_names: Vec<String>,
+    /// The commands of installed packs that accept secrets (never read from the file).
+    #[serde(skip)]
+    pub secret_commands: Vec<crate::pack::SecretCommand>,
 }
 
 /// Une cible de déploiement : où et comment lancer un enfant ailleurs que sur la machine du
@@ -364,6 +367,10 @@ impl RootConfig {
         if rules.clone().any(|rule| rule.sha256.is_some()) {
             bail!("`sha256` ne s'écrit pas dans la configuration : il est posé par les paquets installés (packs_dir)");
         }
+        // nor is the right to receive a secret: only a command of an installed pack declares it
+        if rules.clone().any(|rule| !rule.secrets.is_empty() || !rule.env.is_empty()) {
+            bail!("`secrets` is not written in the configuration: only a command of an installed pack declares the secrets it accepts");
+        }
         // les paquets installés par l'exploitant : vérifiés contre leurs empreintes, et hors de
         // portée d'écriture du maître, sans quoi il ne démarre pas
         if let Some(dir) = &cfg.packs_dir {
@@ -400,8 +407,11 @@ impl RootConfig {
                         bail!("[targets.{name}] : {} n'est pas une commande d'un paquet installé (talixio-agent pack verify)", rule.describe());
                     };
                     rule.sha256 = known.sha256.clone();
+                    rule.secrets = known.secrets.clone();
+                    rule.env = known.env.clone();
                 }
             }
+            cfg.secret_commands = installed.secret_commands;
             cfg.capabilities.exec.extend(installed.exec);
             cfg.pack_roles = installed.roles;
             cfg.pack_names = installed.names;
@@ -557,6 +567,10 @@ pub struct Bootstrap {
     /// sache lequel sert à quoi. Indicatif : le maître revérifie la nature à chaque appel.
     #[serde(default)]
     pub natures: BTreeMap<String, String>,
+    /// Installed roles the child may give to its own children: only those whose every command
+    /// it holds itself. Their instructions and rules still come from the operator's packs.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub pack_roles: BTreeMap<String, crate::pack::InstalledRole>,
 }
 
 /// Ce que l'enfant reçoit au lancement : de quoi joindre son parent, et sa configuration

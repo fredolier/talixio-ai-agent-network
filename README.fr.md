@@ -80,8 +80,12 @@ est conçu.
   compte ; son parent décide ensuite d'envoyer un agent correcteur, avec d'autres droits.
 - **Auditer une liste de dépôts.** Le paquet `audit` livré donne un agent chef par dépôt et cinq
   rôles spécialisés (but, revue du code, réglages des assistants, plan, vérificateur), et rend un
-  rapport critique sans rien changer au dépôt. Pas encore essayé avec un vrai modèle ; dépôts
-  publics seulement pour l'instant (`talixio-agent pack show audit`).
+  rapport critique sans rien changer au dépôt. Pas encore essayé avec un vrai modèle. Voir
+  [`examples/audit`](examples/audit).
+- **Des secrets pour les commandes.** Un jeton ou un mot de passe va à une commande d'un paquet
+  installé, le temps d'un lancement, jamais à un modèle : ajouté chez le maître (page
+  « Secrets »), lié à une commande et à des rôles, scellé jusqu'à l'agent qui lance la commande,
+  retiré de sa sortie.
 - **Tâches planifiées.** Une mission relancée chaque jour ou chaque semaine (page « Tâches »).
 - **Agents permanents.** Un agent qui revient avec sa mémoire à chaque redémarrage du maître.
 - **Équipe pour une mission longue**, où chaque agent a un modèle à sa mesure : un petit modèle

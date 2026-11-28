@@ -327,6 +327,47 @@ A master that itself runs in a container can start agents in sibling containers 
 given the host's Docker socket (Decision 36). Whoever takes over that master process then controls
 Docker and therefore the host; such a master should hold no exec rule with free arguments.
 
+### 3.10 Secrets for commands
+
+Some commands need a credential: a read-only token to clone a private repository, an API key
+for a tool. The rule is the one that already holds for model keys: **a secret never reaches a
+model**. It goes to one command, for one run.
+
+- **Where they live.** In the master's vault, one closed file per secret under
+  `<state_dir>/secrets/`, out of every agent's reach like the rest of the state. The operator
+  manages them from the "Secrets" page or the API: add, replace the value, enable, disable,
+  delete. The value is written once; no route returns it.
+- **What may receive one.** Only a command of an installed pack that declares the variable it
+  reads the secret from (`secrets = ["AUDIT_READ_TOKEN"]` in `pack.toml`), with the plain
+  settings that go with it (`env`, for instance the address the token is valid for). A pack
+  can only declare variables under its own name (`AUDIT_…`), never one the system, the shell or
+  a tool gives a meaning to. A hand-written rule in the configuration cannot declare one.
+- **Who may use it.** The operator ties each secret to one command, one variable and a list of
+  installed roles (and, if wanted, the master itself). The right travels with the command's
+  rule: only an installed role brings it to an agent, a request from a model never does, and a
+  child holds at most what its parent's rule holds. A role name of the form `pack/role` can
+  only be an installed role the creating agent holds.
+- **The way.** When an agent runs such a command, its process makes a throwaway X25519 key
+  pair and asks over the link. Every parent on the way checks that the child holds the command
+  with that secret, and writes what it knows: the child's role, and whether it runs on another
+  machine. The master looks the secret up (command, variable, role, enabled) and seals the
+  answer for the asker's key (X25519, HKDF-SHA256, ChaCha20-Poly1305); the agents in between
+  relay what they cannot read. The value is set in the environment of that one command, kept
+  nowhere else, and removed from the command's output before the model reads it. The journal
+  records the fact, by name: which secret went to which command of which agent.
+- **Elsewhere.** A secret is refused to an agent on an ssh target, or below one, unless the
+  operator allows it for that secret: there it exists in the memory of an account the master
+  does not hold.
+- **Disabling** takes effect at the next run, everywhere: no agent keeps a copy.
+
+What this does not guarantee: the command that receives a secret can do anything with it,
+which is why only pack commands, reviewed and out of the master's reach, qualify. Output
+redaction sees the exact value, not a transformed one. A role is given by a parent agent:
+every agent able to create a role a secret is tied to can obtain a run of that command with
+the secret, though not the value itself. A secret is saved for the program as installed: if
+the pack is replaced, it is withheld until the operator saves it again. Agents under one account are not confined from each
+other by the system (section 9).
+
 ## 4. Packs: commands and roles
 
 A pack is a directory: a manifest `pack.toml` (`name`, `version`, `description`, optional `guide`),
@@ -359,8 +400,10 @@ tampered clone cannot make git run anything), `repo-map` (reproducible numbers a
 `show`, `diff`, `blame`, `authors`) and `new-report`. Roles: one `lead` per repository, which
 creates `goal`, `code-reviewer`, `setup-reviewer`, `planner` and a read-only `verifier` that
 tries to refuse the report. The report on disk is the shared memory between agents. The pack
-derives from Talixio AI Claude Auditor. It has not been run with a real model yet, reads public
-repositories only, and needs `git`, `bash` and `python3` where the agents run.
+derives from Talixio AI Claude Auditor. A private repository is read with a token the operator
+adds as a secret for `fetch-repo` (section 3.10), with the address prefix it is valid for; the
+command offers it to no other address. The pack has not been run with a real model yet, and
+needs `git`, `bash` and `python3` where the agents run (`examples/audit` has an image).
 
 ## 5. Operating modes
 
@@ -423,6 +466,8 @@ use. **It is not yet a stable interface**: paths and payloads may change between
 | GET | `/api/roles` | The role directory (agents created, at most 500 entries) and installed pack roles. |
 | GET, POST | `/api/tasks` | Lists scheduled tasks; creates one. |
 | POST | `/api/tasks/{id}`, `/api/tasks/{id}/delete`, `/api/tasks/{id}/run` | Updates or deletes a task, or delivers its instruction to the master now. |
+| GET, POST | `/api/secrets` | Lists the secrets (never their values) and the commands that accept one; adds a secret. |
+| POST | `/api/secrets/{name}`, `/api/secrets/{name}/delete` | Changes a secret (value, roles, settings, enabled) or deletes it. |
 
 ## 7. Design decisions
 
@@ -475,6 +520,7 @@ reviewer's.
 | 14 | Signed pack repository | 12: 1 high, 3 medium, 7 low, 1 info | 11 fixed, 1 noted |
 | 15 | Pack TUI | 12: 2 high, 4 medium, 6 low | Fixed except 2 noted items |
 | 16 | `audit` pack: `fetch-repo`, `repo-git`, `repo-map`, `new-report` | 9: 2 critical, 1 high, 2 medium, 3 low, 1 info | 8 fixed, 1 partly (no clone size quota) |
+| 17 | Secrets for commands: vault, link messages, API, redaction | 9: 2 medium, 5 low, 2 info | 8 fixed, 1 noted (environment of a running command readable by same-account agents) |
 
 Findings knowingly left open:
 
@@ -499,6 +545,11 @@ Findings knowingly left open:
 - **Audit pack.** No quota on the total size of a clone (time, memory and single-file limits
   only). `fetch-repo` reaches any public-looking https host the agent names; a token is offered
   only to the address prefix the operator bound it to (pass 16).
+- **Secrets.** While a command runs, its secret is in the environment of that process and of
+  what it starts: an agent of the same account that can read `/proc` could read it there. A
+  compromised agent process that may create agents can obtain what its own descendants could
+  obtain. A docker target driving a remote daemon counts as local. Behind a proxy, commands
+  cannot reach the network (their environment is emptied, proxy settings included) (pass 17).
 - **Other.** Third-party scripts on a page read by the example browser script can send what they
   see to any public name (pass 10). A scheduled task survives a change of API token (pass 9).
   The pack TUI does not restore the terminal on SIGTERM or SIGHUP (pass 15).
@@ -543,11 +594,6 @@ Findings knowingly left open:
   API errors, CLI output, release notes) are in French for now.
 
 **Open questions**
-
-- Secrets for commands (for example a read-only git token for `fetch-repo`). Proposed design,
-  not implemented: secrets are kept by the master, managed from the interface, bound by the
-  operator to a pack command and to roles, held as a capability that only attenuates, and
-  delivered sealed to the requesting agent for one run of that command, never to the model.
 
 - Who publishes the official pack repository and where its signing key is kept.
 - Which OS confinement mechanism to adopt first, and whether a containerised master should move

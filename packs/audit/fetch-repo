@@ -54,6 +54,9 @@ trap cleanup EXIT
 if [[ -d "$store" ]]; then
   [[ -d "$dest" && ! -L "$dest" ]] || refuse "$dest is missing: remove nothing by hand, ask for another directory"
   [[ "$(cat "$store/audit-origin" 2>/dev/null)" == "$url" ]] || refuse "$dest was not fetched from this address"
+  [[ -O "$store" && ! -L "$store" && -O "$state" ]] || refuse "the directory of the git data belongs to someone else"
+  # git obeys this file (proxy, certificates, commands): it is written again, as a new store has it
+  rm -f "$store/config" && printf '[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = true\n' > "$store/config"
 else
   [[ ! -e "$dest" && ! -L "$dest" ]] || refuse "$dest exists and was not made by fetch-repo"
   mkdir -p -m 700 "$state"
@@ -66,7 +69,8 @@ fi
 
 cred=()
 if [[ -n "$tok" ]]; then
-  [[ "$bound" =~ ^https://[a-z0-9.-]+/ && "$url/" == "$bound"* ]] || refuse "the token is not for this address"
+  # a prefix that ends with "/": "…/acme" would also be the start of "…/acme-other"
+  [[ "$bound" =~ ^https://[a-z0-9.-]+/([A-Za-z0-9._~-]+/)*$ && "$url/" == "$bound"* ]] || refuse "the token is not for this address (AUDIT_READ_URL is an https address prefix ending with /)"
   helper='!f() { test "$1" = get && printf "username=%s\npassword=%s\n" "$AUDIT_READ_USER" "$AUDIT_READ_TOKEN"; }; f'
   cred=(-c credential.useHttpPath=true -c "credential.$bound.helper=$helper")   # git matches host and path prefix itself
 fi

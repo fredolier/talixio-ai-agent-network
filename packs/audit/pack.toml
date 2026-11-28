@@ -10,12 +10,18 @@ guide = "brief.md"
 
 [[command]]
 program = "fetch-repo"
-description = "Clones or updates an https repository into a directory, for reading only (no hook, no submodule, dead push address). A third argument picks a branch or a commit. Private repositories need a read-only token in AUDIT_READ_TOKEN."
+description = "Clones or updates an https repository into a directory, for reading only (no hook, no submodule, dead push address). A third argument picks a branch or a commit. Private repositories need a read-only token, given by the operator as a secret of the master."
 args = ["{write}", "*"]
+# The token of a private repository: the operator adds it on the master ("Secrets" page) with
+# the address prefix it is valid for; the command refuses to send it anywhere else.
+secrets = ["AUDIT_READ_TOKEN"]
+env = ["AUDIT_READ_URL", "AUDIT_READ_USER"]
 
 [[command]]
 program = "fetch-repo"
 args = ["{write}", "*", "*"]
+secrets = ["AUDIT_READ_TOKEN"]
+env = ["AUDIT_READ_URL", "AUDIT_READ_USER"]
 
 [[command]]
 program = "repo-map"
