@@ -15,8 +15,9 @@ permissions:
 jobs:
   executables:
     name: ${{ matrix.name }}
-    # une version ne part que d'une étiquette, ou de la branche principale du dépôt
-    if: github.ref_type == 'tag' || github.ref_name == github.event.repository.default_branch
+    # a release starts only from a tag, or from main, the public branch (which need not be the
+    # repository's default branch)
+    if: github.ref_type == 'tag' || github.ref_name == 'main'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     strategy:
