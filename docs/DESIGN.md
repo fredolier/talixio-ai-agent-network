@@ -344,12 +344,22 @@ Manifest fields are single-line, bounded and free of control characters, or the 
 | `pack tui` | Full-screen browser over the same operations and checks: `i` install, `r` remove, `v` verify, `q` quit, each change confirmed explicitly. It shows whether the source is signed and how much of a pack's text has been read. |
 | `pack keygen --out <file>`, `pack publish --from <packs> --out <dir> --key-file <file>` | For publishers: create a signing key (private part in a 0600 file) and write a signed repository. |
 
-Sources: the packs embedded in the executable (currently `catalogue`), a local directory
+Sources: the packs embedded in the executable (currently `catalogue` and `audit`), a local directory
 (`--from`, unsigned), or a signed repository (`--depot` with `--key`). Destination: `--dir`,
 `TALIXIO_PACKS`, or `/opt/talixio/packs` as root with the dedicated account. An installed role is
 named `pack/role`: `spawn_agent` with that name gives the child the role's instructions and
 commands, while directories, budget and mission remain the master's choice within its own
 capabilities. Installed roles are visible, read-only, through `GET /api/roles` (Decision 39).
+
+**The `audit` pack.** Audits git repositories from outside and writes a report; it never
+changes or runs the repository. Commands: `fetch-repo` (read-only https clone: no hook, no
+submodule, no LFS, dead push address), `repo-map` (reproducible numbers about the repository),
+`repo-git` (nine fixed read-only questions: `files`, `search`, `history`, `recent`, `commit`,
+`show`, `diff`, `blame`, `authors`) and `new-report`. Roles: one `lead` per repository, which
+creates `goal`, `code-reviewer`, `setup-reviewer`, `planner` and a read-only `verifier` that
+tries to refuse the report. The report on disk is the shared memory between agents. The pack
+derives from Talixio AI Claude Auditor. It has not been run with a real model yet, reads public
+repositories only, and needs `git`, `bash` and `python3` where the agents run.
 
 ## 5. Operating modes
 
@@ -528,6 +538,11 @@ Findings knowingly left open:
   API errors, CLI output, release notes) are in French for now.
 
 **Open questions**
+
+- Secrets for commands (for example a read-only git token for `fetch-repo`). Proposed design,
+  not implemented: secrets are kept by the master, managed from the interface, bound by the
+  operator to a pack command and to roles, held as a capability that only attenuates, and
+  delivered sealed to the requesting agent for one run of that command, never to the model.
 
 - Who publishes the official pack repository and where its signing key is kept.
 - Which OS confinement mechanism to adopt first, and whether a containerised master should move

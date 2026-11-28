@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Clones (or updates) a repository for reading only, for an audit agent.
+#   fetch-repo <dir> <https-url> [branch-or-commit]
+# The clone lands in <dir>/<name>. Its working files are made read-only and its push address
+# is dead. Nothing from the repository is ever run: no hook, no submodule, no LFS download.
+# A private repository needs a read-only token in $AUDIT_READ_TOKEN (and $AUDIT_READ_USER for a
+# deploy token). The token reaches git through a credential helper that names the variable: its
+# value is never on a command line, in the clone's configuration or in a file.
+# Adapted from scripts/fetch.sh of Talixio AI Claude Auditor.
+set -euo pipefail
+refuse() { echo "fetch-repo: $*" >&2; exit 2; }
+
+[[ $# -eq 2 || $# -eq 3 ]] || refuse "usage: fetch-repo <dir> <https-url> [branch-or-commit]"
+dir="$1"; url="$2"; ref="${3:-}"
+[[ -d "$dir" ]] || refuse "$dir is not a directory"
+# https only, a plain host name, no account, no port, no odd character
+[[ "$url" =~ ^https://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(/[A-Za-z0-9._~/-]+)$ ]] || refuse "need an https:// address with no account, port or query in it"
+[[ "$url" != *..* ]] || refuse "address refused"
+[[ -z "$ref" || "$ref" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$ ]] || refuse "branch or commit refused"
+[[ "$ref" != *..* ]] || refuse "branch or commit refused"
+
+name="$(basename "${url%/}" .git | tr -c 'A-Za-z0-9._\n-' '_')"
+[[ -n "$name" && "$name" != .* ]] || refuse "no usable name in the address"
+dest="$(cd "$dir" && pwd)/$name"
+
+export GIT_TERMINAL_PROMPT=0        # fail instead of asking for a password
+export GIT_ALLOW_PROTOCOL=https     # no ssh, file or ext transport
+export GIT_LFS_SKIP_SMUDGE=1        # no extra download
+helper='!f() { test "$1" = get && test -n "${AUDIT_READ_TOKEN:-}" && printf "username=%s\npassword=%s\n" "${AUDIT_READ_USER:-oauth2}" "$AUDIT_READ_TOKEN"; }; f'
+# the empty helper first clears any configured helper (a keychain would store the token)
+g() { git -c credential.helper= -c credential.helper="$helper" -c core.hooksPath=/dev/null -c protocol.version=2 -c http.followRedirects=false "$@"; }
+
+if [[ -d "$dest/.git" ]]; then
+  chmod -R u+w "$dest"
+  g -C "$dest" fetch --quiet --no-recurse-submodules --no-tags "$url" '+refs/heads/*:refs/remotes/origin/*'
+else
+  [[ ! -e "$dest" ]] || refuse "$dest exists and is not a clone"
+  timeout 900 git -c credential.helper= -c credential.helper="$helper" -c core.hooksPath=/dev/null -c http.followRedirects=false \
+    clone --quiet --no-recurse-submodules --no-checkout -- "$url" "$dest"
+fi
+git -C "$dest" remote set-url --push origin no-push://read-only   # a push fails in git itself
+
+if [[ -z "$ref" ]]; then
+  ref="$(git -C "$dest" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null || git -C "$dest" rev-parse HEAD)"
+elif git -C "$dest" rev-parse -q --verify "origin/$ref^{commit}" >/dev/null; then
+  ref="origin/$ref"
+fi
+git -C "$dest" rev-parse -q --verify "$ref^{commit}" >/dev/null || refuse "no such branch or commit: $ref"
+git -C "$dest" -c core.hooksPath=/dev/null -c core.symlinks=false checkout --quiet --force --detach "$ref" --
+find "$dest" -path "$dest/.git" -prune -o -type f -exec chmod a-w {} +   # working files read-only
+
+echo "target:  $dest"
+echo "ref:     $ref"
+echo "commit:  $(git -C "$dest" rev-parse HEAD)  ($(git -C "$dest" log -1 --format=%as))"

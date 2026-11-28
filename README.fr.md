@@ -78,6 +78,10 @@ est conçu.
   permise.
 - **Audit puis correction, séparés.** Un agent diagnostique une machine en lecture seule et rend
   compte ; son parent décide ensuite d'envoyer un agent correcteur, avec d'autres droits.
+- **Auditer une liste de dépôts.** Le paquet `audit` livré donne un agent chef par dépôt et cinq
+  rôles spécialisés (but, revue du code, réglages des assistants, plan, vérificateur), et rend un
+  rapport critique sans rien changer au dépôt. Pas encore essayé avec un vrai modèle ; dépôts
+  publics seulement pour l'instant (`talixio-agent pack show audit`).
 - **Tâches planifiées.** Une mission relancée chaque jour ou chaque semaine (page « Tâches »).
 - **Agents permanents.** Un agent qui revient avec sa mémoire à chaque redémarrage du maître.
 - **Équipe pour une mission longue**, où chaque agent a un modèle à sa mesure : un petit modèle

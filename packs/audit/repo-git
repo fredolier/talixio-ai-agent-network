@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Reads the history of a fetched repository, and nothing else: a fixed set of read-only git
+# questions, each with a bounded answer. Nothing from the repository is run.
+#   repo-git <clone> files [path]            tracked files (with sizes)
+#   repo-git <clone> search <pattern> [path] lines matching an extended regular expression
+#   repo-git <clone> history [path]          commits, oldest first: hash, date, subject
+#   repo-git <clone> recent [path]           the 100 latest commits
+#   repo-git <clone> commit <rev>            one commit: message and the files it touched
+#   repo-git <clone> show <rev> <path>       a file as it was at that commit
+#   repo-git <clone> diff <rev> <path>       what that commit changed in that file
+#   repo-git <clone> blame <path>            who last changed each line, and when
+#   repo-git <clone> authors                 commits per author
+set -euo pipefail
+refuse() { echo "repo-git: $*" >&2; exit 2; }
+[[ $# -ge 2 && $# -le 4 ]] || refuse "usage: repo-git <clone> <question> [arguments] (see the pack's description)"
+repo="$1"; what="$2"; a="${3:-}"; b="${4:-}"
+[[ -d "$repo/.git" ]] || refuse "$repo is not a fetched repository"
+for arg in "$a" "$b"; do [[ "$arg" != -* ]] || refuse "an argument cannot start with a dash"; done
+rev() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._/~^-]{0,199}$ && "$1" != *..* ]] || refuse "revision refused"; }
+path() { [[ -n "$1" && "$1" != /* && "$1" != *..* && "$1" != *:* ]] || refuse "path refused (relative to the repository, no .., no colon)"; }
+# the machine's and the account's configuration are ignored; no hook, no pager, no external diff or text conversion
+g() { timeout 60 git -C "$repo" -c core.hooksPath=/dev/null -c core.pager=cat -c core.fsmonitor=false -c core.quotePath=false -c color.ui=false --no-pager "$@"; }
+cap() { head -c 60000; }
+
+case "$what" in
+  files)   [[ -z "$b" ]] || refuse "files takes one path at most"; if [[ -n "$a" ]]; then path "$a"; g ls-tree -r -l --full-tree HEAD -- "$a"; else g ls-tree -r -l --full-tree HEAD; fi | cap ;;
+  search)  [[ -n "$a" ]] || refuse "search needs a pattern"; if [[ -n "$b" ]]; then path "$b"; g grep -n -I -E --no-textconv -e "$a" HEAD -- "$b"; else g grep -n -I -E --no-textconv -e "$a" HEAD; fi | cut -c1-400 | cap || true ;;
+  history) [[ -z "$b" ]] || refuse "history takes one path at most"; if [[ -n "$a" ]]; then path "$a"; g log --reverse --format='%h %as %s' -- "$a"; else g log --reverse --format='%h %as %s'; fi | cap ;;
+  recent)  [[ -z "$b" ]] || refuse "recent takes one path at most"; if [[ -n "$a" ]]; then path "$a"; g log -100 --format='%h %as %an: %s' -- "$a"; else g log -100 --format='%h %as %an: %s'; fi | cap ;;
+  commit)  [[ -n "$a" && -z "$b" ]] || refuse "commit needs one revision"; rev "$a"; g show --no-ext-diff --no-textconv --stat --format='%H%n%an, %ad%n%n%B' "$a" -- | cap ;;
+  show)    [[ -n "$a" && -n "$b" ]] || refuse "show needs a revision and a path"; rev "$a"; path "$b"; g show --no-ext-diff --no-textconv "$a:$b" | cap ;;
+  diff)    [[ -n "$a" && -n "$b" ]] || refuse "diff needs a revision and a path"; rev "$a"; path "$b"; g show --no-ext-diff --no-textconv --format='%h %as %s' "$a" -- "$b" | cap ;;
+  blame)   [[ -n "$a" && -z "$b" ]] || refuse "blame needs one path"; path "$a"; g blame --date=short -- "$a" | cut -c1-300 | cap ;;
+  authors) [[ -z "$a" ]] || refuse "authors takes no argument"; g shortlog -sn HEAD | cap ;;
+  *) refuse "unknown question: $what" ;;
+esac

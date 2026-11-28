@@ -642,6 +642,75 @@ Demandé le 2026-11-20. Rien n'est codé.
       variables diffèrent. Aucune dépendance ajoutée, aucune route, rien de lu depuis le réseau :
       pas de nouvelle surface. Les textes venus du serveur s'affichent tels qu'ils arrivent.
 
+43. **Le paquet « audit »** (2026-11-28, « une flotte d'agents qui utilisent la base de code de
+    Talixio AI Claude Auditor pour faire des audits de repo […] on lui donne une liste de repos
+    et il lance […] tous les agents dont il a besoin »). `packs/audit`, livré dans l'exécutable,
+    en anglais. Il reprend de l'auditeur ses deux scripts, sa méthode et son rapport ; l'auditeur
+    est un projet Claude Code (skills et réglages), pas un programme : ses skills deviennent des
+    rôles, ses règles `allow` des commandes.
+    - *Commandes* : `fetch-repo <dossier> <adresse https> [branche]` (clone en lecture seule,
+      sans crochet, sous-module ni LFS, adresse de poussée morte ; d'après `fetch.sh`) ;
+      `repo-map <clone> <fichier.md>` (les chiffres : tailles, matériel pour assistants, graphe
+      d'appels, doublons, croissance ; d'après `map.py`) ; `repo-git <clone> <question> […]`
+      (neuf questions fixes en lecture : files, search, history, recent, commit, show, diff,
+      blame, authors ; remplace les règles `git -C targets/* log *` de l'auditeur, que nos
+      règles d'arguments ne savent pas dire sans donner les options de git) ; `new-report`
+      (le gabarit du rapport, neuf sections).
+    - *Rôles* : `lead` (un par dépôt : clone, ouvre le rapport, confie chaque étape, conclut),
+      `goal`, `code-reviewer`, `setup-reviewer`, `planner`, `verifier` (lecture seule, cherche
+      à refuser le rapport). Le rapport sur disque est la mémoire commune : aucun agent ne
+      dépend du souvenir d'un autre, ce qui tient lieu de compaction (absente).
+    - *Le but confirmé.* L'auditeur s'arrête après avoir trouvé le but et attend la personne.
+      Ici le `lead` pose la question à son parent, que le maître relaie dans le dialogue ; sans
+      réponse, le rapport dit « but non confirmé » (`brief.md`, la consigne à donner au maître).
+    - *Rapport seulement.* Rien n'est changé dans le dépôt audité ni lancé depuis lui. La
+      correction (branche, demande de fusion) viendra avec un rôle distinct et d'autres droits.
+    - *Limites.* Pas encore essayé avec un vrai modèle : les commandes ont été essayées à la
+      main sur un dépôt public, pas les rôles. Les dépôts privés attendent la décision 44. Il
+      faut `git`, `bash` et `python3` là où tournent les agents (l'image vide du maître ne les a
+      pas : une cible Docker dédiée reste à écrire). `fetch-repo` clone depuis n'importe quel
+      hôte https que l'agent nomme. Le contenu lu est plafonné (256 ko par fichier, 60 ko par
+      réponse de commande). La licence de l'auditeur n'est pas déclarée dans son dépôt : même
+      propriétaire, à régulariser.
+
+44. **Les secrets des commandes** (2026-11-28, « voir comment passer des secrets aux agents
+    enfants de manière sécurisée […] les gérer depuis le maître : ajouter, éditer, activer,
+    désactiver, et décider vers quels agents enfants ils partent »). **Conception proposée,
+    pas encore écrite ; à confirmer (Q15) avant d'ouvrir cette surface.**
+    - *Principe.* Un secret ne va jamais à un agent : il va à **une commande**, le temps d'un
+      lancement. Le modèle ne le voit ni dans ses consignes, ni dans ses outils, ni dans une
+      sortie. C'est la même règle que pour les clés des modèles, qui restent chez le maître.
+    - *Chez le maître.* Un coffre `<state_dir>/secrets/` (un fichier par secret, lisible du
+      seul compte du maître, comme `keys/`), interdit aux agents comme le reste de l'état. Une
+      page « Secrets » et des routes `/api/secrets` : ajouter, remplacer la valeur, activer,
+      désactiver, supprimer. La valeur ne s'écrit qu'une fois : aucune route ne la rend.
+    - *Qui le reçoit.* Trois conditions, toutes vérifiées par le maître à chaque lancement :
+      (1) la commande le demande par son nom : `secrets = ["AUDIT_READ_TOKEN"]` sur la
+      commande dans `pack.toml`, donc une commande de paquet, vérifiée par empreinte, jamais
+      une règle à arguments libres ; (2) l'exploitant a lié le secret à cette commande et à des
+      rôles (« `depot-gitlab` → variable `AUDIT_READ_TOKEN` de `audit/fetch-repo`, pour le rôle
+      `audit/lead` »), depuis la page ; (3) l'agent le détient dans ses droits (`secrets`,
+      atténué comme le reste : un enfant n'en a jamais plus que son parent, et rien par défaut).
+    - *Le trajet.* À chaque lancement d'une commande qui en demande, l'enfant fabrique une
+      paire de clés jetable et demande le secret par le lien, comme il demande un modèle. Le
+      maître vérifie les trois conditions, scelle la valeur pour cette clé et la renvoie : les
+      agents intermédiaires relaient sans pouvoir lire. L'enfant pose la valeur dans
+      l'environnement de cette seule commande, l'oublie, et retire toute occurrence de la
+      valeur des sorties avant que le modèle ne les lise. Rien sur disque, rien dans la ligne
+      de commande, rien dans le journal sauf le fait (« secret depot-gitlab remis à fetch-repo
+      de l'agent X »).
+    - *Désactiver* vaut au lancement suivant, partout. Aucun agent ne garde de copie.
+    - *Ce que cela ne garantit pas, et qu'il faudra dire.* La commande qui reçoit le secret
+      peut en faire ce qu'elle veut : d'où les seules commandes de paquet, relues et à root.
+      Un secret remis sur une machine distante (ssh) y existe en mémoire, sous un compte que
+      le maître ne tient pas. Le retrait des sorties ne voit que la valeur exacte, pas une
+      valeur transformée. Et un jeton doit être lié à son hôte : `fetch-repo` clone où l'agent
+      le dit, donc le lien de l'exploitant devra porter l'hôte permis (`gitlab.com`) et le
+      script le vérifier avant d'employer le jeton.
+    - *Écartés.* Le secret dans la configuration ou les consignes de l'enfant (lisible par le
+      modèle et sur disque) ; une variable d'environnement de l'agent (héritée par toutes ses
+      commandes) ; le maître qui clone lui-même pour ses enfants (ne vaut que pour git).
+
 ## 5. Architecture
 
 ```
@@ -745,6 +814,7 @@ est créé au premier démarrage dans `<state_dir>/api-token`.
 | Q12 | Un maître lui-même dans Docker doit-il pouvoir lancer des agents dans d'autres conteneurs ? Comment ? | **Tranchée (2026-11-22) : oui, par le socket Docker de la machine (décision 36)**, « dans un premier temps » ; à terme, le maître ira dans une machine virtuelle. Écartés : Docker dans Docker (conteneur privilégié, pire pour une isolation moindre). Le maître installé sur la machine reste possible. |
 | Q13 | Dépôt officiel de paquets : qui publie, où vit la clé. | Ouverte. Le mécanisme est prêt (décision 40) ; il manque une clé Talixio (sa partie publique dans `TRUSTED_KEYS`) et une adresse. Proposition : clé fabriquée et gardée hors ligne par Talixio, signature faite à la main à chaque publication (pas dans la CI, dont un secret volé signerait n'importe quoi), dépôt servi comme fichiers statiques (pages du dépôt GitHub ou site Talixio). |
 | Q14 | Passage du programme lui-même en anglais et en deux langues : messages du journal, erreurs de l'API, ligne de commande, écran des paquets, notes de version, catalogue, configuration d'exemple, consignes données aux agents, commentaires du code. | Ouverte. L'interface web est faite (décision 42). Proposition pour la suite : (1) commentaires et noms de tests en anglais, sans effet sur le comportement ; (2) messages en anglais par défaut avec le français au choix (`TALIXIO_LANG`, `lang` dans la configuration), le journal gardant des codes stables que l'interface traduit ; (3) consignes des agents en anglais, à essayer avec de vrais modèles avant de changer, car elles pèsent sur leur conduite. |
+| Q15 | Secrets des commandes (décision 44) : la conception proposée convient-elle ? | Ouverte. À trancher : (a) lien par rôle (proposé) ou par agent nommé ; (b) secrets permis vers une cible ssh, ou seulement même machine et conteneurs (proposé : refusés vers ssh par défaut, permis secret par secret) ; (c) l'hôte lié au jeton est-il obligatoire (proposé : oui) ; (d) le maître lui-même peut-il employer un secret, ou seulement ses enfants. |
 | Q11 | Répertoire des rôles (R1–R3). | Une table SQLite chez le maître. Écriture : à chaque `spawn_agent`, le rôle remonte par le lien, de parent en parent ; à chaque fin de mission, son résultat. Lecture : un outil `find_role` (recherche par mots, puis par embeddings quand F1 existera), dont la demande remonte au maître comme une demande de modèle. Sécurité, à trancher avant de coder : un rôle enregistré contient des instructions écrites par un agent, donc un texte qui peut avoir été empoisonné et que d'autres agents reliront. Il doit être présenté comme une donnée à évaluer, jamais comme une consigne ; ne jamais porter de droits (les droits restent accordés par le parent, dans la limite des siens) ; et un rôle « approuvé » par l'humain doit se distinguer d'un rôle seulement observé. Fuite : un agent d'une branche lit ce qu'une autre branche a écrit ; prévoir de quoi cloisonner. |
 
 ## 7. Sécurité
