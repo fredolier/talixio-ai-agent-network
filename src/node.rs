@@ -703,8 +703,8 @@ impl Node {
             } else {
                 // relayed: the child must be able to have created that agent, with that role
                 let role = ask.role.as_deref().ok_or("request refused")?;
-                let known = child.caps.spawn.is_some() && child.subtree.children.iter().any(|node| node.contains(&ask.origin));
-                if !known || !crate::pack::roles_for_child(&self.pack_roles, &child.caps).contains_key(role) {
+                // (its tree is what it reports, and arrives later than its agents: not a proof either way)
+                if child.caps.spawn.is_none() || !crate::pack::roles_for_child(&self.pack_roles, &child.caps).contains_key(role) {
                     return Err("request refused: not an agent this child could have created with that role".into());
                 }
             }
