@@ -78,10 +78,14 @@ est conçu.
   permise.
 - **Audit puis correction, séparés.** Un agent diagnostique une machine en lecture seule et rend
   compte ; son parent décide ensuite d'envoyer un agent correcteur, avec d'autres droits.
-- **Auditer une liste de dépôts.** Le paquet `audit` livré donne un agent chef par dépôt et cinq
-  rôles spécialisés (but, revue du code, réglages des assistants, plan, vérificateur), et rend un
-  rapport critique sans rien changer au dépôt. Pas encore essayé avec un vrai modèle. Voir
+- **Auditer une liste de dépôts.** Le paquet `audit` livré donne un agent chef par dépôt et six
+  rôles spécialisés (but, revue du code, réglages de l'assistant, plan, consolidation,
+  vérification), et rend un rapport critique sans rien changer au dépôt : chaque agent écrit sa
+  partie, et l'ensemble est assemblé en une page HTML autonome. Voir
   [`examples/audit`](examples/audit).
+- **Envoyer un travail au dehors.** Le paquet `notify` livré envoie un fichier par e-mail ou
+  publie un texte dans un salon Slack, Discord ou Teams. Un agent choisit le fichier ; les
+  destinataires et le salon sont les vôtres, fixés une fois avec le secret.
 - **Des secrets pour les commandes.** Un jeton ou un mot de passe va à une commande d'un paquet
   installé, le temps d'un lancement, jamais à un modèle : ajouté chez le maître (page
   « Secrets »), lié à une commande et à des rôles, scellé jusqu'à l'agent qui lance la commande,

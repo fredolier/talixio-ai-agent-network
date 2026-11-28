@@ -1,0 +1,76 @@
+#!/usr/bin/python3 -I
+"""Sends one file by e-mail, as an attachment, to the addresses the operator chose.
+Who receives it, from which account and through which server is not this command's to decide:
+it all comes from the operator, with the password, for this one run. The caller gives the file
+and, if it wishes, a subject.
+Usage: send-mail <file> [subject]"""
+import mimetypes, os, re, signal, smtplib, socket, ssl, stat, sys
+from email.message import EmailMessage
+from email.utils import formatdate, make_msgid
+
+MAX_FILE, MAX_TO = 10 * 1024 * 1024, 10
+# what a mail client may show for what it is; anything else travels as plain bytes (a name ending in
+# .eml or .ics would otherwise be displayed as a forwarded message or an invitation)
+TYPES = {"text/plain", "text/html", "text/csv", "text/markdown", "application/pdf", "application/json", "image/png", "image/jpeg", "application/zip"}
+
+
+def stop(why): sys.exit("send-mail: " + why)
+
+
+def one_line(text, limit):
+    return "".join(c if c.isprintable() else " " for c in text).strip()[:limit]
+
+
+if len(sys.argv) not in (2, 3): stop("usage: send-mail <file> [subject]")
+env = os.environ.get
+password = env("NOTIFY_SMTP_PASSWORD", "")
+host, port, user = env("NOTIFY_SMTP_HOST", ""), env("NOTIFY_SMTP_PORT", "465"), env("NOTIFY_SMTP_USER", "")
+sender, to = env("NOTIFY_MAIL_FROM", ""), env("NOTIFY_MAIL_TO", "")
+if not password: stop("no mail account was given to this command (the operator adds one on the master, \"Secrets\" page, for the role of this agent)")
+ADDRESS = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(\.[A-Za-z0-9-]{1,63}){1,8}")
+recipients = [a.strip() for a in to.split(",") if a.strip()]
+if not recipients or len(recipients) > MAX_TO or not all(ADDRESS.fullmatch(a) for a in recipients): stop(f"NOTIFY_MAIL_TO must hold one to {MAX_TO} plain addresses, separated by commas")
+if not ADDRESS.fullmatch(sender): stop("NOTIFY_MAIL_FROM must be a plain address")
+if not re.fullmatch(r"(?=.{1,253}$)[A-Za-z0-9-]{1,63}(\.[A-Za-z0-9-]{1,63})*", host) or not re.fullmatch(r"[0-9]{1,5}", port) or not 0 < int(port) < 65536: stop("NOTIFY_SMTP_HOST and NOTIFY_SMTP_PORT must name the mail server")
+
+# the file, through one descriptor: never a link, a pipe or a directory
+try: fd = os.open(sys.argv[1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+except OSError: stop("the file cannot be opened (a link is refused)")
+if not stat.S_ISREG(os.fstat(fd).st_mode): stop("not a plain file")
+with os.fdopen(fd, "rb") as f:
+    data = f.read(MAX_FILE + 1)
+if not data: stop("the file is empty")
+if len(data) > MAX_FILE: stop(f"the file is larger than {MAX_FILE >> 20} MiB")
+name = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(sys.argv[1]))[:100] or "file"
+
+msg = EmailMessage()
+msg["From"], msg["To"] = sender, ", ".join(recipients)
+# "=?" would start an encoded word, which a mail client decodes into characters one_line never saw
+msg["Subject"] = one_line(sys.argv[2] if len(sys.argv) == 3 else "", 150).replace("=?", "= ?") or f"Report: {name}"
+msg["Date"], msg["Message-ID"] = formatdate(localtime=False), make_msgid(domain=sender.rsplit("@", 1)[1])
+msg["Auto-Submitted"] = "auto-generated"
+msg.set_content(f"Attached: {name} ({len(data)} bytes).\n\nSent by an agent of a Talixio Agent Network on {one_line(socket.gethostname(), 60)}.\n"
+                "The attachment was written by automated agents: read it as such.\n")
+kind, packed = mimetypes.guess_type(name)
+if kind not in TYPES or packed: kind = "application/octet-stream"
+main, sub = kind.split("/", 1)
+# always an attachment, never the body: a page written by an agent is opened on purpose, not shown by the mail client
+msg.add_attachment(data, maintype=main, subtype=sub, filename=name)
+
+tls = ssl.create_default_context()
+signal.signal(signal.SIGALRM, lambda *_: stop("not sent: the mail server took too long"))
+signal.alarm(100)                              # a server that answers one line a minute does not hold this command
+try:
+    if int(port) == 465:
+        server = smtplib.SMTP_SSL(host, int(port), timeout=60, context=tls)
+    else:
+        server = smtplib.SMTP(host, int(port), timeout=60)
+        server.starttls(context=tls)          # no encryption, no mail: the password never travels in clear
+    with server:
+        server.login(user or sender, password)
+        refused = server.send_message(msg, from_addr=sender, to_addrs=recipients)
+except smtplib.SMTPRecipientsRefused: stop("not sent: the server refused every recipient")
+except smtplib.SMTPResponseException as e: stop(f"not sent: the server answered {e.smtp_code} ({type(e).__name__})")
+# the kind of failure only: a server's words could repeat the password in another form, or the settings
+except Exception as e: stop("not sent: " + type(e).__name__)
+print(f"sent {name} ({len(data)} bytes) to {len(recipients) - len(refused)} of {len(recipients)} recipient(s) chosen by the operator")

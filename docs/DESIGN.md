@@ -412,6 +412,18 @@ command offers it to no other address. First runs with a real model (an open-wei
 middle size) showed reports whose citations existed but pointed at the wrong line: hence
 `check-report`, and a clone kept apart from the one directory agents write in. The pack needs `git`, `bash` and `python3` where the agents run (`examples/audit` has an image).
 
+**The `notify` pack.** Sends work out of the cluster. `send-mail <file> [subject]` sends one
+file as an attachment (10 MiB at most) over an encrypted SMTP connection only;
+`send-webhook <text file> [title]` posts the start of a text to an incoming webhook (Slack,
+Discord, Teams, or an https address that takes JSON). One role, `sender`. The split is the
+point: an agent chooses the file, among those it may read, and a subject; the operator chooses
+everything else, once, as a secret with settings beside it (section 3.10): the mail account,
+the sender, the recipients, the webhook address and its kind. Nothing in a request, a file or
+a report changes where things go; the commands follow no redirection and use no proxy. The
+accepted risk is stated in the pack's guide: an agent holding these commands can send any file
+it reads to those recipients, so the role goes only to agents that read nothing the recipients
+may not see. Tried against local fake servers only, so far.
+
 ## 5. Operating modes
 
 **Service** (Decision 28). `talixio-agent service install` writes the service definition and
@@ -529,6 +541,8 @@ reviewer's.
 | 16 | `audit` pack: `fetch-repo`, `repo-git`, `repo-map`, `new-report` | 9: 2 critical, 1 high, 2 medium, 3 low, 1 info | 8 fixed, 1 partly (no clone size quota) |
 | 17 | Secrets for commands: vault, link messages, API, redaction | 9: 2 medium, 5 low, 2 info | 8 fixed, 1 noted (environment of a running command readable by same-account agents) |
 | 18 | `check-report` (audit pack) and the refusal messages shown to agents | 9: 2 medium, 6 low, 1 info | 9 fixed |
+| 19 | `build-report` (audit pack): parts assembled into Markdown and a standalone HTML page | 7: 1 medium, 5 low, 1 info | 6 fixed, 1 noted |
+| 20 | `notify` pack: `send-mail` and `send-webhook` | 8: 2 medium, 3 low, 3 info | 7 fixed, 1 noted (check-then-open race common to `{read}` commands) |
 
 Findings knowingly left open:
 

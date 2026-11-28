@@ -40,6 +40,13 @@ talixio-agent pack show audit
 - `brief.md`: the message to send to the master
   (`talixio-agent pack show audit --file brief.md`).
 
+## Send the reports
+
+Install the `notify` pack beside this one (`./tools.sh pack install notify`), add a mail account
+or a channel on the "Secrets" page (`talixio-agent pack show notify --file guide.md` says which
+values), and add to the brief: "when a report is built, send its `report.html` by e-mail and
+post its `summary.md` to the channel". The recipients are yours: no agent can change them.
+
 ## Run it in Docker
 
 The image "audit" is the master plus what the commands need (git, bash, python3). The master and

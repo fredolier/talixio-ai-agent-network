@@ -1,0 +1,71 @@
+#!/usr/bin/python3 -I
+"""Posts the text of one file to the channel the operator chose (an incoming webhook of Slack,
+Discord or Microsoft Teams, or any https address that takes JSON). Where it goes is the
+operator's secret; the caller gives the file and, if it wishes, a title. A webhook takes text,
+not files: the start of the file is posted, and the message says when it was cut.
+Usage: send-webhook <text file> [title]"""
+import json, os, re, stat, sys, urllib.error, urllib.request
+
+MAX_FILE = 256 * 1024
+LIMIT = {"slack": 3500, "discord": 1800, "teams": 6000, "json": 6000}
+HOSTS = {"slack": r"hooks\.slack\.com", "discord": r"(discord|discordapp)\.com",
+         "teams": r"[a-z0-9.-]+\.(webhook\.office\.com|logic\.azure\.com|powerplatform\.com)", "json": r"[a-z0-9.-]+\.[a-z]{2,}"}
+
+
+def stop(why): sys.exit("send-webhook: " + why)
+
+
+def one_line(text, limit):
+    return "".join(c if c.isprintable() else " " for c in text).strip()[:limit]
+
+
+if len(sys.argv) not in (2, 3): stop("usage: send-webhook <text file> [title]")
+url, kind = os.environ.get("NOTIFY_WEBHOOK_URL", ""), os.environ.get("NOTIFY_WEBHOOK_KIND", "json").lower()
+if not url: stop("no channel was given to this command (the operator adds one on the master, \"Secrets\" page, for the role of this agent)")
+if kind not in LIMIT: stop("NOTIFY_WEBHOOK_KIND must be slack, discord, teams or json")
+where = re.fullmatch(r"https://([a-z0-9.-]+)(:443)?/[\x21-\x7e]*", url)
+if not where or not re.fullmatch(HOSTS[kind], where.group(1)): stop(f"the address given by the operator is not an https address of a {kind} webhook")
+
+try: fd = os.open(sys.argv[1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+except OSError: stop("the file cannot be opened (a link is refused)")
+if not stat.S_ISREG(os.fstat(fd).st_mode): stop("not a plain file")
+with os.fdopen(fd, "rb") as f:
+    data = f.read(MAX_FILE + 1)
+if len(data) > MAX_FILE: stop(f"the file is larger than {MAX_FILE >> 10} KiB: post a summary, not a report")
+try: text = data.decode("utf-8")
+except UnicodeDecodeError: stop("not a text file")
+text = "".join(c if c.isprintable() or c in "\n\t" else " " for c in text).strip()
+if not text: stop("the file is empty")
+if len(text) > LIMIT[kind]: text = text[:LIMIT[kind]].rstrip() + "\n[cut: the file is longer]"
+title = one_line(sys.argv[2] if len(sys.argv) == 3 else "", 120) or one_line(os.path.basename(sys.argv[1]), 120)
+# A channel fetches the links it is shown (previews, images): an address written by an agent would
+# then receive whatever the agent put in it. The title carries no working link at all; in the text,
+# previews are turned off and the notations that hide or embed a link are broken.
+title = title.replace("://", ": //")
+plain = lambda s: s.replace("](", "] (").replace("![", "! [")
+
+if kind == "slack":
+    # no mention, no link of ours: the three characters Slack reads as markup are escaped
+    esc = lambda s: s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    body = {"text": f"*{esc(title)}*\n{esc(text)}", "unfurl_links": False, "unfurl_media": False}
+elif kind == "discord":
+    body = {"content": f"**{plain(title)}**\n{plain(text)}", "allowed_mentions": {"parse": []}, "flags": 4}   # 4: no embeds
+elif kind == "teams":
+    esc = lambda s: plain(s).replace("&", "&amp;").replace("<", "&lt;")
+    body = {"@type": "MessageCard", "@context": "http://schema.org/extensions", "summary": title, "title": esc(title), "text": esc(text).replace("\n", "\n\n")}
+else:
+    body = {"title": title, "text": text}
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs): return None      # the secret address is the only one written to
+
+
+opener = urllib.request.build_opener(NoRedirect, urllib.request.ProxyHandler({}))
+request = urllib.request.Request(url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json", "User-Agent": "talixio-notify"}, method="POST")
+try:
+    with opener.open(request, timeout=30) as answer: status = answer.status
+except urllib.error.HTTPError as e: stop(f"not posted: the channel answered {e.code}")
+# the kind of failure only: an answer could repeat a part of the secret address
+except Exception as e: stop("not posted: " + type(getattr(e, "reason", e)).__name__)
+print(f"posted {len(text)} characters to the {kind} channel chosen by the operator (answer {status})")
