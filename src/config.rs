@@ -368,7 +368,7 @@ impl RootConfig {
             bail!("`sha256` ne s'écrit pas dans la configuration : il est posé par les paquets installés (packs_dir)");
         }
         // nor is the right to receive a secret: only a command of an installed pack declares it
-        if rules.clone().any(|rule| !rule.secrets.is_empty()) {
+        if rules.clone().any(|rule| !rule.secrets.is_empty() || !rule.env.is_empty()) {
             bail!("`secrets` is not written in the configuration: only a command of an installed pack declares the secrets it accepts");
         }
         // les paquets installés par l'exploitant : vérifiés contre leurs empreintes, et hors de
@@ -408,6 +408,7 @@ impl RootConfig {
                     };
                     rule.sha256 = known.sha256.clone();
                     rule.secrets = known.secrets.clone();
+                    rule.env = known.env.clone();
                 }
             }
             cfg.secret_commands = installed.secret_commands;

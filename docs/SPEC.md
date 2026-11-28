@@ -679,8 +679,8 @@ Demandé le 2026-11-20. Rien n'est codé.
 44. **Les secrets des commandes** (2026-11-28, « voir comment passer des secrets aux agents
     enfants de manière sécurisée […] les gérer depuis le maître : ajouter, éditer, activer,
     désactiver, et décider vers quels agents enfants ils partent »). **Conception confirmée par
-    le formulaire (Q15) et écrite le 2026-11-28 (`src/secrets.rs`) ; revue de sécurité
-    indépendante en cours, pas encore publiée sur `main`.** Écarts avec la proposition : le
+    le formulaire (Q15), écrite le 2026-11-28 (`src/secrets.rs`, v0.24.0), revue (dix-septième
+    passe).** Écarts avec la proposition : le
     droit n'est pas une liste `secrets` à part mais un champ de la règle de la commande
     (`ExecRule.secrets`), que seul un rôle installé apporte à un agent (jamais la demande d'un
     modèle) ; un secret est lié à une commande, une variable et des rôles (un autre usage est un
@@ -919,6 +919,25 @@ les seules options passées à `claude`, sans contrôle de ce qu'il fait réelle
 | K10 | Basse | Filtre des secrets de l'environnement sensible à la casse (Windows ne l'est pas). | ✅ Comparaison sans casse. Ce que `claude_env` laisse passer reste à la charge de l'exploitant (noté). |
 | K11 | Basse | `<état>/claude` pouvait être un lien symbolique posé avant le démarrage. | ✅ Refusé au démarrage. |
 | K12 | Basse | Une invite commençant par « / » pouvait être prise pour une commande de `claude`. | ✅ Jamais en tête d'invite (et `--disable-slash-commands`). |
+
+### Dix-septième passe (2026-11-28) : les secrets des commandes (décision 44)
+
+Revue indépendante du code avant publication, sur banc (maître en mémoire, vrai paquet, vraies
+demandes forgées sur le lien, `git credential fill`). Conclusion : aucun moyen trouvé pour un
+modèle seul d'obtenir une valeur ; la faille principale était au niveau du lien, pour un
+process d'agent compromis. Neuf constats.
+
+| # | Gravité | Constat | Traitement |
+|---|---|---|---|
+| S1 | moyen | Un agent qui relaie pouvait annoncer n'importe quel rôle pour un agent inventé, avec sa propre clé, et lire la valeur (rejoué). | ✅ Une demande relayée n'est admise que si l'enfant peut créer des agents, que l'origine figure dans sa descendance connue et que le rôle est de ceux qu'il a pu donner (`roles_for_child`) ; rejoué dans `tests/security.rs`. Reste : un process compromis qui tient ces trois conditions obtient ce que sa descendance pourrait obtenir (noté). |
+| S2 | moyen/bas | Le retrait d'un début de valeur en fin de sortie servait d'oracle (dit si un texte choisi commence la valeur). | ✅ Plus de recherche de préfixe : une sortie tronquée perd sa fin, sans condition ; une sortie entière n'est fouillée que pour la valeur exacte. |
+| S3 | bas | Aucune limite sur les demandes de secrets ; rôle non borné ni nettoyé dans le journal. | ✅ 60 demandes par minute et par enfant ; champs bornés et refusés s'ils cachent un caractère. |
+| S4 | bas | Liste des variables interdites par préfixe seulement (`HTTPS_PROXY`, `SSL_CERT_FILE`… pour un paquet nommé `https`, `ssl`) ; l'agent acceptait tout réglage d'accompagnement de forme correcte. | ✅ Les réglages permis sont portés par la règle (`ExecRule.env`) et filtrés ; liste allongée (`*_PROXY`, `SSL_`, `CURL_`, `OPENSSL_`, `GCONV_`, `MALLOC_`, `RES_`, `DOCKER_`, `AWS_`, `HTTP(S)_`). |
+| S5 | bas | `fetch-repo` se fiait à la configuration du dépôt de données existant (si un agent pouvait écrire sous HOME). | ✅ Configuration réécrite à chaque lancement, propriétaire vérifié. Le dossier ne doit toujours être accordé à aucun agent. |
+| S6 | bas | La valeur vit dans l'environnement de la commande et de ses enfants pendant le lancement : lisible dans `/proc/<pid>/environ` par un agent du même compte qui lit `/proc`. | ❌ Noté (limite) : pas de cloisonnement entre agents d'un même compte ; un conteneur par campagne. Piste : remise par un tube. |
+| S7 | bas | Un secret survivait au remplacement de son paquet (même nom de commande, autre programme). | ✅ Le secret garde l'empreinte du programme ; si elle change, il n'est plus remis tant que l'exploitant ne l'a pas rouvert et enregistré (affiché dans la page). |
+| S8 | info | Textes de la page trop affirmatifs (« jamais à un modèle », « effacé »). | ✅ Reformulés : ce qui est garanti (consignes, outils, journal, sortie telle quelle), où la valeur est gardée. Noté : une cible docker pilotant un démon distant compte comme locale. |
+| S9 | info | `AUDIT_READ_URL` sans « / » final acceptait par le script un préfixe voisin (git, lui, ne donnait pas le jeton). | ✅ « / » final exigé. |
 
 ### Seizième passe (2026-11-28) : le paquet « audit » (décision 43)
 

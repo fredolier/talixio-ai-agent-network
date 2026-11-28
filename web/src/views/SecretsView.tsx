@@ -86,7 +86,7 @@ export function SecretsView({ cluster }: { cluster: Cluster }) {
       <PageHeader
         eyebrow={t('Control · secrets')}
         title={t('Tokens and passwords for commands')}
-        lead={t('A secret goes to one command of an installed pack, for the time of one run: never to a model, never into instructions or a journal. You decide here which command receives it and for which roles. Its value is written once and never shown again; disabling it takes effect at the next run.')}
+        lead={t('A secret goes to one command of an installed pack, for the time of one run: never into the instructions, the tools or the journal of an agent, and it is removed from what the command prints. You decide here which command receives it and for which roles. The master keeps the value in its state directory, closed to other accounts, and never shows it again; disabling it takes effect at the next run.')}
       >
         {!draft && commands.length > 0 && (
           <Button onClick={() => setDraft(blank())}>
@@ -208,6 +208,7 @@ export function SecretsView({ cluster }: { cluster: Cluster }) {
                       {s.name}
                       {!s.enabled && <span className="text-[13px] font-normal text-muted-foreground">{t('disabled')}</span>}
                     </span>
+                    {s.stale && <p className="mt-1 text-[13px] text-destructive whitespace-normal">{t('The command changed since this secret was saved: it is no longer given. Open it and save it to confirm.')}</p>}
                   </TableCell>
                   <TableCell className="whitespace-normal">
                     <span className="font-mono text-[13px]">{s.variable}</span> {t('of')} <span className="font-mono text-[13px]">{s.command}</span>
@@ -245,7 +246,7 @@ export function SecretsView({ cluster }: { cluster: Cluster }) {
                         aria-label={t('Delete {name}', { name: s.name })}
                         title={t('Delete')}
                         onClick={() => {
-                          if (confirm(t('Delete the secret “{name}”? Its value is erased from the master.', { name: s.name }))) void run(() => api(cluster.token, `${path(s.name)}/delete`, {}), t('Secret deleted.'))
+                          if (confirm(t('Delete the secret “{name}”? Its file is removed from the master.', { name: s.name }))) void run(() => api(cluster.token, `${path(s.name)}/delete`, {}), t('Secret deleted.'))
                         }}
                       >
                         <Trash2 />

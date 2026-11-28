@@ -62,6 +62,9 @@ pub struct ExecRule {
     /// child holds at most those of its parent's rule.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub secrets: Vec<String>,
+    /// Plain settings the command accepts next to its secrets (declared by the pack as well).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub env: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -246,6 +249,7 @@ impl Capabilities {
                     && (own.sha256.is_none() || own.sha256 == rule.sha256)
                     // a secret goes down only through a rule that holds it
                     && rule.secrets.iter().all(|name| own.secrets.contains(name))
+                    && rule.env.iter().all(|name| own.env.contains(name))
             });
             if !covered {
                 return Err(format!("commande « {} » : hors de vos propres droits", rule.describe()));
@@ -392,7 +396,7 @@ mod tests {
     use super::*;
 
     fn rule(program: &str, args: Option<&[&str]>) -> ExecRule {
-        ExecRule { program: abs(program), args: args.map(|a| a.iter().map(|s| s.to_string()).collect()), cwd: None, sha256: None, secrets: Vec::new() }
+        ExecRule { program: abs(program), args: args.map(|a| a.iter().map(|s| s.to_string()).collect()), cwd: None, sha256: None, secrets: Vec::new(), env: Vec::new() }
     }
 
     /// Les chemins des tests sont écrits à la façon POSIX ; sous Windows, un chemin n'est absolu

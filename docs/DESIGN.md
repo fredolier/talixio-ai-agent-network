@@ -364,7 +364,8 @@ What this does not guarantee: the command that receives a secret can do anything
 which is why only pack commands, reviewed and out of the master's reach, qualify. Output
 redaction sees the exact value, not a transformed one. A role is given by a parent agent:
 every agent able to create a role a secret is tied to can obtain a run of that command with
-the secret, though not the value itself. Agents under one account are not confined from each
+the secret, though not the value itself. A secret is saved for the program as installed: if
+the pack is replaced, it is withheld until the operator saves it again. Agents under one account are not confined from each
 other by the system (section 9).
 
 ## 4. Packs: commands and roles
@@ -519,6 +520,7 @@ reviewer's.
 | 14 | Signed pack repository | 12: 1 high, 3 medium, 7 low, 1 info | 11 fixed, 1 noted |
 | 15 | Pack TUI | 12: 2 high, 4 medium, 6 low | Fixed except 2 noted items |
 | 16 | `audit` pack: `fetch-repo`, `repo-git`, `repo-map`, `new-report` | 9: 2 critical, 1 high, 2 medium, 3 low, 1 info | 8 fixed, 1 partly (no clone size quota) |
+| 17 | Secrets for commands: vault, link messages, API, redaction | 9: 2 medium, 5 low, 2 info | 8 fixed, 1 noted (environment of a running command readable by same-account agents) |
 
 Findings knowingly left open:
 
@@ -543,6 +545,11 @@ Findings knowingly left open:
 - **Audit pack.** No quota on the total size of a clone (time, memory and single-file limits
   only). `fetch-repo` reaches any public-looking https host the agent names; a token is offered
   only to the address prefix the operator bound it to (pass 16).
+- **Secrets.** While a command runs, its secret is in the environment of that process and of
+  what it starts: an agent of the same account that can read `/proc` could read it there. A
+  compromised agent process that may create agents can obtain what its own descendants could
+  obtain. A docker target driving a remote daemon counts as local. Behind a proxy, commands
+  cannot reach the network (their environment is emptied, proxy settings included) (pass 17).
 - **Other.** Third-party scripts on a page read by the example browser script can send what they
   see to any public name (pass 10). A scheduled task survives a change of API token (pass 9).
   The pack TUI does not restore the terminal on SIGTERM or SIGHUP (pass 15).

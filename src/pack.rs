@@ -91,6 +91,8 @@ pub struct SecretCommand {
     pub env: Vec<String>,
     /// The installed roles that hold this command.
     pub roles: Vec<String>,
+    /// SHA-256 of the program: a secret tied to it is for this content, not for the name.
+    pub sha256: String,
 }
 
 /// The name of a variable a pack may receive: its own, in capitals, so that it cannot be one
@@ -102,11 +104,15 @@ pub fn variable_ok(pack: &str, name: &str) -> bool {
 
 /// The shape alone, for an agent that does not know which pack a command comes from.
 pub fn variable_shape_ok(name: &str) -> bool {
-    const TAKEN: [&str; 14] = ["LD_", "DYLD_", "GIT_", "BASH_", "PYTHON", "NODE_", "NPM_", "PERL", "RUBY", "JAVA_", "SSH_", "LC_", "XDG_", "TALIXIO_"];
+    const TAKEN: [&str; 26] = [
+        "LD_", "DYLD_", "GIT_", "BASH_", "PYTHON", "NODE_", "NPM_", "PERL", "RUBY", "JAVA_", "SSH_", "LC_", "XDG_", "TALIXIO_", "SSL_", "CURL_", "OPENSSL_", "GCONV_",
+        "MALLOC_", "RES_", "DOCKER_", "AWS_", "HTTP_", "HTTPS_", "ALL_", "NO_",
+    ];
     (3..=64).contains(&name.len())
         && name.contains('_')
         && name.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
         && !TAKEN.iter().any(|taken| name.starts_with(taken))
+        && !name.ends_with("_PROXY")
         && !crate::spawn::SAFE_ENV.contains(&name)
 }
 
@@ -171,6 +177,9 @@ pub fn roles_for_child(roles: &BTreeMap<String, InstalledRole>, caps: &crate::po
         for rule in &mut role.exec {
             let held = own(rule).map(|own| own.secrets.clone()).unwrap_or_default();
             rule.secrets.retain(|name| held.contains(name));
+            if rule.secrets.is_empty() {
+                rule.env.clear();
+            }
         }
         kept.insert(name.clone(), role);
     }
@@ -557,6 +566,7 @@ pub fn load_installed(dir: &Path, strict: bool) -> Result<Installed> {
                 cwd: None,
                 sha256: Some(sha256_hex(&pack.files[&command.program])),
                 secrets: command.secrets.clone(),
+                env: command.env.clone(),
             });
         }
         let id = pack.id();
@@ -573,7 +583,7 @@ pub fn load_installed(dir: &Path, strict: bool) -> Result<Installed> {
                 continue;
             }
             let roles = pack.manifest.roles.iter().filter(|r| r.commands.contains(&command.program)).map(|r| format!("{name}/{}", r.name)).collect();
-            installed.secret_commands.push(SecretCommand { name: full, program: dest.join(&command.program), secrets: command.secrets.clone(), env: command.env.clone(), roles });
+            installed.secret_commands.push(SecretCommand { name: full, program: dest.join(&command.program), secrets: command.secrets.clone(), env: command.env.clone(), roles, sha256: sha256_hex(&pack.files[&command.program]) });
         }
         installed.exec.extend(rules);
         installed.names.push(format!("{name} {} ({})", pack.manifest.version, &id[..12]));

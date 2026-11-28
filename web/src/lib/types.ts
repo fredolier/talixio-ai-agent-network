@@ -210,6 +210,8 @@ export interface Secret {
   updated_ms: number
   used_ms: number
   used_by: string
+  /** The command's program is no longer the one this secret was saved for. */
+  stale: boolean
 }
 
 /** A command of an installed pack that accepts secrets. */

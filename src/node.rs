@@ -93,6 +93,8 @@ pub struct Node {
     pub pack_roles: BTreeMap<String, crate::pack::InstalledRole>,
     /// The master's vault of secrets for commands. No other agent has one.
     pub vault: Option<crate::secrets::Vault>,
+    /// Requests for secrets per child, in the current minute.
+    pub secret_rate: Mutex<BTreeMap<String, (Instant, u32)>>,
     /// Signale que l'arbre a changé et doit être renvoyé au parent.
     pub tree_dirty: Notify,
     /// Où en est la mission confiée par le parent.
@@ -367,6 +369,7 @@ impl Node {
             targets: cfg.targets.clone(),
             pack_roles: cfg.pack_roles.clone(),
             vault: Some(crate::secrets::Vault::open(&cfg.state_dir, cfg.secret_commands.clone())?),
+            secret_rate: Mutex::default(),
             tree_dirty: Notify::new(),
             mission: Mutex::new(Mission::default()),
         };
@@ -415,6 +418,7 @@ impl Node {
             targets: BTreeMap::new(),
             pack_roles: boot.pack_roles.clone(),
             vault: None,
+            secret_rate: Mutex::default(),
             tree_dirty: Notify::new(),
             mission: Mutex::new(Mission::default()),
         };
@@ -638,8 +642,8 @@ impl Node {
         }
         .await;
         match result {
-            // only what the rule declares as a secret, and plain settings with a harmless name
-            Ok(given) => given.into_iter().filter(|g| if g.secret { rule.secrets.contains(&g.name) } else { crate::pack::variable_shape_ok(&g.name) }).collect(),
+            // only what the rule declares, as a secret or as a setting
+            Ok(given) => given.into_iter().filter(|g| if g.secret { rule.secrets.contains(&g.name) } else { rule.env.contains(&g.name) && crate::pack::variable_shape_ok(&g.name) }).collect(),
             Err(reason) => {
                 self.emit("error", format!("secrets of {}: {}", rule.program.display(), crate::clean(&reason, 300, false)));
                 Vec::new()
@@ -666,8 +670,21 @@ impl Node {
     /// child, and stamped with what this parent knows (the role, another machine).
     pub async fn secret_for_child(&self, child_id: &str, mut ask: crate::secrets::SecretAsk) -> Result<String, String> {
         ask.origin = crate::clean(&ask.origin, 64, false);
-        if ask.variables.len() > 8 || ask.key.len() != 64 {
+        let plain = |text: &str, max: usize| text.len() <= max && crate::clean(text, max, false) == text;
+        if ask.variables.len() > 8 || ask.key.len() != 64 || ask.variables.iter().any(|v| !plain(v, 64)) || ask.role.as_deref().is_some_and(|role| !plain(role, 80)) || ask.program.as_os_str().len() > 1024 {
             return Err("request refused".into());
+        }
+        // a command that needs a secret runs a few times a minute at most
+        {
+            let mut rate = self.secret_rate.lock().unwrap();
+            let slot = rate.entry(child_id.to_string()).or_insert((Instant::now(), 0));
+            if slot.0.elapsed() > Duration::from_secs(60) {
+                *slot = (Instant::now(), 0);
+            }
+            slot.1 += 1;
+            if slot.1 > 60 {
+                return Err("too many requests for secrets: wait a minute".into());
+            }
         }
         {
             let children = self.children.lock().unwrap();
@@ -683,8 +700,13 @@ impl Node {
             if ask.origin == child_id {
                 ask.role = Some(child.role.clone());
                 ask.remote = false;
-            } else if ask.role.is_none() {
-                return Err("request refused".into());
+            } else {
+                // relayed: the child must be able to have created that agent, with that role
+                let role = ask.role.as_deref().ok_or("request refused")?;
+                let known = child.caps.spawn.is_some() && child.subtree.children.iter().any(|node| node.contains(&ask.origin));
+                if !known || !crate::pack::roles_for_child(&self.pack_roles, &child.caps).contains_key(role) {
+                    return Err("request refused: not an agent this child could have created with that role".into());
+                }
             }
             ask.remote |= child.target.as_ref().is_some_and(|target| target.kind != "docker");
         }

@@ -98,7 +98,6 @@
   "the master": "le maître",
   "Control · secrets": "Maîtrise · secrets",
   "Tokens and passwords for commands": "Jetons et mots de passe pour les commandes",
-  "A secret goes to one command of an installed pack, for the time of one run: never to a model, never into instructions or a journal. You decide here which command receives it and for which roles. Its value is written once and never shown again; disabling it takes effect at the next run.": "Un secret va à une commande d'un paquet installé, le temps d'un lancement : jamais à un modèle, jamais dans des consignes ni dans un journal. Vous décidez ici quelle commande le reçoit et pour quels rôles. Sa valeur s'écrit une fois et n'est plus jamais affichée ; le désactiver vaut dès le lancement suivant.",
   "New secret": "Nouveau secret",
   "Edit the secret “{name}”": "Modifier le secret « {name} »",
   "Lowercase letters, digits and dashes. The name appears in the journal; the value never does.": "Minuscules, chiffres et tirets. Le nom apparaît dans le journal ; la valeur, jamais.",
@@ -127,6 +126,8 @@
   "other machines included": "autres machines comprises",
   "“{name}” disabled: no command receives it any more.": "« {name} » désactivé : plus aucune commande ne le reçoit.",
   "“{name}” enabled.": "« {name} » activé.",
-  "Delete the secret “{name}”? Its value is erased from the master.": "Supprimer le secret « {name} » ? Sa valeur est effacée du maître.",
-  "Secret deleted.": "Secret supprimé."
+  "Secret deleted.": "Secret supprimé.",
+  "A secret goes to one command of an installed pack, for the time of one run: never into the instructions, the tools or the journal of an agent, and it is removed from what the command prints. You decide here which command receives it and for which roles. The master keeps the value in its state directory, closed to other accounts, and never shows it again; disabling it takes effect at the next run.": "Un secret va à une commande d'un paquet installé, le temps d'un lancement : jamais dans les consignes, les outils ou le journal d'un agent, et il est retiré de ce que la commande affiche. Vous décidez ici quelle commande le reçoit et pour quels rôles. Le maître garde la valeur dans son dossier d'état, fermé aux autres comptes, et ne l'affiche plus jamais ; le désactiver vaut dès le lancement suivant.",
+  "Delete the secret “{name}”? Its file is removed from the master.": "Supprimer le secret « {name} » ? Son fichier est retiré du maître.",
+  "The command changed since this secret was saved: it is no longer given. Open it and save it to confirm.": "La commande a changé depuis l'enregistrement de ce secret : il n'est plus remis. Ouvrez-le et enregistrez-le pour confirmer."
 }

@@ -69,7 +69,9 @@ docker exec talixio cat /data/work/audits/<name>/report.md
   it found is the right one. Without an answer the report says "not confirmed".
 - **Private repositories.** Add a read-only token on the "Secrets" page of the master: command
   `audit/fetch-repo`, variable `AUDIT_READ_TOKEN`, role `audit/lead`, and in `AUDIT_READ_URL`
-  the address prefix the token is valid for (`https://gitlab.com/your-group/`). Only the
+  the address prefix the token is valid for, ending with `/` (`https://gitlab.com/your-group/`).
+  A lead that receives the token fetches only under that prefix: tie it to the leads of your
+  private repositories, or audit public ones before adding it. Only the
   `fetch-repo` command of a lead receives it, for the time of one run; no model ever reads it,
   and the command offers it to no other address. `AUDIT_READ_USER` is only needed for a deploy
   token (its user name).

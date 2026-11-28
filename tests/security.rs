@@ -433,15 +433,20 @@ async fn a_child_cannot_talk_its_way_to_a_secret() {
     let refused = node.secret_for_child("a-child", ask("a-child", Some("demo/holder"))).await.unwrap_err();
     assert!(refused.contains("does not hold"), "{refused}");
     // it holds the command, without the secret
-    let rule = |secrets: &[&str]| ExecRule { program: "/packs/demo/show".into(), args: Some(vec![]), cwd: None, sha256: None, secrets: secrets.iter().map(|s| s.to_string()).collect() };
+    let rule = |secrets: &[&str]| ExecRule { program: "/packs/demo/show".into(), args: Some(vec![]), cwd: None, sha256: None, secrets: secrets.iter().map(|s| s.to_string()).collect(), env: Vec::new() };
     node.children.lock().unwrap().get_mut("a-child").unwrap().caps.exec = vec![rule(&[])];
     assert!(node.secret_for_child("a-child", ask("a-child", None)).await.is_err());
     // it holds both, but this parent does not: nothing goes through an agent that lacks the right
     node.children.lock().unwrap().get_mut("a-child").unwrap().caps.exec = vec![rule(&["DEMO_TOKEN"])];
     let refused = node.secret_for_child("a-child", ask("a-child", None)).await.unwrap_err();
     assert!(refused.contains("does not hold"), "{refused}");
-    // a relayed request without the role its parent should have written, an unknown child, a bad key
+    // a relayed request without the role its parent should have written; one for an agent the
+    // child never created, under a role it could not have given (the child cannot create agents)
     assert!(node.secret_for_child("a-child", ask("a-other", None)).await.is_err());
+    let refused = node.secret_for_child("a-child", ask("a-ghost", Some("demo/holder"))).await.unwrap_err();
+    assert!(refused.contains("could have created"), "{refused}");
+    // a role text that hides something, an unknown child, a bad key
+    assert!(node.secret_for_child("a-child", ask("a-child", Some("demo/holder\u{202e}\nx"))).await.is_err());
     assert!(node.secret_for_child("a-ghost", ask("a-ghost", None)).await.is_err());
     let mut bad = ask("a-child", None);
     bad.key = "00".into();

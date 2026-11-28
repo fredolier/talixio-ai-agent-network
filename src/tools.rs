@@ -747,8 +747,8 @@ async fn run_command(node: &Arc<Node>, input: &Value) -> Result<String, String> 
     };
     let (mut stdout, mut stderr) = (collect(stdout).await, collect(stderr).await);
     // the model never reads a secret, even one the command printed
-    crate::secrets::redact(&mut stdout.0, &given);
-    crate::secrets::redact(&mut stderr.0, &given);
+    crate::secrets::redact(&mut stdout.0, stdout.1, &given);
+    crate::secrets::redact(&mut stderr.0, stderr.1, &given);
     drop(given);
     let Ok(status) = status else {
         return Err(format!("commande interrompue après {} s", COMMAND_TIMEOUT.as_secs()));
@@ -807,7 +807,10 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value, resumed: Option<&str>) -> 
     };
     // un rôle installé (paquet) : ses consignes et les règles de ses commandes viennent du paquet
     // a secret reaches a command through an installed role only: never because a request says so
-    caps.exec.iter_mut().for_each(|rule| rule.secrets.clear());
+    caps.exec.iter_mut().for_each(|rule| {
+        rule.secrets.clear();
+        rule.env.clear();
+    });
     let template = node.pack_roles.get(&role);
     // "pack/role" names an installed role: an agent cannot make one up, nor borrow the name of
     // one it does not hold (the master ties secrets to these names)
@@ -818,7 +821,10 @@ async fn spawn_agent(node: &Arc<Node>, input: &Value, resumed: Option<&str>) -> 
         for rule in &template.exec {
             match caps.exec.iter_mut().find(|r| r.program == rule.program && r.args == rule.args) {
                 // the role decides which secrets its commands accept, not the request
-                Some(asked) => asked.secrets = rule.secrets.clone(),
+                Some(asked) => {
+                    asked.secrets = rule.secrets.clone();
+                    asked.env = rule.env.clone();
+                }
                 None => caps.exec.push(rule.clone()),
             }
         }

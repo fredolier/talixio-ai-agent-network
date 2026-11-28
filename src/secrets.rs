@@ -48,6 +48,10 @@ pub struct Secret {
     /// Plain settings that travel with it (the address it is valid for, a user name).
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    /// SHA-256 of the command's program when the operator last saved this secret: a replaced
+    /// pack does not inherit it.
+    #[serde(default)]
+    pinned: String,
     pub updated_ms: u64,
     /// Last time it was handed to a command, and to which agent.
     #[serde(default)]
@@ -167,9 +171,20 @@ impl Vault {
     pub fn list(&self) -> Value {
         let secrets = self.secrets.lock().unwrap();
         json!({
-            "secrets": secrets.values().map(Secret::view).collect::<Vec<_>>(),
+            "secrets": secrets.values().map(|s| { let mut view = s.view(); view["stale"] = json!(self.stale(s)); view }).collect::<Vec<_>>(),
             "commands": self.commands.iter().map(|c| json!({ "name": c.name, "secrets": c.secrets, "env": c.env, "roles": c.roles })).collect::<Vec<_>>(),
         })
+    }
+
+    fn pin(&self, secret: &mut Secret) {
+        if let Some(command) = self.commands.iter().find(|c| c.name == secret.command) {
+            secret.pinned = command.sha256.clone();
+        }
+    }
+
+    /// The command of this secret is no longer the program it was saved for.
+    fn stale(&self, secret: &Secret) -> bool {
+        self.commands.iter().find(|c| c.name == secret.command).is_none_or(|c| c.sha256 != secret.pinned)
     }
 
     /// Checks where a secret is allowed to go, against the installed packs.
@@ -234,12 +249,14 @@ impl Vault {
             master: false,
             remote: false,
             env: BTreeMap::new(),
+            pinned: String::new(),
             updated_ms: crate::now_ms(),
             used_ms: 0,
             used_by: String::new(),
         };
         apply(&mut secret, body)?;
         self.check_link(&secret)?;
+        self.pin(&mut secret);
         self.save(&secret)?;
         let view = secret.view();
         secrets.insert(name, secret);
@@ -260,6 +277,8 @@ impl Vault {
         if secret.enabled || self.commands.iter().any(|c| c.name == secret.command) {
             self.check_link(&secret)?;
         }
+        // saved by the operator: it is for the command as it is installed now
+        self.pin(&mut secret);
         secret.updated_ms = crate::now_ms();
         self.save(&secret)?;
         let view = secret.view();
@@ -308,6 +327,10 @@ impl Vault {
                 }
                 continue;
             };
+            if secret.pinned != command.sha256 {
+                notes.push(format!("secret {} not given to {} of {}: the command changed since the secret was saved (open it in the interface and save it to confirm)", secret.name, command.name, asker.agent));
+                continue;
+            }
             if asker.remote && !secret.remote {
                 notes.push(format!("secret {} refused to {} of {}: the agent runs on another machine, and this secret is not allowed there", secret.name, command.name, asker.agent));
                 continue;
@@ -416,7 +439,7 @@ pub fn seal(request: &str, asker_public: &str, given: &[Given]) -> Result<String
 
 /// Removes every secret value from what a command wrote, before a model reads it: the value
 /// itself, and the start of it that a cut output would end with.
-pub fn redact(output: &mut Vec<u8>, given: &[Given]) {
+pub fn redact(output: &mut Vec<u8>, truncated: bool, given: &[Given]) {
     for secret in given.iter().filter(|g| g.secret && g.value.len() >= MIN_VALUE) {
         let value = secret.value.as_bytes();
         let mark = format!("[secret {}]", secret.name).into_bytes();
@@ -431,11 +454,10 @@ pub fn redact(output: &mut Vec<u8>, given: &[Given]) {
                 at += 1;
             }
         }
-        // an output cut at its limit may end in the middle of the value
-        let longest = (4..value.len()).rev().find(|n| clean.ends_with(&value[..*n]));
-        if let Some(n) = longest {
-            clean.truncate(clean.len() - n);
-            clean.extend_from_slice(&mark);
+        // an output cut at its limit may end in the middle of the value: the end goes, whatever
+        // it holds (looking for the value there would tell a reader how the value starts)
+        if truncated {
+            clean.truncate(clean.len().saturating_sub(value.len() - 1));
         }
         *output = clean;
     }
@@ -452,6 +474,7 @@ mod tests {
             secrets: vec!["AUDIT_READ_TOKEN".into()],
             env: vec!["AUDIT_READ_URL".into()],
             roles: vec!["audit/lead".into()],
+            sha256: "aa".into(),
         }];
         Vault::open(dir, commands).unwrap()
     }
@@ -502,6 +525,13 @@ mod tests {
             let mode = std::fs::metadata(tmp.path().join("secrets/gitlab.json")).unwrap().permissions().mode();
             assert_eq!(mode & 0o077, 0);
         }
+        // the pack was replaced: the same command name with another program does not inherit it
+        let mut replaced = super::tests::vault(tmp.path());
+        replaced.commands[0].sha256 = "bb".into();
+        let (given, notes) = ask(&replaced, Some("audit/lead"), false);
+        assert!(given.is_empty() && notes[0].contains("command changed") && replaced.list()["secrets"][0]["stale"] == true);
+        replaced.update("gitlab", &json!({})).unwrap();
+        assert_eq!(ask(&replaced, Some("audit/lead"), false).0.len(), 2);
         again.delete("gitlab").unwrap();
         assert!(ask(&again, Some("audit/lead"), false).0.is_empty() && !tmp.path().join("secrets/gitlab.json").exists());
     }
@@ -559,9 +589,15 @@ mod tests {
             Given { name: "AUDIT_READ_TOKEN".into(), value: "glpat-0123456789".into(), secret: true },
             Given { name: "AUDIT_READ_URL".into(), value: "https://gitlab.com/".into(), secret: false },
         ];
-        let mut output = b"fatal: https://oauth2:glpat-0123456789@gitlab.com/ twice glpat-0123456789, cut: glpat-012".to_vec();
-        redact(&mut output, &given);
+        let full = b"fatal: https://oauth2:glpat-0123456789@gitlab.com/ twice glpat-0123456789, end: glpat-012".to_vec();
+        let mut output = full.clone();
+        redact(&mut output, false, &given);
+        // a whole output is not searched for the start of the value: that would tell how it starts
+        assert_eq!(String::from_utf8(output).unwrap(), "fatal: https://oauth2:[secret AUDIT_READ_TOKEN]@gitlab.com/ twice [secret AUDIT_READ_TOKEN], end: glpat-012");
+        // a cut output loses its end, whatever it holds
+        let mut output = full;
+        redact(&mut output, true, &given);
         let text = String::from_utf8(output).unwrap();
-        assert_eq!(text, "fatal: https://oauth2:[secret AUDIT_READ_TOKEN]@gitlab.com/ twice [secret AUDIT_READ_TOKEN], cut: [secret AUDIT_READ_TOKEN]");
+        assert!(text.ends_with("twice [secret AUDIT_READ_TOKEN],") && !text.contains("glpat"), "{text}");
     }
 }
